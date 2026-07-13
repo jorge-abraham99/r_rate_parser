@@ -1,0 +1,11 @@
+.DS_Store
+.pytest_cache/
+.venv/
+__pycache__/
+*.pyc
+
+data/runs/
+data/sources/raw/
+data/sources/registered/
+data/warehouse/
+
