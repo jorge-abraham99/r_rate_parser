@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#d7e2ef;font-family:'Poppins',system-ui,sans-serif;color:#16273b}
+  a{color:#1b4f9c;text-decoration:none}
+  a:hover{color:#123a75;text-decoration:underline}
+  select,input{font-family:'Poppins',sans-serif}
+  ::selection{background:#bcd7f5}
+</style>
+</helmet>
+
+<div style="min-height:100vh;display:flex;flex-direction:column">
+  <!-- top bar -->
+  <div style="background:#0f3466;color:#eaf1fa;display:flex;align-items:center;gap:14px;padding:10px 20px">
+    <div style="width:26px;height:26px;background:#2079d8;border-radius:6px;display:grid;place-items:center;font-weight:700;font-size:14px;color:#fff">R</div>
+    <div style="font-weight:600;font-size:14px;letter-spacing:.02em">REUDAN <span style="color:#8fa9c9;font-weight:500">Rate Desk</span></div>
+    <div style="flex:1"></div>
+    <div style="font-size:11.5px;color:#8fa9c9">Rates refreshed today 07:40</div>
+  </div>
+
+
+  <!-- search -->
+  <div style="display:flex;align-items:flex-end;gap:12px;padding:16px 20px;background:#f3f7fc;border-bottom:1px solid #c9d6e6;flex-wrap:wrap">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5f7189">Origin port (POL)</span>
+      <select value="{{ origin }}" onChange="{{ setOrigin }}" style="height:38px;min-width:190px;border:1.5px solid #16273b;border-radius:5px;background:#fff;font-size:14px;font-weight:600;padding:0 10px">
+        <sc-for list="{{ origins }}" as="o" hint-placeholder-count="3"><option value="{{ o }}">{{ o }}</option></sc-for>
+      </select>
+    </div>
+    <div style="padding-bottom:11px;color:#8798ac;font-size:15px">→</div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5f7189">Destination port (POD)</span>
+      <select value="{{ dest }}" onChange="{{ setDest }}" style="height:38px;min-width:260px;border:1.5px solid #16273b;border-radius:5px;background:#fff;font-size:14px;font-weight:600;padding:0 10px">
+        <sc-for list="{{ dests }}" as="d" hint-placeholder-count="6"><option value="{{ d }}">{{ d }}</option></sc-for>
+      </select>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5f7189">Container size</span>
+      <select value="{{ size }}" onChange="{{ setSize }}" style="height:38px;min-width:120px;border:1.5px solid #16273b;border-radius:5px;background:#fff;font-size:14px;font-weight:600;padding:0 10px">
+        <sc-for list="{{ sizes }}" as="s" hint-placeholder-count="3"><option value="{{ s }}">{{ s }}</option></sc-for>
+      </select>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5f7189">Door pickup <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></span>
+      <select value="{{ door }}" onChange="{{ setDoor }}" style="height:38px;min-width:180px;border:1.5px solid #b6c5d8;border-radius:5px;background:#fff;font-size:13.5px;padding:0 10px">
+        <sc-for list="{{ doors }}" as="d" hint-placeholder-count="4"><option value="{{ d.v }}">{{ d.label }}</option></sc-for>
+      </select>
+    </div>
+  </div>
+
+  <!-- results -->
+  <div style="flex:1;padding:16px 20px 40px">
+    <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <span style="font-size:15px;font-weight:700">{{ laneTitle }}</span>
+      <span style="font-size:12.5px;color:#5f7189">{{ laneSummary }}</span>
+      <sc-if value="{{ doorLine }}" hint-placeholder-val="{{ false }}">
+        <span style="font-size:12px;background:#fdf6e3;border:1px solid #e3d3a1;border-radius:4px;padding:2px 8px;color:#7a5c10">{{ doorLine }}</span>
+      </sc-if>
+    </div>
+
+    <div style="background:#ffffff;border:1px solid #c3d1e2;border-radius:7px;overflow-x:auto;box-shadow:0 1px 3px rgba(20,30,25,.07)">
+      <div style="min-width:1110px;display:grid;grid-template-columns:30px minmax(150px,1.3fr) minmax(115px,1fr) 62px 62px 62px 62px 62px 95px 115px;column-gap:10px;padding:8px 14px;border-bottom:1.5px solid #16273b;font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#5f7189;align-items:center">
+        <span>#</span><span>Carrier</span><span>Source</span>
+        <span style="text-align:right">Base</span>
+        <span style="text-align:right">Haulage</span>
+        <span style="text-align:right">THC</span>
+        <span style="text-align:right">Docs</span>
+        <span style="text-align:right">Surch.</span>
+        <span style="text-align:right">All-in $/40′</span>
+        <span>Validity</span>
+      </div>
+
+      <sc-for list="{{ rows }}" as="r" hint-placeholder-count="4">
+        <div style="border-bottom:1px solid #e4ebf4">
+          <div style="{{ r.rowStyle }}" onClick="{{ r.onToggle }}">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8798ac">{{ r.rank }}</span>
+            <span style="display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap">
+              <span style="font-weight:700;font-size:14px">{{ r.carrier }}</span>
+              <sc-if value="{{ r.best }}" hint-placeholder-val="{{ false }}"><span style="background:#1b4f9c;color:#fff;font-size:9.5px;font-weight:700;letter-spacing:.06em;border-radius:3px;padding:2px 7px;text-transform:uppercase">Best rate</span></sc-if>
+            </span>
+            <span style="display:flex;align-items:center;gap:6px;min-width:0" title="{{ r.sheet }}">
+              <sc-if value="{{ r.tag }}" hint-placeholder-val="{{ false }}"><span style="flex:none;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;background:#e6edf6;border:1px solid #c9d6e6;border-radius:3px;padding:1px 6px;color:#33475e">{{ r.tag }}</span></sc-if>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#5f7189;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.sheetShort }}</span>
+            </span>
+            <span style="text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#33475e">{{ r.cBase }}</span>
+            <span style="text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#33475e">{{ r.cHaul }}</span>
+            <span style="text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#33475e">{{ r.cThc }}</span>
+            <span style="text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#33475e">{{ r.cDocs }}</span>
+            <span style="text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#33475e">{{ r.cSurch }}</span>
+            <span style="text-align:right;font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:700">{{ r.allIn }}</span>
+            <span><span style="{{ r.vStyle }}">{{ r.validity }}</span></span>
+          </div>
+          <sc-if value="{{ r.expanded }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:10px 14px 14px 58px;background:#eef4fb;border-top:1px dashed #c9d6e6">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#5f7189;margin-bottom:6px">Breakdown · USD per 40′HC (from sheet)</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px 18px;max-width:820px">
+                <sc-for list="{{ r.breakdown }}" as="b" hint-placeholder-count="6">
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#33475e">{{ b.k }} <b>{{ b.v }}</b></span>
+                </sc-for>
+              </div>
+              <div style="font-size:11.5px;color:#5f7189;margin-top:8px">{{ r.fineprint }}</div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+
+      <sc-if value="{{ hasNone }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:26px 14px;text-align:center;color:#5f7189;font-size:13px">No parsed rates for this lane and container size.</div>
+      </sc-if>
+
+      <sc-if value="{{ noRateLine }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:#eef4fb;font-size:11.5px;color:#5f7189">
+          <span style="width:7px;height:7px;border-radius:50%;background:#b3c1d1"></span>{{ noRateLine }}
+        </div>
+      </sc-if>
+    </div>
+
+    <div style="display:flex;gap:16px;margin-top:10px;font-size:11px;color:#8798ac;flex-wrap:wrap">
+      <span>Figures = USD per 40′HC, all-in port-to-port as parsed from carrier sheets.</span>
+      <span>Click a row for the surcharge breakdown.</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { origin: 'Felixstowe', dest: 'Jakarta / Surabaya / Semarang', size: "40′ HC", door: '', margin: null, expanded: null, copied: null };
+
+  data() {
+    const MSC_FINE = 'Subject to ETS USD 98/40′ + Fuel EU USD 18/40′ (VATOS) · docs GBP 30 per B/L · 14 days demurrage free time at destination.';
+    const mscBreak = (allIn, extra) => {
+      const common = [['Base ocean', 0], ['GFS', 56], ['THC', 250], ['SPS', 19], ['CSF', 11], ['Haulage', 250], ['FES', 100], ['SEL', 8], ['DRT', 10], ['ECA', 30], ['BRC', 154]];
+      const extraSum = extra.reduce((a, b) => a + b[1], 0);
+      const sum = 888 + extraSum;
+      common[0][1] = Math.abs(allIn - sum);
+      return common.concat(extra).map(([k, v]) => ({ k, v: String(v) }));
+    };
+    const msc = (dest, peute, paper, extra, origins) => ['PEUTE', 'PAPER'].map((c, i) => ({
+      carrier: 'MSC', sheet: 'MSC - FAR EAST RATES JUL.xlsx · ' + c, kind: 'contract',
+      origins: origins || ['Felixstowe', 'Liverpool'], dest, allIn: i ? paper : peute,
+      validity: 'to 31 Jul', vTone: 'ok', freetime: '14d POD',
+      note: 'Subj. ETS $98 + FuelEU $18 · £30/BL docs',
+      breakdown: mscBreak(i ? paper : peute, extra), fineprint: MSC_FINE,
+    }));
+    const cosco = (dest, rate, note) => ({
+      carrier: 'COSCO', sheet: 'COSCO FAR-EAST RATES.xlsx', kind: 'contract',
+      origins: ['Felixstowe', 'Southampton'], dest, allIn: rate,
+      validity: 'expires 20 Jul', vTone: 'warn', freetime: '—',
+      note: note || 'All-in as quoted · add-ons may apply at POD',
+      breakdown: [{ k: 'All-in as quoted', v: String(rate) }],
+      fineprint: 'Sheet quotes a single all-in figure — destination add-on charges may apply at some PODs. Confirm before fixing.',
+    });
+    const maersk = (dest, transit) => ({
+      carrier: 'Maersk', sheet: 'MAERSK Q-3, INDIA AND FAR-EAST.xlsx · QT-MAEU-50410626-9', kind: 'spot quote',
+      origins: ['Felixstowe'], dest, allIn: 285,
+      validity: 'to 31 Jul', vTone: 'ok', freetime: '—',
+      note: 'Transit ' + transit + 'd · CY/CY · FAK · confirm UK POL (quote issued ex-Rotterdam)',
+      breakdown: [{ k: 'Basic ocean (fixed)', v: '98' }, { k: 'Emission surcharge', v: '152' }, { k: 'Docs origin (EUR 30)', v: '35' }],
+      fineprint: 'Destination charges (INR): Container Protect 3,800 · docs 6,710 · THC 9,893–17,722 — for consignee account. Quote issued ex-Rotterdam; UK loading to be confirmed with Maersk.',
+    });
+    const vnExtra = [['DTHC', 197], ['CCL', 20]];
+    return [
+      ...msc('Jakarta / Surabaya / Semarang', 284, 309, [['DTHC', 145], ['CCL', 36], ['EMR', 24], ['OCC', 20]]),
+      ...msc('Port Klang / Penang', 284, 309, [['DTHC', 170], ['CCL', 15], ['EMR', 6]]),
+      ...msc('Ho Chi Minh', 363, 388, vnExtra),
+      ...msc('Haiphong', 284, 309, vnExtra),
+      ...msc('Vung Tau / Da Nang', 284, 309, vnExtra),
+      ...msc('Laem Chabang', 284, 309, [['DTHC', 137], ['CCL', 15], ['CAG', 16]]),
+      ...msc('Manila', 634, 659, [['DTHC', 260]]),
+      cosco('Jakarta / Surabaya / Semarang', 360),
+      cosco('Ho Chi Minh', 325),
+      cosco('Laem Chabang', 325),
+      cosco('Haiphong', 330, 'Also covers Binh Duong via AEU7'),
+      maersk('Mundra', 35), maersk('Nhava Sheva (JNPT)', 33), maersk('Tuticorin', 41),
+    ];
+  }
+
+  renderVals() {
+    const S = this.state;
+    const doors = [
+      { v: '', label: 'Port drop-off (none)' },
+      { v: 'Abbots Bromley', gbp: 140 }, { v: 'Aberdare', gbp: 369 }, { v: 'Accrington', gbp: 138 },
+      { v: 'Aintree', gbp: 305 }, { v: 'Alfreton', gbp: 175 }, { v: 'Aberdeen', gbp: 996 },
+    ].map(d => ({ ...d, label: d.label || d.v + ' · £' + d.gbp }));
+    const all = this.data();
+    const dests = [...new Set(all.map(r => r.dest))];
+    const lane = all.filter(r => r.dest === S.dest && r.origins.includes(S.origin) && S.size === "40′ HC");
+    lane.sort((a, b) => a.allIn - b.allIn);
+    const carriers = ['MSC', 'COSCO', 'Maersk'];
+    const missing = carriers.filter(c => !lane.some(r => r.carrier === c));
+    const doorSel = doors.find(d => d.v === S.door && d.v);
+    const fmt = n => '$' + n.toLocaleString('en-US');
+    const rows = lane.map((r, i) => {
+      const id = r.carrier + r.sheet + r.dest;
+      const best = i === 0;
+      const tone = r.vTone === 'ok'
+        ? 'background:#e3f2e7;color:#177a46;border:1px solid #b5dcc2'
+        : 'background:#fdf0d8;color:#8a5d07;border:1px solid #e8d3a2';
+      const bd = Object.fromEntries(r.breakdown.map(b => [b.k, +b.v]));
+      let cBase = '—', cHaul = '—', cThc = '—', cDocs = '—', cSurch = '—';
+      if (r.carrier === 'MSC') {
+        cBase = bd['Base ocean']; cHaul = 250; cThc = 250;
+        cSurch = Math.abs(r.allIn) - cBase < 0 ? r.allIn + cBase - 500 : r.allIn - cBase - 500;
+      } else if (r.carrier === 'Maersk') {
+        cBase = 98; cDocs = 35; cSurch = 152;
+      }
+      const cf = v => v === '—' ? '—' : (v < 0 ? '−' + Math.abs(v).toLocaleString('en-US') : v.toLocaleString('en-US'));
+      return {
+        rank: String(i + 1), carrier: r.carrier, sheet: r.sheet,
+        cBase: cf(cBase), cHaul: cf(cHaul), cThc: cf(cThc), cDocs: cf(cDocs), cSurch: cf(cSurch),
+        tag: r.sheet.includes(' · ') ? r.sheet.split(' · ')[1].split('-')[0] : false,
+        sheetShort: r.sheet.split(' · ')[0],
+        allIn: fmt(r.allIn),
+        validity: r.validity, freetime: r.freetime, note: r.note, best,
+        breakdown: r.breakdown, fineprint: r.fineprint,
+        expanded: S.expanded === id,
+        rowStyle: 'min-width:1110px;display:grid;grid-template-columns:30px minmax(150px,1.3fr) minmax(115px,1fr) 62px 62px 62px 62px 62px 95px 115px;column-gap:10px;align-items:center;padding:11px 14px;cursor:pointer;' + (best ? 'background:#e9f1fc;box-shadow:inset 3px 0 0 #1b4f9c;' : 'background:#ffffff;'),
+        vStyle: 'display:inline-block;font-size:11px;font-weight:600;border-radius:3px;padding:2px 7px;white-space:nowrap;' + tone,
+        onToggle: () => this.setState({ expanded: S.expanded === id ? null : id }),
+      };
+    });
+    const best = lane[0];
+    return {
+      origins: ['Felixstowe', 'Liverpool', 'Southampton'],
+      dests, doors, origin: S.origin, dest: S.dest, door: S.door,
+      sizes: ["20′", "40′", "40′ HC"], size: S.size,
+      setSize: e => this.setState({ size: e.target.value, expanded: null }),
+      rows, hasNone: rows.length === 0,
+      laneTitle: S.origin + ' → ' + S.dest,
+      laneSummary: rows.length
+        ? rows.length + ' parsed rate' + (rows.length > 1 ? 's' : '') + ' · best ' + fmt(best.allIn) + ' ' + best.carrier
+        : 'no parsed rates on this lane',
+      doorLine: doorSel ? 'Door: ' + doorSel.v + ' → +£' + doorSel.gbp + '/ctn to port (waste haulage Q3 sheet)' : false,
+      noRateLine: missing.length ? 'No rate on this lane from ' + missing.join(', ') + ' in the parsed sheets.' : false,
+      setOrigin: e => this.setState({ origin: e.target.value, expanded: null }),
+      setDest: e => this.setState({ dest: e.target.value, expanded: null }),
+      setDoor: e => this.setState({ door: e.target.value }),
+    };
+  }
+}
+</script>
+</body>
+</html>

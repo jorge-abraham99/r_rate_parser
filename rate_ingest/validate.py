@@ -88,6 +88,8 @@ def validate_import(rate_import_id: str, card: RateCard, offers: list[RateOffer]
         lane_key = (offer.pol, offer.pod, offer.final_destination, offer.equipment_type, offer.valid_from, offer.valid_to)
         lane_key = (
             offer.raw_sheet_name,
+            offer.origin,
+            offer.place_of_receipt,
             offer.zone,
             offer.pol,
             offer.pod,

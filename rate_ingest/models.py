@@ -148,6 +148,10 @@ class ParserTemplate(BaseModel):
     row_filters: dict[str, Any] = Field(default_factory=dict)
     note_extraction: dict[str, Any] = Field(default_factory=dict)
     validation: dict[str, Any] = Field(default_factory=dict)
+    matrix_rules: dict[str, Any] = Field(default_factory=dict)
+    offer_block_rules: dict[str, Any] = Field(default_factory=dict)
+    email_table_rules: dict[str, Any] = Field(default_factory=dict)
+    defaults: dict[str, Any] = Field(default_factory=dict)
 
 
 class InspectResult(BaseModel):

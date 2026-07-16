@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reudan Rate Desk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --navy:#0f3466;
+      --blue:#1b4f9c;
+      --logo:#2079d8;
+      --page:#d7e2ef;
+      --panel:#f3f7fc;
+      --card:#ffffff;
+      --border:#c9d6e6;
+      --border-strong:#16273b;
+      --text:#33475e;
+      --muted:#5f7189;
+      --soft:#8798ac;
+      --ok-bg:#e3f2e7;
+      --ok-text:#177a46;
+      --warn-bg:#fdf0d8;
+      --warn-text:#8a5d07;
+      --danger:#9f2f2f;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--page);font-family:'Poppins',system-ui,sans-serif;color:var(--text)}
+    button,input,select,textarea{font:inherit}
+    code,pre,.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+    .topbar{background:var(--navy);color:#eaf1fa;display:flex;align-items:center;gap:14px;padding:10px 20px}
+    .logo{width:26px;height:26px;background:var(--logo);border-radius:6px;display:grid;place-items:center;font-weight:700;font-size:14px;color:#fff}
+    .container{padding:18px 20px 36px;display:grid;gap:18px}
+    .grid{display:grid;grid-template-columns:1.15fr .85fr;gap:18px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 3px rgba(20,30,25,.07)}
+    .section-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px;align-items:center}
+    .section-head h2{margin:0;font-size:14px;color:var(--border-strong)}
+    .section-head span{font-size:11px;color:var(--soft)}
+    .content{padding:16px}
+    .form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .field{display:flex;flex-direction:column;gap:4px}
+    .field label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+    .field input,.field select,.field textarea{min-height:40px;border:1.5px solid var(--border-strong);border-radius:6px;padding:9px 10px;background:#fff}
+    .field textarea{min-height:90px;resize:vertical}
+    .field.secondary input{border-color:var(--border)}
+    .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
+    .btn{border:none;border-radius:6px;padding:10px 14px;font-weight:600;cursor:pointer}
+    .btn-primary{background:var(--blue);color:#fff}
+    .btn-secondary{background:#e8eef6;color:var(--border-strong)}
+    .btn-danger{background:#f7e4e4;color:var(--danger)}
+    .status{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:600}
+    .status-approved{background:var(--ok-bg);color:var(--ok-text)}
+    .status-pending_review,.status-registered{background:#eef4fb;color:var(--blue)}
+    .status-failed,.status-rejected{background:#f7e4e4;color:var(--danger)}
+    .status-unknown_format{background:var(--warn-bg);color:var(--warn-text)}
+    .muted{color:var(--soft)}
+    .tiny{font-size:11px}
+    .table-wrap{overflow:auto}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:10px 12px;border-bottom:1px solid #e4ebf4;font-size:12px;text-align:left;vertical-align:top}
+    th{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+    tr:hover td{background:#fafcff}
+    .mono-chip{display:inline-block;font-size:10px;padding:2px 6px;border-radius:4px;background:#e6edf6;border:1px solid var(--border)}
+    .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .pre{white-space:pre-wrap;background:#f7fbff;border:1px solid var(--border);border-radius:6px;padding:12px;max-height:420px;overflow:auto;font-size:12px;line-height:1.45}
+    .alert{padding:10px 12px;border-radius:6px;font-size:12px}
+    .alert-info{background:#eef4fb;color:var(--blue);border:1px solid #ceddf1}
+    .alert-error{background:#f7e4e4;color:var(--danger);border:1px solid #e6c0c0}
+    .empty{padding:22px;text-align:center;color:var(--muted);font-size:13px}
+    .linkrow{display:flex;gap:12px;flex-wrap:wrap}
+    .linkrow a{color:var(--blue);text-decoration:none;font-size:12px}
+    .linkrow a:hover{text-decoration:underline}
+    @media (max-width: 1100px){
+      .grid,.split{grid-template-columns:1fr}
+      .form-grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo">R</div>
+    <div style="font-weight:600;font-size:14px;letter-spacing:.02em">REUDAN <span style="color:#8fa9c9;font-weight:500">Rate Desk</span></div>
+    <div style="flex:1"></div>
+    <div id="healthText" style="font-size:11.5px;color:#8fa9c9">Checking local API...</div>
+  </div>
+
+  <div class="container">
+    <div class="grid">
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <h2>Import Rate File</h2>
+            <span>Uses the same deterministic parser flow as the CLI.</span>
+          </div>
+        </div>
+        <div class="content">
+          <div id="importAlert"></div>
+          <form id="importForm">
+            <div class="form-grid">
+              <div class="field">
+                <label for="sourceFile">Source File</label>
+                <input id="sourceFile" name="file" type="file" required>
+              </div>
+              <div class="field secondary">
+                <label for="uploadedBy">Uploaded By</label>
+                <input id="uploadedBy" name="uploaded_by" type="text" placeholder="abraham">
+              </div>
+              <div class="field secondary">
+                <label for="templateId">Template Override</label>
+                <input id="templateId" name="template" type="text" placeholder="leave blank for auto-match">
+              </div>
+            </div>
+            <div class="actions">
+              <button class="btn btn-primary" type="submit">Run Import</button>
+              <span class="tiny muted">Known templates only. Unknown files will currently fail to match.</span>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <h2>Workspace</h2>
+            <span>Connected UI for the current parser, plus the original design prototype.</span>
+          </div>
+        </div>
+        <div class="content">
+          <div class="linkrow">
+            <a href="/ui/Rate%20Lookup%20v1.dc.html" target="_blank" rel="noreferrer">Open original rate lookup prototype</a>
+            <a href="/api/health" target="_blank" rel="noreferrer">Open API health endpoint</a>
+          </div>
+          <div style="margin-top:14px" class="alert alert-info">
+            This page is the real connected operator UI. The older prototype remains in the folder as a design reference and sample interaction model.
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <h2>Recent Imports</h2>
+          <span>Review, approve, reject, and inspect recent parser runs.</span>
+        </div>
+        <button id="refreshImportsBtn" class="btn btn-secondary" type="button">Refresh</button>
+      </div>
+      <div class="content table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Import</th>
+              <th>File</th>
+              <th>Status</th>
+              <th>Parser</th>
+              <th>Template</th>
+              <th>Warnings</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="importsTableBody">
+            <tr><td colspan="8" class="empty">No imports yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <h2>Import Detail</h2>
+          <span>Selected run summary, canonical preview, and review markdown.</span>
+        </div>
+      </div>
+      <div class="content" id="detailPane">
+        <div class="empty">Select an import to inspect it.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <h2>Approved Rate Search</h2>
+          <span>Search only published approved offers.</span>
+        </div>
+      </div>
+      <div class="content">
+        <form id="searchForm">
+          <div class="form-grid">
+            <div class="field secondary">
+              <label for="providerName">Provider</label>
+              <input id="providerName" type="text" placeholder="MSC">
+            </div>
+            <div class="field secondary">
+              <label for="carrierName">Carrier</label>
+              <input id="carrierName" type="text" placeholder="Maersk">
+            </div>
+            <div class="field secondary">
+              <label for="pol">POL</label>
+              <input id="pol" type="text" placeholder="GBSOU">
+            </div>
+            <div class="field secondary">
+              <label for="pod">POD / Destination</label>
+              <input id="pod" type="text" placeholder="HO CHI MINH">
+            </div>
+            <div class="field secondary">
+              <label for="equipmentType">Equipment</label>
+              <input id="equipmentType" type="text" placeholder="40HC">
+            </div>
+            <div class="field secondary">
+              <label for="validOn">Valid On</label>
+              <input id="validOn" type="date">
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary" type="submit">Search Approved Rates</button>
+            <button class="btn btn-secondary" type="button" id="clearSearchBtn">Clear</button>
+          </div>
+        </form>
+        <div class="table-wrap" style="margin-top:16px">
+          <table>
+            <thead>
+              <tr>
+                <th>Carrier</th>
+                <th>POL</th>
+                <th>POD</th>
+                <th>Equipment</th>
+                <th>Base</th>
+                <th>All-In</th>
+                <th>Validity</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody id="searchTableBody">
+              <tr><td colspan="8" class="empty">Run a search after approving imports.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>

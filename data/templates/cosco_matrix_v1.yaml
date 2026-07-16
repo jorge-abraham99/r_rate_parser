@@ -1,0 +1,39 @@
+template_id: cosco_matrix_v1
+template_name: COSCO Far East Matrix v1
+provider_name: COSCO
+parser_family: matrix
+document_type: ocean_export
+file_type: xlsx
+active: true
+
+match_rules:
+  filename_contains:
+    - "COSCO"
+    - "FAR-EAST"
+  required_header_labels:
+    - "POL"
+    - "valid from"
+  sheet_name_contains_any:
+    - "Sheet1"
+
+sheet_rules:
+  include_sheet_name_contains:
+    - "Sheet1"
+
+matrix_rules:
+  header_row: 2
+  data_start_row: 4
+  origin_column: 1
+  destination_start_column: 2
+  destination_end_column: 5
+
+defaults:
+  carrier_name: COSCO
+  currency_default: GBP
+  equipment_type: 40HC
+  all_in_flag: true
+  commodity: waste paper
+
+validation:
+  amount_min: 1
+  amount_max: 5000
