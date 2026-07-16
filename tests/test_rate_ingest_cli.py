@@ -151,7 +151,16 @@ def test_api_import_approve_and_search_flow(tmp_path: Path, monkeypatch):
     detail = detail_response.json()
     assert detail["summary"]["rate_offers"] > 0
 
-    approve_response = api_client.post(f"/api/imports/{import_id}/approve", json={"approved_by": "jorge"})
+    approve_response = api_client.post(
+        f"/api/imports/{import_id}/approve",
+        json={
+            "approved_by": "jorge",
+            "carrier_name": "MSC",
+            "carrier_key": "msc-peute",
+            "carrier_label": "MSC — PEUTE",
+            "contract_tag": "PEUTE",
+        },
+    )
     assert approve_response.status_code == 200
     approved = approve_response.json()
     assert approved["rate_import"]["status"] == "approved"
@@ -162,6 +171,63 @@ def test_api_import_approve_and_search_flow(tmp_path: Path, monkeypatch):
     assert search_rows
     assert any("HO CHI MINH" in (row.get("pod") or row.get("final_destination") or "") for row in search_rows)
 
+    desk_response = api_client.get("/api/rate-desk")
+    assert desk_response.status_code == 200
+    desk = desk_response.json()
+    assert desk["rates"]
+    assert desk["last_refreshed"]
+    assert desk["filters"]["origins"]
+    assert desk["filters"]["destinations"]
+    assert desk["filters"]["equipment_types"]
+    assert "Paper" in desk["filters"]["materials"]
+    assert desk["rates"][0]["source_file_name"] == "MSC - FAR EAST RATES JAN.xlsx"
+    assert desk["rates"][0]["carrier_key"] == "msc-peute"
+
+    imports_response = api_client.get("/api/imports")
+    assert imports_response.status_code == 200
+    listed_import = next(item for item in imports_response.json() if item["import_id"] == import_id)
+    assert listed_import["carrier_label"] == "MSC — PEUTE"
+    assert listed_import["lane_count"] > 0
+
     ui_response = api_client.get("/ui/")
     assert ui_response.status_code == 200
     assert "Reudan Rate Desk" in ui_response.text
+    assert "Origin port (POL)" in ui_response.text
+    assert "Material" in ui_response.text
+    assert "Show expired rates" in ui_response.text
+    assert "Import Rate File" not in ui_response.text
+
+    import_ui_response = api_client.get("/ui/import.html")
+    assert import_ui_response.status_code == 200
+    assert "Drop rate sheets here" in import_ui_response.text
+    assert "Review parsed sheet" in import_ui_response.text
+    assert "Who's this rate from?" in import_ui_response.text
+
+    replacement_response = api_client.post(
+        "/api/imports",
+        data={"uploaded_by": "priya"},
+        files={"file": ("MSC - FAR EAST RATES FEB.xlsx", source_bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert replacement_response.status_code == 200
+    replacement_id = replacement_response.json()["import_id"]
+    replacement_approval = api_client.post(
+        f"/api/imports/{replacement_id}/approve",
+        json={
+            "approved_by": "priya",
+            "carrier_name": "MSC",
+            "carrier_key": "msc-peute",
+            "carrier_label": "MSC — PEUTE",
+            "contract_tag": "PEUTE",
+        },
+    )
+    assert replacement_approval.status_code == 200
+    statuses = {item["import_id"]: item["status"] for item in api_client.get("/api/imports").json()}
+    assert statuses[import_id] == "archived"
+    assert statuses[replacement_id] == "approved"
+    assert {rate["source_file_name"] for rate in api_client.get("/api/rate-desk").json()["rates"]} == {
+        "MSC - FAR EAST RATES FEB.xlsx"
+    }
+
+    delete_response = api_client.delete(f"/api/imports/{replacement_id}")
+    assert delete_response.status_code == 200
+    assert api_client.get("/api/rate-desk").json()["rates"] == []
