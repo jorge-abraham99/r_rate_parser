@@ -140,6 +140,19 @@ The original design prototype is still available at:
 http://127.0.0.1:8000/ui/Rate%20Lookup%20v1.dc.html
 ```
 
+## Railway Deployment
+
+Yes, Railway can give this app a public domain, but two setup steps are required:
+
+- attach a persistent volume to `/app/data`
+- generate a public domain in Railway Networking
+
+The volume is required because this app stores imports, review packs, and approved-rate data on disk under `./data`.
+
+The Railway deployment guide is here:
+
+- [DEPLOY_RAILWAY.md](/Users/abraham/Documents/reudan/parser/DEPLOY_RAILWAY.md)
+
 ## Debug Command
 
 `inspect` is for debugging template matching, not normal operator use.
