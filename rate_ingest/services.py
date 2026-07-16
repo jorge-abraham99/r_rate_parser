@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+import shutil
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,7 @@ from rate_ingest.source_registry import register_source
 from rate_ingest.template_matcher import find_best_template, load_templates
 from rate_ingest.utils import read_csv_rows, read_json, write_csv_rows, write_json
 from rate_ingest.validate import validate_import
-from rate_ingest.warehouse import record_import, warehouse_paths
+from rate_ingest.warehouse import record_import, remove_import_rows, replace_import, warehouse_paths
 
 
 def find_run_dir(settings: Settings, import_id: str) -> Path:
@@ -71,9 +72,12 @@ def import_source_file(
     source_path: Path,
     template: str | None = None,
     uploaded_by: str | None = None,
+    source_file_name: str | None = None,
 ) -> dict[str, Any]:
     settings.ensure()
     source = register_source(settings, source_path, uploaded_by=uploaded_by)
+    if source_file_name:
+        source.file_name = Path(source_file_name).name
     inspected, _ = classify_source(settings, source)
     scored = inspected.possible_templates
     if template:
@@ -199,6 +203,9 @@ def list_imports(settings: Settings, limit: int = 50) -> list[dict[str, Any]]:
         run_dir = settings.runs_dir / item.id
         source_snapshot = read_json_if_exists(run_dir / "source_snapshot.json") or {}
         validation_report = read_json_if_exists(run_dir / "validation_report.json") or {"summary": {}}
+        card_rows = read_csv_rows(run_dir / "parsed_rate_cards.csv")
+        offer_rows = read_csv_rows(run_dir / "parsed_rate_offers.csv")
+        card = card_rows[0] if card_rows else {}
         imports.append(
             {
                 "import_id": item.id,
@@ -211,6 +218,14 @@ def list_imports(settings: Settings, limit: int = 50) -> list[dict[str, Any]]:
                 "created_at": serialize_date(item.created_at),
                 "file_name": source_snapshot.get("file_name"),
                 "source_type": source_snapshot.get("source_type"),
+                "uploaded_by": source_snapshot.get("uploaded_by"),
+                "carrier_name": card.get("carrier_name") or card.get("provider_name"),
+                "carrier_key": source_snapshot.get("operator_carrier_key"),
+                "carrier_label": source_snapshot.get("operator_carrier_label"),
+                "contract_tag": source_snapshot.get("contract_tag"),
+                "valid_from": card.get("valid_from"),
+                "valid_to": card.get("valid_to"),
+                "lane_count": len(offer_rows),
                 "validation_summary": validation_report.get("summary", item.validation_summary_json),
             }
         )
@@ -218,7 +233,16 @@ def list_imports(settings: Settings, limit: int = 50) -> list[dict[str, Any]]:
     return imports[:limit]
 
 
-def approve_import_by_id(settings: Settings, import_id: str, approved_by: str) -> dict[str, Any]:
+def approve_import_by_id(
+    settings: Settings,
+    import_id: str,
+    approved_by: str,
+    *,
+    carrier_name: str | None = None,
+    carrier_key: str | None = None,
+    carrier_label: str | None = None,
+    contract_tag: str | None = None,
+) -> dict[str, Any]:
     run_dir = find_run_dir(settings, import_id)
     payload = load_run_payload(run_dir)
     rate_import = RateImport(**payload["rate_import"])
@@ -227,6 +251,20 @@ def approve_import_by_id(settings: Settings, import_id: str, approved_by: str) -
     offers = [RateOffer(**deserialize_row(row)) for row in payload["rate_offers"]]
     charges = [RateChargeLine(**deserialize_row(row)) for row in payload["rate_charge_lines"]]
     notes = [RateNote(**deserialize_row(row)) for row in payload["rate_notes"]]
+    if validation_report.summary.get("errors", 0) > 0:
+        raise ValueError("Import has blocking validation errors and cannot be approved.")
+    if carrier_name and cards:
+        cards[0].carrier_name = carrier_name
+        cards[0].provider_name = carrier_name
+        write_csv_rows(run_dir / "parsed_rate_cards.csv", [card.model_dump(mode="json") for card in cards])
+    if carrier_key or carrier_label or contract_tag:
+        source_snapshot = payload["source_snapshot"]
+        source_snapshot["operator_carrier_key"] = carrier_key
+        source_snapshot["operator_carrier_label"] = carrier_label or carrier_name
+        source_snapshot["contract_tag"] = contract_tag
+        write_json(run_dir / "source_snapshot.json", source_snapshot)
+    if carrier_key:
+        archive_previous_imports(settings, carrier_key, excluding=import_id)
     approve_run(settings, run_dir, rate_import, validation_report, cards, offers, charges, notes, approved_by)
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
     return get_import_detail(settings, import_id)
@@ -238,6 +276,27 @@ def reject_import_by_id(settings: Settings, import_id: str, reason: str) -> dict
     reject_run(settings, run_dir, rate_import, reason)
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
     return get_import_detail(settings, import_id)
+
+
+def delete_import_by_id(settings: Settings, import_id: str) -> dict[str, Any]:
+    run_dir = find_run_dir(settings, import_id)
+    remove_import_rows(settings, import_id, remove_import_record=True)
+    shutil.rmtree(run_dir)
+    return {"deleted": True, "import_id": import_id}
+
+
+def archive_previous_imports(settings: Settings, carrier_key: str, *, excluding: str) -> None:
+    for item in list_imports(settings, limit=5000):
+        if item["import_id"] == excluding or item.get("status") != "approved":
+            continue
+        if item.get("carrier_key") != carrier_key:
+            continue
+        previous_dir = find_run_dir(settings, item["import_id"])
+        previous = RateImport(**read_json(previous_dir / "rate_import.json"))
+        remove_import_rows(settings, previous.id)
+        previous.status = "archived"
+        write_json(previous_dir / "rate_import.json", previous.model_dump(mode="json"))
+        replace_import(settings, previous)
 
 
 def search_approved_offers(
@@ -257,6 +316,11 @@ def search_approved_offers(
     notes = [RateNote(**deserialize_row(row)) for row in read_csv_rows(paths["notes"])]
 
     cards_by_id = {card.id: card for card in cards}
+    source_by_import: dict[str, dict[str, Any]] = {}
+    for card in cards:
+        source_path = settings.runs_dir / card.rate_import_id / "source_snapshot.json"
+        if source_path.exists():
+            source_by_import[card.rate_import_id] = read_json(source_path)
     charges_by_offer: dict[str, list[RateChargeLine]] = {}
     for charge in charges:
         charges_by_offer.setdefault(charge.rate_offer_id, []).append(charge)
@@ -288,13 +352,26 @@ def search_approved_offers(
 
         offer_charges = charges_by_offer.get(offer.id, [])
         note_bucket = notes_by_offer.get(offer.id) or notes_by_card.get(card.id, [])
-        charge_total = round(sum(charge.amount or 0 for charge in offer_charges), 2)
+        additive_charges = [
+            charge
+            for charge in offer_charges
+            if not is_base_charge(charge)
+            and currencies_match(charge.currency, offer.base_currency or card.currency_default)
+        ]
+        charge_total = round(sum(charge.amount or 0 for charge in additive_charges), 2)
         if offer.base_amount is None and charge_total == 0:
             all_in_amount = None
         elif offer.all_in_flag is True or not offer_charges:
             all_in_amount = offer.base_amount
         else:
             all_in_amount = round((offer.base_amount or 0) + charge_total, 2)
+        source_payload = source_by_import.get(card.rate_import_id, {})
+        materials = infer_materials(
+            card.commodity,
+            source_payload.get("operator_carrier_key"),
+            source_payload.get("file_name"),
+            offer.raw_sheet_name,
+        )
         results.append(
             {
                 "offer_id": offer.id,
@@ -317,6 +394,12 @@ def search_approved_offers(
                 "valid_from": serialize_date(offer.valid_from or card.valid_from),
                 "valid_to": serialize_date(offer.valid_to or card.valid_to),
                 "raw_sheet_name": offer.raw_sheet_name,
+                "source_file_name": source_payload.get("file_name"),
+                "carrier_key": source_payload.get("operator_carrier_key"),
+                "carrier_label": source_payload.get("operator_carrier_label"),
+                "contract_tag": source_payload.get("contract_tag"),
+                "materials": materials,
+                "offer_reference": offer.offer_reference,
                 "raw_row_reference": offer.raw_row_reference,
                 "routing_note": offer.routing_note,
                 "notes_summary": note_bucket[0].note_text if note_bucket else card.notes_summary,
@@ -326,6 +409,49 @@ def search_approved_offers(
         )
     results.sort(key=lambda item: ((item["all_in_amount"] is None), item["all_in_amount"] or 0, item["carrier_name"] or ""))
     return results[:limit]
+
+
+def get_rate_desk_data(settings: Settings, limit: int = 2000) -> dict[str, Any]:
+    rates = search_approved_offers(settings, limit=limit)
+    imports = list_imports(settings, limit=500)
+    approved_at = [item.get("approved_at") for item in imports if item.get("approved_at")]
+    last_refreshed = max(approved_at, key=parse_datetime_sort_key) if approved_at else None
+
+    origins = sorted(
+        {
+            first_present(rate.get("pol"), rate.get("place_of_receipt"), rate.get("origin"))
+            for rate in rates
+            if first_present(rate.get("pol"), rate.get("place_of_receipt"), rate.get("origin"))
+        }
+    )
+    destinations = sorted(
+        {
+            first_present(rate.get("final_destination"), rate.get("pod"))
+            for rate in rates
+            if first_present(rate.get("final_destination"), rate.get("pod"))
+        }
+    )
+    equipment_types = sorted({rate["equipment_type"] for rate in rates if rate.get("equipment_type")})
+    carriers = sorted(
+        {
+            first_present(rate.get("carrier_name"), rate.get("provider_name"))
+            for rate in rates
+            if first_present(rate.get("carrier_name"), rate.get("provider_name"))
+        }
+    )
+    materials = sorted({material for rate in rates for material in rate.get("materials", [])})
+    return {
+        "last_refreshed": last_refreshed,
+        "rates": rates,
+        "filters": {
+            "origins": origins,
+            "destinations": destinations,
+            "equipment_types": equipment_types,
+            "carriers": carriers,
+            "materials": materials,
+            "door_pickups": [],
+        },
+    }
 
 
 def parse_source_by_family(
@@ -360,6 +486,43 @@ def read_json_if_exists(path: Path) -> Any:
 
 def contains_text(value: str | None, search: str) -> bool:
     return search.lower() in (value or "").lower()
+
+
+def infer_materials(
+    commodity: str | None,
+    carrier_key: str | None,
+    source_file_name: str | None,
+    sheet_name: str | None,
+) -> list[str]:
+    text = " ".join(filter(None, [commodity, carrier_key, source_file_name, sheet_name])).lower()
+    materials: list[str] = []
+    if "paper" in text or "peute" in text:
+        materials.append("Paper")
+    if any(token in text for token in ["metal", "scrap", "steel"]):
+        materials.append("Metal")
+    if any(token in text for token in ["tyre", "tire", "rubber"]):
+        materials.append("Tyres")
+    return materials
+
+
+def is_base_charge(charge: RateChargeLine) -> bool:
+    if (charge.charge_type or "").lower() == "base":
+        return True
+    name = (charge.charge_name or "").lower()
+    return "basic ocean freight" in name or name == "ocean freight"
+
+
+def currencies_match(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return True
+    return left.upper() == right.upper()
+
+
+def parse_datetime_sort_key(value: str) -> datetime:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
 
 
 def offer_valid_on(offer: RateOffer, card: RateCard, valid_on: date) -> bool:

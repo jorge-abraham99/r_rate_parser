@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reudan Rate Import</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/ui/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/ui/" aria-label="Reudan Rate Desk home">
+        <span class="logo" aria-hidden="true">R</span>
+        <span class="brand-name">REUDAN <span>Rate Desk</span></span>
+      </a>
+      <nav class="app-nav" aria-label="Main navigation">
+        <a class="active" href="/ui/import.html" aria-current="page">Import</a>
+        <a href="/ui/">Quote</a>
+      </nav>
+      <div id="periodText" class="refresh-text">Loading import period…</div>
+    </header>
+
+    <main class="ingest-main">
+      <div id="importAlert" class="desk-alert" role="status" hidden></div>
+
+      <label id="dropZone" class="rate-dropzone" for="sourceFile">
+        <input id="sourceFile" type="file" accept=".xlsx,.xls,.pdf,.csv" hidden>
+        <span class="dropzone-title">Drop rate sheets here</span>
+        <span class="dropzone-help">.xlsx / .xls / .pdf / .csv · we'll ask who it's from — or <span>browse files</span></span>
+        <span id="dropzoneBusy" class="dropzone-busy" hidden>Parsing sheet…</span>
+      </label>
+
+      <section class="status-board" aria-label="Rate sheet status">
+        <article class="status-card received-card">
+          <h2>✓ In this period · <span id="receivedCount">0</span></h2>
+          <div id="receivedList" class="status-list"><p class="status-empty">Loading…</p></div>
+        </article>
+        <article class="status-card expected-card">
+          <h2>◌ Expected · <span id="expectedCount">0</span></h2>
+          <div id="expectedList" class="status-list"><p class="status-empty">Loading…</p></div>
+        </article>
+        <article id="overdueCard" class="status-card overdue-card">
+          <h2>⚠ Overdue · <span id="overdueCount">0</span></h2>
+          <div id="overdueList" class="status-list"><p class="status-empty">Loading…</p></div>
+        </article>
+      </section>
+
+      <div id="coverageRisk" class="coverage-risk" hidden>
+        <span aria-hidden="true">⚠</span>
+        <p></p>
+      </div>
+
+      <section class="uploads-card" aria-label="Recent uploads">
+        <div class="upload-grid upload-grid-header" aria-hidden="true">
+          <span>File</span><span>Carrier · contract</span><span>Uploaded</span><span class="number">Lanes</span><span>Status</span><span></span>
+        </div>
+        <div id="uploadsList"><div class="uploads-empty">No published sheets yet.</div></div>
+      </section>
+
+      <footer class="import-footnotes">
+        <span>Published sheets feed the Quote tab immediately.</span>
+        <span>Got a corrected sheet? Delete the old upload and drop the new one.</span>
+      </footer>
+    </main>
+  </div>
+
+  <div id="previewModal" class="modal-overlay" hidden>
+    <section class="parse-modal" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+      <header class="parse-modal-header">
+        <h2 id="previewTitle">Review parsed sheet</h2>
+        <span>nothing goes live until you publish</span>
+      </header>
+      <div class="parse-facts">
+        <div class="fact-row"><span>File</span><strong id="previewFile" class="mono"></strong></div>
+        <div class="fact-row carrier-fact">
+          <label for="carrierSelect">Who's this rate from?</label>
+          <div class="carrier-choice">
+            <select id="carrierSelect">
+              <option value="">Select carrier…</option>
+            </select>
+            <input id="newCarrierName" type="text" placeholder="Carrier name" hidden>
+          </div>
+        </div>
+        <div id="parsedFacts" hidden>
+          <div class="fact-row"><span>Validity</span><strong id="previewValidity" class="mono"></strong></div>
+          <div class="fact-row"><span>Lanes parsed</span><strong id="previewLanes"></strong></div>
+        </div>
+      </div>
+
+      <div id="diffSection" class="diff-section" hidden>
+        <h3>vs. previous published sheet</h3>
+        <div class="diff-grid diff-header"><span>Lane</span><span>Previous</span><span>New</span><span>Δ</span></div>
+        <div id="diffRows"></div>
+        <p id="diffSummary" class="diff-summary"></p>
+      </div>
+      <div id="firstSheetNote" class="first-sheet-note" hidden>First sheet from this carrier — nothing to compare against yet.</div>
+
+      <footer class="parse-modal-footer">
+        <button id="publishButton" class="publish-button" type="button" disabled>Publish — rates go live</button>
+        <button id="cancelPreviewButton" class="cancel-button" type="button">Cancel</button>
+        <span id="archiveNote" class="archive-note"></span>
+      </footer>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="/ui/app.js?v=2"></script>
+</body>
+</html>

@@ -1,259 +1,588 @@
-const state = {
+const carrierRoster = [
+  { key: "msc-peute", label: "MSC — PEUTE", carrierName: "MSC", contractTag: "PEUTE", cadence: "weekly", periodDays: 7 },
+  { key: "msc-paper", label: "MSC — PAPER", carrierName: "MSC", contractTag: "PAPER", cadence: "weekly", periodDays: 7 },
+  { key: "cosco", label: "COSCO", carrierName: "COSCO", contractTag: "", cadence: "weekly", periodDays: 7 },
+  { key: "maersk", label: "Maersk", carrierName: "Maersk", contractTag: "", cadence: "monthly", periodDays: 31 },
+  { key: "haulage", label: "UK Haulage", carrierName: "UK Haulage", contractTag: "", cadence: "quarterly", periodDays: 92 },
+];
+
+const importState = {
   imports: [],
-  selectedImport: null,
-  searchResults: [],
+  approvedRates: [],
+  preview: null,
+  busy: false,
+  toastTimer: null,
 };
 
-const importsTableBody = document.getElementById("importsTableBody");
-const detailPane = document.getElementById("detailPane");
-const searchTableBody = document.getElementById("searchTableBody");
-const importAlert = document.getElementById("importAlert");
-const healthText = document.getElementById("healthText");
+const elements = {
+  sourceFile: document.getElementById("sourceFile"),
+  dropZone: document.getElementById("dropZone"),
+  dropzoneBusy: document.getElementById("dropzoneBusy"),
+  importAlert: document.getElementById("importAlert"),
+  periodText: document.getElementById("periodText"),
+  receivedCount: document.getElementById("receivedCount"),
+  receivedList: document.getElementById("receivedList"),
+  expectedCount: document.getElementById("expectedCount"),
+  expectedList: document.getElementById("expectedList"),
+  overdueCount: document.getElementById("overdueCount"),
+  overdueList: document.getElementById("overdueList"),
+  overdueCard: document.getElementById("overdueCard"),
+  coverageRisk: document.getElementById("coverageRisk"),
+  uploadsList: document.getElementById("uploadsList"),
+  previewModal: document.getElementById("previewModal"),
+  previewFile: document.getElementById("previewFile"),
+  carrierSelect: document.getElementById("carrierSelect"),
+  newCarrierName: document.getElementById("newCarrierName"),
+  parsedFacts: document.getElementById("parsedFacts"),
+  previewValidity: document.getElementById("previewValidity"),
+  previewLanes: document.getElementById("previewLanes"),
+  diffSection: document.getElementById("diffSection"),
+  diffRows: document.getElementById("diffRows"),
+  diffSummary: document.getElementById("diffSummary"),
+  firstSheetNote: document.getElementById("firstSheetNote"),
+  archiveNote: document.getElementById("archiveNote"),
+  publishButton: document.getElementById("publishButton"),
+  cancelPreviewButton: document.getElementById("cancelPreviewButton"),
+  toast: document.getElementById("toast"),
+};
 
-document.getElementById("importForm").addEventListener("submit", onImportSubmit);
-document.getElementById("refreshImportsBtn").addEventListener("click", () => loadImports(true));
-document.getElementById("searchForm").addEventListener("submit", onSearchSubmit);
-document.getElementById("clearSearchBtn").addEventListener("click", clearSearch);
+elements.sourceFile.addEventListener("change", () => {
+  const file = elements.sourceFile.files?.[0];
+  if (file) uploadRateSheet(file);
+  elements.sourceFile.value = "";
+});
+elements.dropZone.addEventListener("dragover", (event) => {
+  event.preventDefault();
+  if (!importState.busy) elements.dropZone.classList.add("drag-active");
+});
+elements.dropZone.addEventListener("dragleave", () => elements.dropZone.classList.remove("drag-active"));
+elements.dropZone.addEventListener("drop", (event) => {
+  event.preventDefault();
+  elements.dropZone.classList.remove("drag-active");
+  const file = event.dataTransfer?.files?.[0];
+  if (file && !importState.busy) uploadRateSheet(file);
+});
+elements.carrierSelect.addEventListener("change", () => {
+  if (!importState.preview) return;
+  importState.preview.carrierKey = elements.carrierSelect.value;
+  renderPreview();
+});
+elements.newCarrierName.addEventListener("input", () => {
+  if (!importState.preview) return;
+  importState.preview.newCarrierName = elements.newCarrierName.value;
+  renderPreview();
+});
+elements.publishButton.addEventListener("click", publishPreview);
+elements.cancelPreviewButton.addEventListener("click", cancelPreview);
+elements.previewModal.addEventListener("click", (event) => {
+  if (event.target === elements.previewModal) cancelPreview();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && importState.preview && !importState.busy) cancelPreview();
+});
 
-boot();
+bootImportWorkspace();
 
-async function boot() {
-  await Promise.all([loadHealth(), loadImports(false)]);
+async function bootImportWorkspace() {
+  renderPeriodText();
+  populateCarrierOptions();
+  await refreshWorkspace();
 }
 
-async function loadHealth() {
+async function refreshWorkspace() {
   try {
-    const response = await fetch("/api/health");
-    if (!response.ok) throw new Error("health check failed");
-    const payload = await response.json();
-    healthText.textContent = payload.status === "ok" ? "Local API connected" : "API unhealthy";
+    const [importsResponse, deskResponse] = await Promise.all([
+      fetch("/api/imports?limit=250"),
+      fetch("/api/rate-desk?limit=5000"),
+    ]);
+    if (!importsResponse.ok || !deskResponse.ok) throw new Error("Could not load the import workspace.");
+    importState.imports = await importsResponse.json();
+    const deskPayload = await deskResponse.json();
+    importState.approvedRates = Array.isArray(deskPayload.rates) ? deskPayload.rates : [];
+    renderStatusBoard();
+    renderUploads();
   } catch (error) {
-    healthText.textContent = "Local API unavailable";
-    showAlert(importAlert, `Could not reach the local API: ${error.message}`, "error");
+    showAlert(error.message, true);
   }
 }
 
-async function loadImports(selectNewest) {
-  const response = await fetch("/api/imports?limit=25");
-  const payload = await response.json();
-  state.imports = payload;
-  renderImports();
-  if (selectNewest && payload.length > 0) {
-    await loadImportDetail(payload[0].import_id);
-  } else if (state.selectedImport) {
-    const match = payload.find((item) => item.import_id === state.selectedImport.import_id);
-    if (match) {
-      await loadImportDetail(match.import_id);
+async function uploadRateSheet(file) {
+  hideAlert();
+  setBusy(true);
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("uploaded_by", "Rate Desk operator");
+    const response = await fetch("/api/imports", { method: "POST", body: form });
+    if (!response.ok) {
+      const error = await safeJson(response);
+      throw new Error(error.detail || "The parser could not import this file.");
     }
+    const imported = await response.json();
+    const detailResponse = await fetch(`/api/imports/${encodeURIComponent(imported.import_id)}`);
+    if (!detailResponse.ok) throw new Error("The sheet parsed, but its preview could not be loaded.");
+    importState.preview = {
+      importId: imported.import_id,
+      fileName: file.name,
+      detail: await detailResponse.json(),
+      carrierKey: "",
+      newCarrierName: "",
+    };
+    elements.previewModal.hidden = false;
+    document.body.classList.add("modal-open");
+    renderPreview();
+  } catch (error) {
+    showAlert(error.message, true);
+  } finally {
+    setBusy(false);
   }
 }
 
-function renderImports() {
-  if (!state.imports.length) {
-    importsTableBody.innerHTML = `<tr><td colspan="8" class="empty">No imports yet.</td></tr>`;
-    return;
-  }
-  importsTableBody.innerHTML = state.imports.map((item) => `
-    <tr>
-      <td class="mono">${escapeHtml(item.import_id)}</td>
-      <td>${escapeHtml(item.file_name || "-")}</td>
-      <td><span class="status status-${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>
-      <td>${escapeHtml(item.parser_family || "-")}</td>
-      <td><span class="mono-chip">${escapeHtml(item.template_id || "-")}</span></td>
-      <td>${escapeHtml(String((item.validation_summary || {}).warnings ?? 0))}</td>
-      <td>${formatDateTime(item.created_at)}</td>
-      <td>
-        <button class="btn btn-secondary tiny" data-action="view" data-id="${escapeAttr(item.import_id)}">View</button>
-        ${item.status !== "approved" ? `<button class="btn btn-primary tiny" data-action="approve" data-id="${escapeAttr(item.import_id)}">Approve</button>` : ""}
-        ${item.status !== "rejected" ? `<button class="btn btn-danger tiny" data-action="reject" data-id="${escapeAttr(item.import_id)}">Reject</button>` : ""}
-      </td>
-    </tr>
-  `).join("");
+function populateCarrierOptions() {
+  elements.carrierSelect.innerHTML = [
+    '<option value="">Select carrier…</option>',
+    ...carrierRoster.map((carrier) => `<option value="${escapeAttr(carrier.key)}">${escapeHtml(carrier.label)}</option>`),
+    '<option value="__new">Someone new…</option>',
+  ].join("");
+}
 
-  importsTableBody.querySelectorAll("button[data-action]").forEach((button) => {
-    button.addEventListener("click", onImportActionClick);
+function renderPreview() {
+  const preview = importState.preview;
+  if (!preview) return;
+  const detail = preview.detail;
+  const isNew = preview.carrierKey === "__new";
+  const carrier = carrierRoster.find((item) => item.key === preview.carrierKey);
+  const isSelected = Boolean(carrier || (isNew && preview.newCarrierName.trim()));
+  const validation = detail.validation_report?.summary || {};
+  const errors = Number(validation.errors || 0);
+  const warnings = Number(validation.warnings || 0);
+  const laneCount = uniqueLaneCount(detail.canonical_rates || []);
+
+  elements.previewFile.textContent = preview.fileName;
+  elements.carrierSelect.value = preview.carrierKey;
+  elements.newCarrierName.hidden = !isNew;
+  if (isNew && elements.newCarrierName.value !== preview.newCarrierName) {
+    elements.newCarrierName.value = preview.newCarrierName;
+  }
+  elements.parsedFacts.hidden = !preview.carrierKey;
+  elements.previewValidity.textContent = formatValidity(detail.card?.valid_from, detail.card?.valid_to);
+  elements.previewLanes.innerHTML = `<b>${laneCount}</b> · ${escapeHtml(equipmentSummary(detail))} · <span>${escapeHtml(validationSummary(errors, warnings))}</span>`;
+  elements.publishButton.disabled = !isSelected || errors > 0 || importState.busy;
+
+  const analysis = preview.carrierKey ? buildRateDiff(preview, carrier) : null;
+  elements.diffSection.hidden = !analysis?.rows.length;
+  elements.firstSheetNote.hidden = !preview.carrierKey || Boolean(analysis?.rows.length);
+  elements.archiveNote.textContent = analysis?.hasPrevious ? "previous live sheet will be archived" : "";
+  if (analysis?.rows.length) {
+    elements.diffRows.innerHTML = analysis.rows.map(renderDiffRow).join("");
+    const remaining = Math.max(0, laneCount - analysis.rows.length);
+    elements.diffSummary.textContent = remaining
+      ? `+ ${remaining} more parsed lane${remaining === 1 ? "" : "s"}`
+      : "All comparable lanes shown.";
+  } else if (preview.carrierKey) {
+    elements.firstSheetNote.textContent = analysis?.hasPrevious
+      ? "No matching lanes were found in the previous published sheet."
+      : "First sheet from this carrier — nothing to compare against yet.";
+  }
+}
+
+function buildRateDiff(preview, carrier) {
+  const selectedName = carrier?.carrierName || preview.newCarrierName.trim();
+  const previousRates = importState.approvedRates.filter((rate) => {
+    if (carrier && rate.carrier_key) return rate.carrier_key === carrier.key;
+    return normalized(rate.carrier_name || rate.provider_name) === normalized(selectedName);
   });
-}
+  const previousByLane = new Map();
+  previousRates.forEach((rate) => {
+    const key = laneKey(rateOrigin(rate), rateDestination(rate));
+    if (!previousByLane.has(key)) previousByLane.set(key, rate);
+  });
 
-async function onImportActionClick(event) {
-  const button = event.currentTarget;
-  const action = button.dataset.action;
-  const importId = button.dataset.id;
-  if (action === "view") {
-    await loadImportDetail(importId);
-    return;
-  }
-  if (action === "approve") {
-    const approvedBy = window.prompt("Approve as:", "abraham");
-    if (!approvedBy) return;
-    const response = await fetch(`/api/imports/${encodeURIComponent(importId)}/approve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ approved_by: approvedBy }),
+  const seen = new Set();
+  const rows = [];
+  for (const rate of preview.detail.canonical_rates || []) {
+    const key = laneKey(rate.from_raw, rate.to_raw);
+    if (seen.has(key) || !previousByLane.has(key)) continue;
+    seen.add(key);
+    const previous = previousByLane.get(key);
+    rows.push({
+      lane: `${displayPlace(rate.from_raw)} → ${displayPlace(rate.to_raw)}`,
+      previous: toNumber(previous.base_amount),
+      next: toNumber(rate.amount),
+      currency: rate.currency || previous.base_currency || "USD",
     });
-    await handleMutationResponse(response, `Approved ${importId}`);
-    await loadImports(false);
-    await loadImportDetail(importId);
-    return;
+    if (rows.length === 4) break;
   }
-  if (action === "reject") {
-    const reason = window.prompt("Reject reason:", "needs review");
-    if (!reason) return;
-    const response = await fetch(`/api/imports/${encodeURIComponent(importId)}/reject`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason }),
-    });
-    await handleMutationResponse(response, `Rejected ${importId}`);
-    await loadImports(false);
-    await loadImportDetail(importId);
-  }
+  return { rows, hasPrevious: previousRates.length > 0 };
 }
 
-async function loadImportDetail(importId) {
-  const response = await fetch(`/api/imports/${encodeURIComponent(importId)}`);
-  if (!response.ok) {
-    const error = await safeJson(response);
-    detailPane.innerHTML = `<div class="alert alert-error">${escapeHtml(error.detail || "Could not load import detail.")}</div>`;
-    return;
-  }
-  state.selectedImport = await response.json();
-  renderImportDetail();
-}
-
-function renderImportDetail() {
-  const detail = state.selectedImport;
-  if (!detail) {
-    detailPane.innerHTML = `<div class="empty">Select an import to inspect it.</div>`;
-    return;
-  }
-  const canonicalRows = (detail.canonical_rates || []).slice(0, 12).map((row) => `
-    <tr>
-      <td>${escapeHtml(row.from_raw || "-")}</td>
-      <td>${escapeHtml(row.to_raw || "-")}</td>
-      <td class="mono">${escapeHtml(String(row.amount ?? "-"))}</td>
-      <td>${escapeHtml(row.currency || "-")}</td>
-      <td>${escapeHtml(row.valid_from || "-")}</td>
-      <td>${escapeHtml(row.valid_to || "-")}</td>
-    </tr>
-  `).join("");
-  const summary = detail.summary || {};
-  detailPane.innerHTML = `
-    <div class="split">
-      <div>
-        <div class="alert alert-info" style="margin-bottom:14px">
-          <b>${escapeHtml(detail.source?.file_name || detail.import_id)}</b><br>
-          Status: <span class="status status-${escapeHtml(detail.rate_import.status)}">${escapeHtml(detail.rate_import.status)}</span>
-          <span class="muted"> · parser ${escapeHtml(detail.rate_import.parser_family || "-")} · template ${escapeHtml(detail.rate_import.template_id || "-")}</span>
-        </div>
-        <table>
-          <tbody>
-            <tr><th>Offers</th><td>${escapeHtml(String(summary.rate_offers ?? 0))}</td></tr>
-            <tr><th>Charge lines</th><td>${escapeHtml(String(summary.charge_lines ?? 0))}</td></tr>
-            <tr><th>Notes</th><td>${escapeHtml(String(summary.notes ?? 0))}</td></tr>
-            <tr><th>Canonical rows</th><td>${escapeHtml(String(summary.canonical_rates ?? 0))}</td></tr>
-            <tr><th>Warnings</th><td>${escapeHtml(String((detail.validation_report?.summary || {}).warnings ?? 0))}</td></tr>
-            <tr><th>Errors</th><td>${escapeHtml(String((detail.validation_report?.summary || {}).errors ?? 0))}</td></tr>
-          </tbody>
-        </table>
-        <div style="margin-top:16px">
-          <h3 style="margin:0 0 8px;font-size:12px;color:#16273b">Canonical Preview</h3>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr><th>From</th><th>To</th><th>Amount</th><th>Curr.</th><th>From</th><th>To</th></tr>
-              </thead>
-              <tbody>
-                ${canonicalRows || `<tr><td colspan="6" class="empty">No canonical rows.</td></tr>`}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-      <div>
-        <h3 style="margin:0 0 8px;font-size:12px;color:#16273b">Review Markdown</h3>
-        <div class="pre">${escapeHtml(detail.review_markdown || "No review markdown found.")}</div>
-      </div>
+function renderDiffRow(row) {
+  const delta = row.previous == null || row.next == null ? null : row.next - row.previous;
+  const deltaClass = delta == null || delta === 0 ? "neutral" : delta > 0 ? "increase" : "decrease";
+  const deltaLabel = delta == null || delta === 0
+    ? "—"
+    : delta > 0
+      ? `+${formatNumber(delta)} ▲`
+      : `−${formatNumber(Math.abs(delta))} ▼`;
+  return `
+    <div class="diff-grid diff-row">
+      <span>${escapeHtml(row.lane)}</span>
+      <span>${escapeHtml(formatMoney(row.previous, row.currency))}</span>
+      <span>${escapeHtml(formatMoney(row.next, row.currency))}</span>
+      <span class="${deltaClass}">${escapeHtml(deltaLabel)}</span>
     </div>
   `;
 }
 
-async function onImportSubmit(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const formData = new FormData(form);
-  const response = await fetch("/api/imports", { method: "POST", body: formData });
-  if (!response.ok) {
-    const error = await safeJson(response);
-    showAlert(importAlert, error.detail || "Import failed.", "error");
+async function publishPreview() {
+  const preview = importState.preview;
+  if (!preview || elements.publishButton.disabled) return;
+  const isNew = preview.carrierKey === "__new";
+  const carrier = carrierRoster.find((item) => item.key === preview.carrierKey);
+  const carrierName = isNew ? preview.newCarrierName.trim() : carrier.carrierName;
+  const carrierLabel = isNew ? carrierName : carrier.label;
+  const carrierKey = isNew ? `custom-${slugify(carrierName)}` : carrier.key;
+  setBusy(true);
+  try {
+    const response = await fetch(`/api/imports/${encodeURIComponent(preview.importId)}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        approved_by: "Rate Desk operator",
+        carrier_name: carrierName,
+        carrier_key: carrierKey,
+        carrier_label: carrierLabel,
+        contract_tag: carrier?.contractTag || null,
+      }),
+    });
+    if (!response.ok) {
+      const error = await safeJson(response);
+      throw new Error(error.detail || "The rates could not be published.");
+    }
+    const lanes = uniqueLaneCount(preview.detail.canonical_rates || []);
+    closePreviewImmediately();
+    showToast(`${carrierLabel} published — ${lanes} lane${lanes === 1 ? "" : "s"} live in Quote`);
+    await refreshWorkspace();
+  } catch (error) {
+    showAlert(error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function cancelPreview() {
+  const preview = importState.preview;
+  if (!preview || importState.busy) return;
+  closePreviewImmediately();
+  try {
+    await fetch(`/api/imports/${encodeURIComponent(preview.importId)}`, { method: "DELETE" });
+  } finally {
+    await refreshWorkspace();
+  }
+}
+
+function closePreviewImmediately() {
+  importState.preview = null;
+  elements.previewModal.hidden = true;
+  document.body.classList.remove("modal-open");
+  elements.carrierSelect.value = "";
+  elements.newCarrierName.value = "";
+  elements.newCarrierName.hidden = true;
+}
+
+function renderStatusBoard() {
+  const received = [];
+  const expected = [];
+  const overdue = [];
+  carrierRoster.forEach((carrier) => {
+    const matches = importState.imports
+      .filter((item) => inferCarrierKey(item) === carrier.key && ["approved", "archived"].includes(item.status))
+      .sort((left, right) => dateValue(right.approved_at || right.created_at) - dateValue(left.approved_at || left.created_at));
+    const live = matches.find((item) => item.status === "approved");
+    if (live && isCurrentPeriod(live, carrier.periodDays)) {
+      received.push({ carrier, item: live });
+      return;
+    }
+    if (matches.length && isOverdue(matches[0], carrier.periodDays)) {
+      overdue.push({ carrier, item: matches[0] });
+      return;
+    }
+    expected.push({ carrier, item: matches[0] || null });
+  });
+
+  elements.receivedCount.textContent = received.length;
+  elements.expectedCount.textContent = expected.length;
+  elements.overdueCount.textContent = overdue.length;
+  elements.receivedList.innerHTML = received.length
+    ? received.map(({ carrier, item }) => `
+        <div class="status-received-row">
+          <strong>${escapeHtml(carrier.label)}</strong>
+          <span class="mono">${escapeHtml(shortDateTime(item.approved_at || item.created_at))} · ${escapeHtml(item.approved_by || item.uploaded_by || "operator")}</span>
+        </div>`).join("")
+    : '<p class="status-empty">Nothing received yet.</p>';
+  elements.expectedList.innerHTML = expected.length
+    ? expected.map(({ carrier, item }) => `
+        <div class="status-item">
+          <strong>${escapeHtml(carrier.label)}${dueSoon(item) ? '<span class="due-chip">due in 2 days</span>' : ""}</strong>
+          <span>${escapeHtml(expectedLabel(carrier, item))}</span>
+        </div>`).join("")
+    : '<p class="status-empty">Nothing outstanding.</p>';
+  elements.overdueList.innerHTML = overdue.length
+    ? overdue.map(({ carrier, item }) => `
+        <div class="status-item">
+          <strong>${escapeHtml(carrier.label)} <small>· ${daysLate(item, carrier.periodDays)} days late</small></strong>
+          <span>${escapeHtml(overdueLabel(item))}</span>
+        </div>`).join("")
+    : '<p class="status-empty">No one is late.</p>';
+  elements.overdueCard.classList.toggle("has-overdue", overdue.length > 0);
+  renderCoverageRisk(overdue);
+}
+
+function renderCoverageRisk(overdue) {
+  if (!overdue.length) {
+    elements.coverageRisk.hidden = true;
     return;
   }
-  const payload = await response.json();
-  showAlert(importAlert, `Import created: ${payload.import_id}`, "info");
-  form.reset();
-  await loadImports(true);
+  const names = formatList(overdue.map(({ carrier }) => carrier.label));
+  elements.coverageRisk.querySelector("p").innerHTML = `<b>Coverage at risk:</b> ${escapeHtml(names)} ${overdue.length === 1 ? "is" : "are"} overdue. Quote coverage may be incomplete until the new sheet${overdue.length === 1 ? " is" : "s are"} published.`;
+  elements.coverageRisk.hidden = false;
 }
 
-async function onSearchSubmit(event) {
-  event.preventDefault();
-  const params = new URLSearchParams();
-  const fieldIds = ["providerName", "carrierName", "pol", "pod", "equipmentType", "validOn"];
-  const queryNames = {
-    providerName: "provider_name",
-    carrierName: "carrier_name",
-    pol: "pol",
-    pod: "pod",
-    equipmentType: "equipment_type",
-    validOn: "valid_on",
-  };
-  fieldIds.forEach((id) => {
-    const value = document.getElementById(id).value.trim();
-    if (value) params.set(queryNames[id], value);
-  });
-  params.set("limit", "100");
-  const response = await fetch(`/api/search?${params.toString()}`);
-  state.searchResults = await response.json();
-  renderSearchResults();
-}
-
-function clearSearch() {
-  ["providerName", "carrierName", "pol", "pod", "equipmentType", "validOn"].forEach((id) => {
-    document.getElementById(id).value = "";
-  });
-  state.searchResults = [];
-  renderSearchResults();
-}
-
-function renderSearchResults() {
-  if (!state.searchResults.length) {
-    searchTableBody.innerHTML = `<tr><td colspan="8" class="empty">No approved offers matched the current search.</td></tr>`;
+function renderUploads() {
+  const visible = importState.imports
+    .filter((item) => ["approved", "archived"].includes(item.status))
+    .slice(0, 15);
+  if (!visible.length) {
+    elements.uploadsList.innerHTML = '<div class="uploads-empty">No published sheets yet.</div>';
     return;
   }
-  searchTableBody.innerHTML = state.searchResults.map((row) => `
-    <tr>
-      <td><b>${escapeHtml(row.carrier_name || row.provider_name || "-")}</b><div class="tiny muted">${escapeHtml(row.provider_name || "-")}</div></td>
-      <td>${escapeHtml(row.pol || row.place_of_receipt || "-")}</td>
-      <td>${escapeHtml(row.pod || row.final_destination || "-")}</td>
-      <td>${escapeHtml(row.equipment_type || "-")}</td>
-      <td class="mono">${escapeHtml(formatMoney(row.base_amount, row.base_currency))}</td>
-      <td class="mono">${escapeHtml(formatMoney(row.all_in_amount, row.base_currency))}</td>
-      <td>${escapeHtml(compactValidity(row.valid_from, row.valid_to))}</td>
-      <td><span class="mono-chip">${escapeHtml(row.raw_sheet_name || "-")}</span><div class="tiny muted">${escapeHtml(row.raw_row_reference || "-")}</div></td>
-    </tr>
+  elements.uploadsList.innerHTML = visible.map((item) => `
+    <div class="upload-grid upload-row">
+      <span class="upload-file mono" title="${escapeAttr(item.file_name || "")}">${escapeHtml(item.file_name || "Unknown file")}</span>
+      <strong>${escapeHtml(importCarrierLabel(item))}</strong>
+      <span class="upload-when">${escapeHtml(shortDateTime(item.approved_at || item.created_at))}</span>
+      <span class="upload-lanes mono">${escapeHtml(String(item.lane_count ?? 0))}</span>
+      <span><span class="live-chip${item.status === "archived" ? " archived" : ""}">${item.status === "archived" ? "archived" : "live"}</span></span>
+      <button class="delete-upload" type="button" data-import-id="${escapeAttr(item.import_id)}" data-file-name="${escapeAttr(item.file_name || "this file")}" title="Delete — re-upload a corrected file" aria-label="Delete ${escapeAttr(item.file_name || "upload")}">×</button>
+    </div>
   `).join("");
+  elements.uploadsList.querySelectorAll("button[data-import-id]").forEach((button) => {
+    button.addEventListener("click", () => deleteUpload(button.dataset.importId, button.dataset.fileName));
+  });
 }
 
-async function handleMutationResponse(response, successMessage) {
+async function deleteUpload(importId, fileName) {
+  if (!window.confirm(`Delete ${fileName}? Its published rates will be removed from Quote.`)) return;
+  const response = await fetch(`/api/imports/${encodeURIComponent(importId)}`, { method: "DELETE" });
   if (!response.ok) {
     const error = await safeJson(response);
-    window.alert(error.detail || "Action failed.");
+    showAlert(error.detail || "The upload could not be deleted.", true);
     return;
   }
-  window.alert(successMessage);
+  showToast(`${fileName} deleted — drop the corrected sheet when ready`);
+  await refreshWorkspace();
 }
 
-function showAlert(container, message, tone) {
-  container.innerHTML = `<div class="alert alert-${tone === "error" ? "error" : "info"}">${escapeHtml(message)}</div>`;
+function setBusy(value) {
+  importState.busy = value;
+  elements.dropZone.classList.toggle("is-busy", value);
+  elements.dropzoneBusy.hidden = !value;
+  elements.sourceFile.disabled = value;
+  if (value) elements.publishButton.disabled = true;
+  else if (importState.preview) renderPreview();
+}
+
+function renderPeriodText() {
+  const now = new Date();
+  elements.periodText.textContent = `Week ${isoWeek(now)} · ${now.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}`;
+}
+
+function showAlert(message, isError = false) {
+  elements.importAlert.textContent = message;
+  elements.importAlert.classList.toggle("error", isError);
+  elements.importAlert.hidden = false;
+}
+
+function hideAlert() {
+  elements.importAlert.hidden = true;
+  elements.importAlert.textContent = "";
+  elements.importAlert.classList.remove("error");
+}
+
+function showToast(message) {
+  clearTimeout(importState.toastTimer);
+  elements.toast.textContent = message;
+  elements.toast.hidden = false;
+  importState.toastTimer = setTimeout(() => {
+    elements.toast.hidden = true;
+  }, 3200);
+}
+
+function uniqueLaneCount(rates) {
+  return new Set(rates.map((rate) => laneKey(rate.from_raw, rate.to_raw))).size;
+}
+
+function equipmentSummary(detail) {
+  const equipment = [...new Set((detail.offers_preview || []).map((offer) => offer.equipment_type).filter(Boolean))];
+  return equipment.length ? equipment.map(formatEquipment).join(" / ") : "container rates";
+}
+
+function validationSummary(errors, warnings) {
+  if (errors) return `${errors} blocking error${errors === 1 ? "" : "s"}`;
+  return `${warnings} parser warning${warnings === 1 ? "" : "s"}`;
+}
+
+function formatValidity(from, to) {
+  if (!from && !to) return "No validity dates found";
+  return `${formatDate(from) || "open"} → ${formatDate(to) || "open"}`;
+}
+
+function isCurrentPeriod(item, periodDays) {
+  const today = startOfToday();
+  const validTo = parseDate(item.valid_to);
+  if (validTo) return validTo >= today;
+  const approved = new Date(item.approved_at || item.created_at || 0);
+  return Number.isFinite(approved.getTime()) && (today - approved) / 86400000 <= periodDays;
+}
+
+function isOverdue(item, periodDays) {
+  const validTo = parseDate(item.valid_to);
+  if (validTo) return validTo < startOfToday();
+  const approved = new Date(item.approved_at || item.created_at || 0);
+  return Number.isFinite(approved.getTime()) && (startOfToday() - approved) / 86400000 > periodDays;
+}
+
+function daysLate(item, periodDays) {
+  const validTo = parseDate(item.valid_to);
+  if (validTo) return Math.max(1, Math.floor((startOfToday() - validTo) / 86400000));
+  const approved = new Date(item.approved_at || item.created_at || 0);
+  return Math.max(1, Math.floor((startOfToday() - approved) / 86400000 - periodDays));
+}
+
+function dueSoon(item) {
+  const validTo = parseDate(item?.valid_to);
+  if (!validTo) return false;
+  const days = Math.ceil((validTo - startOfToday()) / 86400000);
+  return days >= 0 && days <= 2;
+}
+
+function expectedLabel(carrier, item) {
+  if (item?.valid_to) return `${carrier.cadence} · current sheet valid to ${formatDate(item.valid_to)}`;
+  return `${carrier.cadence} · waiting for this period's sheet`;
+}
+
+function overdueLabel(item) {
+  return item.valid_to ? `previous sheet expired ${formatDate(item.valid_to)}` : "latest sheet is outside its expected cadence";
+}
+
+function inferCarrierKey(item) {
+  if (item.carrier_key) return item.carrier_key;
+  const text = normalized([item.file_name, item.template_id, item.carrier_name, item.carrier_label].filter(Boolean).join(" "));
+  if (text.includes("MSC") && text.includes("PAPER")) return "msc-paper";
+  if (text.includes("MSC")) return "msc-peute";
+  if (text.includes("COSCO")) return "cosco";
+  if (text.includes("MAERSK")) return "maersk";
+  if (text.includes("HAUL")) return "haulage";
+  return "";
+}
+
+function importCarrierLabel(item) {
+  if (item.carrier_label) return item.carrier_label;
+  const rosterItem = carrierRoster.find((carrier) => carrier.key === inferCarrierKey(item));
+  return rosterItem?.label || item.carrier_name || "Unknown carrier";
+}
+
+function rateOrigin(rate) {
+  return rate.pol || rate.place_of_receipt || rate.origin || "";
+}
+
+function rateDestination(rate) {
+  return rate.final_destination || rate.pod || "";
+}
+
+function laneKey(origin, destination) {
+  return `${normalized(origin)}|${normalized(destination)}`;
+}
+
+function shortDateTime(value) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "date unknown";
+  return date.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function dateValue(value) {
+  const date = new Date(value || "");
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function formatDate(value) {
+  const date = parseDate(value);
+  return date ? date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
+}
+
+function parseDate(value) {
+  if (!value) return null;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function startOfToday() {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function isoWeek(date) {
+  const copy = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  copy.setUTCDate(copy.getUTCDate() + 4 - (copy.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(copy.getUTCFullYear(), 0, 1));
+  return Math.ceil((((copy - yearStart) / 86400000) + 1) / 7);
+}
+
+function formatEquipment(value) {
+  const equipment = normalized(value).replaceAll(" ", "");
+  if (["40HC", "40HDRY", "40HCDRY", "FEU"].includes(equipment)) return "40′ HC";
+  if (["40", "40DRY", "40DV"].includes(equipment)) return "40′";
+  if (["20", "20DRY", "20DV", "TEU"].includes(equipment)) return "20′";
+  return value;
+}
+
+function displayPlace(value) {
+  const text = String(value || "").trim();
+  if (!text || text !== text.toUpperCase()) return text;
+  return text.toLowerCase().replace(/[a-z]+/g, (word) => word[0].toUpperCase() + word.slice(1));
+}
+
+function formatMoney(value, currency) {
+  const number = toNumber(value);
+  if (number == null) return "—";
+  const symbols = { USD: "$", GBP: "£", EUR: "€" };
+  const code = String(currency || "USD").toUpperCase();
+  return `${symbols[code] || `${code} `}${formatNumber(number)}`;
+}
+
+function formatNumber(value) {
+  return Number(value).toLocaleString("en-GB", { maximumFractionDigits: 2 });
+}
+
+function formatList(values) {
+  if (values.length <= 1) return values[0] || "";
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
+}
+
+function slugify(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "carrier";
+}
+
+function normalized(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function toNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 async function safeJson(response) {
@@ -262,27 +591,6 @@ async function safeJson(response) {
   } catch (error) {
     return {};
   }
-}
-
-function formatMoney(value, currency) {
-  if (value === null || value === undefined || value === "") return "-";
-  const number = Number(value);
-  if (Number.isNaN(number)) return `${value} ${currency || ""}`.trim();
-  return `${currency || "USD"} ${number.toLocaleString("en-US")}`;
-}
-
-function compactValidity(validFrom, validTo) {
-  if (validFrom && validTo) return `${validFrom} to ${validTo}`;
-  if (validTo) return `to ${validTo}`;
-  if (validFrom) return `from ${validFrom}`;
-  return "-";
-}
-
-function formatDateTime(value) {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
 }
 
 function escapeHtml(value) {

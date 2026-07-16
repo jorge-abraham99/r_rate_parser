@@ -6,7 +6,7 @@ import pandas as pd
 
 from rate_ingest.config import Settings
 from rate_ingest.models import CanonicalRate, RateCard, RateChargeLine, RateImport, RateNote, RateOffer
-from rate_ingest.utils import append_csv_rows, read_csv_rows
+from rate_ingest.utils import append_csv_rows, read_csv_rows, write_csv_rows
 
 
 def warehouse_paths(settings: Settings) -> dict[str, Path]:
@@ -58,6 +58,67 @@ def publish_approved_rows(
     append_csv_rows(paths["charges"], [charge.model_dump(mode="json") for charge in charges])
     append_csv_rows(paths["notes"], [note.model_dump(mode="json") for note in notes])
     append_csv_rows(paths["canonical_rates"], [rate.model_dump(mode="json") for rate in canonical_rates])
+
+
+def remove_import_rows(settings: Settings, import_id: str, *, remove_import_record: bool = False) -> None:
+    """Remove the warehouse rows published by one import and rebuild canonical rates."""
+    paths = warehouse_paths(settings)
+    cards = read_csv_rows(paths["cards"])
+    removed_card_ids = {row.get("id") for row in cards if row.get("rate_import_id") == import_id}
+    kept_cards = [row for row in cards if row.get("rate_import_id") != import_id]
+
+    offers = read_csv_rows(paths["offers"])
+    removed_offer_ids = {row.get("id") for row in offers if row.get("rate_card_id") in removed_card_ids}
+    kept_offers = [row for row in offers if row.get("rate_card_id") not in removed_card_ids]
+    kept_charges = [
+        row for row in read_csv_rows(paths["charges"])
+        if row.get("rate_offer_id") not in removed_offer_ids
+    ]
+    kept_notes = [
+        row for row in read_csv_rows(paths["notes"])
+        if row.get("rate_card_id") not in removed_card_ids and row.get("rate_offer_id") not in removed_offer_ids
+    ]
+
+    write_csv_rows(paths["cards"], kept_cards)
+    write_csv_rows(paths["offers"], kept_offers)
+    write_csv_rows(paths["charges"], kept_charges)
+    write_csv_rows(paths["notes"], kept_notes)
+    write_csv_rows(paths["canonical_rates"], rebuild_canonical_rows(kept_cards, kept_offers))
+
+    if remove_import_record:
+        imports = [row for row in read_csv_rows(paths["imports"]) if row.get("id") != import_id]
+        write_csv_rows(paths["imports"], imports)
+
+
+def rebuild_canonical_rows(cards: list[dict[str, str]], offers: list[dict[str, str]]) -> list[dict[str, object]]:
+    cards_by_id = {row.get("id"): row for row in cards}
+    canonical_rows: list[dict[str, object]] = []
+    for offer in offers:
+        card = cards_by_id.get(offer.get("rate_card_id"))
+        if not card or not offer.get("base_amount"):
+            continue
+        from_raw = first_value(offer.get("place_of_receipt"), offer.get("origin"), offer.get("pol"))
+        to_raw = first_value(offer.get("final_destination"), offer.get("pod"))
+        if not from_raw or not to_raw:
+            continue
+        document_type = card.get("document_type") or "unknown"
+        canonical_rows.append(
+            {
+                "rate_type": "ocean" if document_type.startswith("ocean") else document_type,
+                "from_raw": from_raw,
+                "to_raw": to_raw,
+                "amount": float(offer["base_amount"]),
+                "currency": offer.get("base_currency") or card.get("currency_default"),
+                "unit": "per_container",
+                "valid_from": offer.get("valid_from") or card.get("valid_from"),
+                "valid_to": offer.get("valid_to") or card.get("valid_to"),
+            }
+        )
+    return canonical_rows
+
+
+def first_value(*values: str | None) -> str | None:
+    return next((value for value in values if value), None)
 
 
 def search_offers(
