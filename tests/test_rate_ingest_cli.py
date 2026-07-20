@@ -201,7 +201,7 @@ def test_api_import_approve_and_search_flow(tmp_path: Path, monkeypatch):
     assert import_ui_response.status_code == 200
     assert "Drop rate sheets here" in import_ui_response.text
     assert "Review parsed sheet" in import_ui_response.text
-    assert "Who's this rate from?" in import_ui_response.text
+    assert "Which sheet is this?" in import_ui_response.text
 
     replacement_response = api_client.post(
         "/api/imports",

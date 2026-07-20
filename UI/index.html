@@ -23,7 +23,7 @@
       <div id="refreshText" class="refresh-text">Loading approved rates…</div>
     </header>
 
-    <section class="search-band" aria-label="Rate search">
+    <section class="quote-search-band" aria-label="Rate search">
       <div class="lookup-field">
         <label for="originSelect">Origin port (POL)</label>
         <select id="originSelect" disabled>
@@ -31,40 +31,41 @@
         </select>
       </div>
       <div class="route-arrow" aria-hidden="true">→</div>
-      <div class="lookup-field lookup-field-destination">
+      <div class="lookup-field quote-destination">
         <label for="destinationSelect">Destination port (POD)</label>
         <select id="destinationSelect" disabled>
           <option>Loading…</option>
         </select>
       </div>
-      <div class="lookup-field lookup-field-size">
+      <div class="lookup-field quote-size">
         <label for="equipmentSelect">Container size</label>
         <select id="equipmentSelect" disabled>
           <option>Loading…</option>
         </select>
       </div>
-      <div class="lookup-field lookup-field-material">
+      <div class="lookup-field quote-qty">
+        <label for="qtyInput">Containers</label>
+        <input id="qtyInput" type="number" min="1" max="999" value="1" inputmode="numeric">
+      </div>
+      <div class="lookup-field quote-material">
         <label for="materialSelect">Material</label>
-        <select id="materialSelect">
-          <option value="">All materials</option>
-          <option value="Paper">Paper</option>
-          <option value="Metal">Metal</option>
-          <option value="Tyres">Tyres</option>
+        <select id="materialSelect" disabled>
+          <option>Loading…</option>
+        </select>
+      </div>
+      <div class="lookup-field quote-door secondary">
+        <label for="doorSelect">Door pickup <span>(optional)</span></label>
+        <select id="doorSelect" disabled>
+          <option>No haulage rates imported</option>
         </select>
       </div>
       <label class="expired-toggle" for="showExpiredToggle">
         <input id="showExpiredToggle" type="checkbox">
         <span>Show expired rates</span>
       </label>
-      <div class="lookup-field lookup-field-door secondary">
-        <label for="doorSelect">Door pickup <span>(optional)</span></label>
-        <select id="doorSelect" disabled>
-          <option value="">No haulage rates imported</option>
-        </select>
-      </div>
     </section>
 
-    <main class="rate-desk-main">
+    <main class="quote-main">
       <div id="deskAlert" class="desk-alert" role="status" hidden></div>
 
       <div class="results-heading">
@@ -73,37 +74,34 @@
         <span id="doorChip" class="door-chip" hidden></span>
       </div>
 
-      <section class="rate-table-card" aria-label="Ranked rates">
-        <div class="rate-grid rate-grid-header" aria-hidden="true">
+      <section class="quote-card" aria-label="Ranked rates">
+        <div class="quote-grid quote-grid-header" aria-hidden="true">
           <span>#</span>
-          <span>Carrier</span>
-          <span>Lane</span>
+          <span>Rate</span>
           <span>Source</span>
-          <span class="number">Base</span>
-          <span class="number">Haulage</span>
-          <span class="number">THC</span>
-          <span class="number">Docs</span>
-          <span class="number">Surch.</span>
-          <span class="number">All-in / ctn</span>
+          <span>Transit</span>
+          <span class="number">Origin</span>
+          <span class="number">Freight</span>
+          <span class="number">Destination</span>
+          <span class="number">All-in USD</span>
           <span>Validity</span>
         </div>
         <div id="rateRows">
           <div class="rate-empty">Loading approved rates…</div>
         </div>
-        <div id="coverageGap" class="coverage-gap" hidden>
+        <div id="quoteFooterStrip" class="quote-footer-strip">
           <span aria-hidden="true"></span>
-          <p></p>
+          <p>Origin / Freight / Destination grouping is derived from approved charge lines. Maersk sheets are the most complete today.</p>
         </div>
       </section>
 
-      <footer class="rate-footnotes">
-        <span>Figures are per container and shown in the source rate currency.</span>
-      <span>Only currently valid, published rates are ranked.</span>
-        <span>Click a row for the parsed charge breakdown.</span>
+      <footer class="quote-footnotes">
+        <span id="figuresNote">Origin / Freight / Destination columns are USD equivalents per container.</span>
+        <span>Click a row for the full charge-by-charge breakdown in sheet currency.</span>
       </footer>
     </main>
   </div>
 
-  <script src="/ui/rate-desk.js?v=7"></script>
+  <script src="/ui/rate-desk.js?v=8"></script>
 </body>
 </html>

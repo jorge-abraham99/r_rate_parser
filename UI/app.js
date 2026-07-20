@@ -1,10 +1,32 @@
-const carrierRoster = [
-  { key: "msc-peute", label: "MSC — PEUTE", carrierName: "MSC", contractTag: "PEUTE", cadence: "weekly", periodDays: 7 },
-  { key: "msc-paper", label: "MSC — PAPER", carrierName: "MSC", contractTag: "PAPER", cadence: "weekly", periodDays: 7 },
-  { key: "cosco", label: "COSCO", carrierName: "COSCO", contractTag: "", cadence: "weekly", periodDays: 7 },
-  { key: "maersk", label: "Maersk", carrierName: "Maersk", contractTag: "", cadence: "monthly", periodDays: 31 },
-  { key: "haulage", label: "UK Haulage", carrierName: "UK Haulage", contractTag: "", cadence: "quarterly", periodDays: 92 },
+const TRACKED_CARRIERS = [
+  {
+    key: "maersk-contract",
+    label: "Maersk — Contract",
+    carrierName: "Maersk",
+    carrierLabel: "Maersk · Contract",
+    contractTag: "CONTRACT",
+    cadence: "monthly",
+    periodDays: 31,
+  },
+  {
+    key: "maersk-spot",
+    label: "Maersk — Spot",
+    carrierName: "Maersk",
+    carrierLabel: "Maersk · Spot",
+    contractTag: "SPOT",
+    cadence: "weekly",
+    periodDays: 7,
+  },
 ];
+
+const ONBOARDING_CARRIERS = [
+  { key: "msc-peute", label: "MSC — PEUTE", carrierName: "MSC", carrierLabel: "MSC — PEUTE", contractTag: "PEUTE" },
+  { key: "msc-paper", label: "MSC — PAPER", carrierName: "MSC", carrierLabel: "MSC — PAPER", contractTag: "PAPER" },
+  { key: "cosco", label: "COSCO", carrierName: "COSCO", carrierLabel: "COSCO", contractTag: "" },
+  { key: "haulage", label: "UK Haulage", carrierName: "UK Haulage", carrierLabel: "UK Haulage", contractTag: "" },
+];
+
+const ALL_CARRIERS = [...TRACKED_CARRIERS, ...ONBOARDING_CARRIERS];
 
 const importState = {
   imports: [],
@@ -27,6 +49,7 @@ const elements = {
   overdueCount: document.getElementById("overdueCount"),
   overdueList: document.getElementById("overdueList"),
   overdueCard: document.getElementById("overdueCard"),
+  onboardingQueue: document.getElementById("onboardingQueue"),
   coverageRisk: document.getElementById("coverageRisk"),
   uploadsList: document.getElementById("uploadsList"),
   previewModal: document.getElementById("previewModal"),
@@ -36,7 +59,16 @@ const elements = {
   parsedFacts: document.getElementById("parsedFacts"),
   previewValidity: document.getElementById("previewValidity"),
   previewLanes: document.getElementById("previewLanes"),
+  mapSection: document.getElementById("mapSection"),
+  previewMapOrigin: document.getElementById("previewMapOrigin"),
+  previewMapFreight: document.getElementById("previewMapFreight"),
+  previewMapDestination: document.getElementById("previewMapDestination"),
+  previewMapUnmatched: document.getElementById("previewMapUnmatched"),
+  previewMapUnmatchedChip: document.getElementById("previewMapUnmatchedChip"),
+  previewMapNote: document.getElementById("previewMapNote"),
   diffSection: document.getElementById("diffSection"),
+  diffTitle: document.getElementById("diffTitle"),
+  diffPreviousLabel: document.getElementById("diffPreviousLabel"),
   diffRows: document.getElementById("diffRows"),
   diffSummary: document.getElementById("diffSummary"),
   firstSheetNote: document.getElementById("firstSheetNote"),
@@ -51,32 +83,42 @@ elements.sourceFile.addEventListener("change", () => {
   if (file) uploadRateSheet(file);
   elements.sourceFile.value = "";
 });
+
 elements.dropZone.addEventListener("dragover", (event) => {
   event.preventDefault();
   if (!importState.busy) elements.dropZone.classList.add("drag-active");
 });
-elements.dropZone.addEventListener("dragleave", () => elements.dropZone.classList.remove("drag-active"));
+
+elements.dropZone.addEventListener("dragleave", () => {
+  elements.dropZone.classList.remove("drag-active");
+});
+
 elements.dropZone.addEventListener("drop", (event) => {
   event.preventDefault();
   elements.dropZone.classList.remove("drag-active");
   const file = event.dataTransfer?.files?.[0];
   if (file && !importState.busy) uploadRateSheet(file);
 });
+
 elements.carrierSelect.addEventListener("change", () => {
   if (!importState.preview) return;
   importState.preview.carrierKey = elements.carrierSelect.value;
   renderPreview();
 });
+
 elements.newCarrierName.addEventListener("input", () => {
   if (!importState.preview) return;
   importState.preview.newCarrierName = elements.newCarrierName.value;
   renderPreview();
 });
+
 elements.publishButton.addEventListener("click", publishPreview);
 elements.cancelPreviewButton.addEventListener("click", cancelPreview);
+
 elements.previewModal.addEventListener("click", (event) => {
   if (event.target === elements.previewModal) cancelPreview();
 });
+
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && importState.preview && !importState.busy) cancelPreview();
 });
@@ -86,6 +128,7 @@ bootImportWorkspace();
 async function bootImportWorkspace() {
   renderPeriodText();
   populateCarrierOptions();
+  renderOnboardingQueue();
   await refreshWorkspace();
 }
 
@@ -101,9 +144,25 @@ async function refreshWorkspace() {
     importState.approvedRates = Array.isArray(deskPayload.rates) ? deskPayload.rates : [];
     renderStatusBoard();
     renderUploads();
+    hideAlert();
   } catch (error) {
     showAlert(error.message, true);
   }
+}
+
+function populateCarrierOptions() {
+  elements.carrierSelect.innerHTML = [
+    '<option value="">Select…</option>',
+    ...ALL_CARRIERS.map((carrier) => `<option value="${escapeAttr(carrier.key)}">${escapeHtml(carrier.label)}</option>`),
+    '<option value="__new">Another source…</option>',
+  ].join("");
+}
+
+function renderOnboardingQueue() {
+  elements.onboardingQueue.innerHTML = ONBOARDING_CARRIERS.map((carrier) => {
+    const hasImport = importState.imports.some((item) => inferCarrierKey(item) === carrier.key);
+    return `<span class="onboarding-chip${hasImport ? " live" : ""}">${escapeHtml(carrier.label)}</span>`;
+  }).join("");
 }
 
 async function uploadRateSheet(file) {
@@ -138,82 +197,148 @@ async function uploadRateSheet(file) {
   }
 }
 
-function populateCarrierOptions() {
-  elements.carrierSelect.innerHTML = [
-    '<option value="">Select carrier…</option>',
-    ...carrierRoster.map((carrier) => `<option value="${escapeAttr(carrier.key)}">${escapeHtml(carrier.label)}</option>`),
-    '<option value="__new">Someone new…</option>',
-  ].join("");
-}
-
 function renderPreview() {
   const preview = importState.preview;
   if (!preview) return;
+
   const detail = preview.detail;
   const isNew = preview.carrierKey === "__new";
-  const carrier = carrierRoster.find((item) => item.key === preview.carrierKey);
-  const isSelected = Boolean(carrier || (isNew && preview.newCarrierName.trim()));
+  const carrier = ALL_CARRIERS.find((item) => item.key === preview.carrierKey);
   const validation = detail.validation_report?.summary || {};
   const errors = Number(validation.errors || 0);
   const warnings = Number(validation.warnings || 0);
   const laneCount = uniqueLaneCount(detail.canonical_rates || []);
+  const mapping = buildChargeClassification(detail);
+  const canPublish = Boolean(
+    (carrier || (isNew && preview.newCarrierName.trim()))
+    && errors === 0
+    && !importState.busy
+  );
 
   elements.previewFile.textContent = preview.fileName;
   elements.carrierSelect.value = preview.carrierKey;
   elements.newCarrierName.hidden = !isNew;
-  if (isNew && elements.newCarrierName.value !== preview.newCarrierName) {
+  if (elements.newCarrierName.value !== preview.newCarrierName) {
     elements.newCarrierName.value = preview.newCarrierName;
   }
   elements.parsedFacts.hidden = !preview.carrierKey;
   elements.previewValidity.textContent = formatValidity(detail.card?.valid_from, detail.card?.valid_to);
   elements.previewLanes.innerHTML = `<b>${laneCount}</b> · ${escapeHtml(equipmentSummary(detail))} · <span>${escapeHtml(validationSummary(errors, warnings))}</span>`;
-  elements.publishButton.disabled = !isSelected || errors > 0 || importState.busy;
 
-  const analysis = preview.carrierKey ? buildRateDiff(preview, carrier) : null;
-  elements.diffSection.hidden = !analysis?.rows.length;
-  elements.firstSheetNote.hidden = !preview.carrierKey || Boolean(analysis?.rows.length);
-  elements.archiveNote.textContent = analysis?.hasPrevious ? "previous live sheet will be archived" : "";
-  if (analysis?.rows.length) {
-    elements.diffRows.innerHTML = analysis.rows.map(renderDiffRow).join("");
-    const remaining = Math.max(0, laneCount - analysis.rows.length);
-    elements.diffSummary.textContent = remaining
-      ? `+ ${remaining} more parsed lane${remaining === 1 ? "" : "s"}`
-      : "All comparable lanes shown.";
-  } else if (preview.carrierKey) {
-    elements.firstSheetNote.textContent = analysis?.hasPrevious
-      ? "No matching lanes were found in the previous published sheet."
-      : "First sheet from this carrier — nothing to compare against yet.";
+  elements.mapSection.hidden = !preview.carrierKey;
+  elements.previewMapOrigin.textContent = mapping.origin;
+  elements.previewMapFreight.textContent = mapping.freight;
+  elements.previewMapDestination.textContent = mapping.destination;
+  elements.previewMapUnmatched.textContent = mapping.unmatched;
+  elements.previewMapUnmatchedChip.className = `map-chip ${mapping.unmatched > 0 ? "warn" : "ok"}`;
+  elements.previewMapNote.textContent = mapping.note;
+
+  const diff = preview.carrierKey ? buildRateDiff(preview, carrier) : null;
+  elements.diffSection.hidden = !diff?.rows.length;
+  if (diff?.rows.length) {
+    elements.diffTitle.textContent = `All-in USD vs. previous live sheet (${diff.previousLabel})`;
+    elements.diffPreviousLabel.textContent = diff.previousLabel;
+    elements.diffRows.innerHTML = diff.rows.map(renderDiffRow).join("");
+    elements.diffSummary.textContent = diff.summary;
+  } else {
+    elements.diffRows.innerHTML = "";
+    elements.diffSummary.textContent = "";
   }
+
+  elements.firstSheetNote.hidden = !(preview.carrierKey && (!diff || !diff.rows.length));
+  if (!elements.firstSheetNote.hidden) {
+    if (isNew) {
+      elements.firstSheetNote.textContent = "New source — its charges will need mapping to Origin / Freight / Destination before rates can go live cleanly.";
+    } else if (diff?.hasPrevious) {
+      elements.firstSheetNote.textContent = "No matching lanes were found in the previous published sheet.";
+    } else {
+      elements.firstSheetNote.textContent = "First sheet from this source — nothing to compare against yet.";
+    }
+  }
+
+  elements.archiveNote.textContent = diff?.hasCurrentLive ? "previous live sheet will be archived" : "";
+  elements.publishButton.disabled = !canPublish;
+}
+
+function buildChargeClassification(detail) {
+  const charges = Array.isArray(detail.charges_preview) ? detail.charges_preview : [];
+  const counts = { origin: 0, freight: 0, destination: 0, unmatched: 0 };
+  charges.forEach((charge) => {
+    const bucket = bucketForCharge(charge);
+    if (bucket === "origin") counts.origin += 1;
+    else if (bucket === "freight") counts.freight += 1;
+    else if (bucket === "destination") counts.destination += 1;
+    else counts.unmatched += 1;
+  });
+  return {
+    ...counts,
+    note: counts.unmatched > 0
+      ? "Some charge lines are still heuristic and need manual review before this becomes fully trustworthy."
+      : "All visible charge lines were classified into Origin / Freight / Destination buckets.",
+  };
+}
+
+function bucketForCharge(charge) {
+  const name = normalized(charge.charge_name);
+  const type = normalized(charge.charge_type);
+  if (type === "base" || name.includes("ocean freight") || name.includes("bunker") || name.includes("emission")) return "freight";
+  if (name.includes("origin") || name.includes("export") || name.includes("haulage") || name.includes("intermodal") || name.includes("pickup")) return "origin";
+  if (name.includes("destination") || name.includes("import") || name.includes("terminal handling") || name.includes("documentation") || name.includes("container protect") || name.includes("thc") || name.includes("delivery")) return "destination";
+  if (name.includes("doc")) return "destination";
+  return "freight";
 }
 
 function buildRateDiff(preview, carrier) {
   const selectedName = carrier?.carrierName || preview.newCarrierName.trim();
+  const selectedKey = carrier?.key || `custom-${slugify(selectedName)}`;
+  const previousImports = importState.imports
+    .filter((item) => item.import_id !== preview.importId && ["approved", "archived"].includes(item.status))
+    .filter((item) => inferCarrierKey(item) === selectedKey || normalized(item.carrier_name || item.carrier_label) === normalized(selectedName))
+    .sort((left, right) => dateValue(right.approved_at || right.created_at) - dateValue(left.approved_at || left.created_at));
+  const currentLive = previousImports.find((item) => item.status === "approved") || null;
+
   const previousRates = importState.approvedRates.filter((rate) => {
-    if (carrier && rate.carrier_key) return rate.carrier_key === carrier.key;
+    if (currentLive && currentLive.carrier_key) return rate.carrier_key === currentLive.carrier_key;
+    if (carrier?.key) return rate.carrier_key === carrier.key;
     return normalized(rate.carrier_name || rate.provider_name) === normalized(selectedName);
   });
+
   const previousByLane = new Map();
   previousRates.forEach((rate) => {
     const key = laneKey(rateOrigin(rate), rateDestination(rate));
     if (!previousByLane.has(key)) previousByLane.set(key, rate);
   });
 
-  const seen = new Set();
   const rows = [];
+  const seen = new Set();
   for (const rate of preview.detail.canonical_rates || []) {
     const key = laneKey(rate.from_raw, rate.to_raw);
-    if (seen.has(key) || !previousByLane.has(key)) continue;
+    if (seen.has(key)) continue;
     seen.add(key);
     const previous = previousByLane.get(key);
+    if (!previous) continue;
     rows.push({
       lane: `${displayPlace(rate.from_raw)} → ${displayPlace(rate.to_raw)}`,
-      previous: toNumber(previous.base_amount),
+      previous: toNumber(previous.all_in_amount ?? previous.base_amount),
       next: toNumber(rate.amount),
       currency: rate.currency || previous.base_currency || "USD",
     });
     if (rows.length === 4) break;
   }
-  return { rows, hasPrevious: previousRates.length > 0 };
+
+  const previousLabel = currentLive?.contract_tag || currentLive?.carrier_label || (carrier?.contractTag || "prev");
+  const remaining = Math.max(0, uniqueLaneCount(preview.detail.canonical_rates || []) - rows.length);
+  return {
+    rows,
+    previousLabel,
+    hasPrevious: previousImports.length > 0,
+    hasCurrentLive: Boolean(currentLive),
+    summary: rows.length
+      ? remaining
+        ? `+ ${remaining} more parsed lane${remaining === 1 ? "" : "s"}`
+        : "All comparable lanes shown."
+      : "",
+  };
 }
 
 function renderDiffRow(row) {
@@ -222,14 +347,14 @@ function renderDiffRow(row) {
   const deltaLabel = delta == null || delta === 0
     ? "—"
     : delta > 0
-      ? `+${formatNumber(delta)} ▲`
-      : `−${formatNumber(Math.abs(delta))} ▼`;
+      ? `+${formatNumber(delta)}`
+      : `−${formatNumber(Math.abs(delta))}`;
   return `
     <div class="diff-grid diff-row">
       <span>${escapeHtml(row.lane)}</span>
-      <span>${escapeHtml(formatMoney(row.previous, row.currency))}</span>
-      <span>${escapeHtml(formatMoney(row.next, row.currency))}</span>
-      <span class="${deltaClass}">${escapeHtml(deltaLabel)}</span>
+      <span>${escapeHtml(formatUsd(row.previous))}</span>
+      <span>${escapeHtml(formatUsd(row.next))}</span>
+      <span class="diff-delta ${deltaClass}">${escapeHtml(deltaLabel)}</span>
     </div>
   `;
 }
@@ -237,11 +362,14 @@ function renderDiffRow(row) {
 async function publishPreview() {
   const preview = importState.preview;
   if (!preview || elements.publishButton.disabled) return;
+
   const isNew = preview.carrierKey === "__new";
-  const carrier = carrierRoster.find((item) => item.key === preview.carrierKey);
+  const carrier = ALL_CARRIERS.find((item) => item.key === preview.carrierKey);
   const carrierName = isNew ? preview.newCarrierName.trim() : carrier.carrierName;
-  const carrierLabel = isNew ? carrierName : carrier.label;
+  const carrierLabel = isNew ? carrierName : carrier.carrierLabel;
   const carrierKey = isNew ? `custom-${slugify(carrierName)}` : carrier.key;
+  const contractTag = isNew ? "" : carrier.contractTag;
+
   setBusy(true);
   try {
     const response = await fetch(`/api/imports/${encodeURIComponent(preview.importId)}/approve`, {
@@ -252,7 +380,7 @@ async function publishPreview() {
         carrier_name: carrierName,
         carrier_key: carrierKey,
         carrier_label: carrierLabel,
-        contract_tag: carrier?.contractTag || null,
+        contract_tag: contractTag || null,
       }),
     });
     if (!response.ok) {
@@ -294,13 +422,14 @@ function renderStatusBoard() {
   const received = [];
   const expected = [];
   const overdue = [];
-  carrierRoster.forEach((carrier) => {
+
+  TRACKED_CARRIERS.forEach((carrier) => {
     const matches = importState.imports
       .filter((item) => inferCarrierKey(item) === carrier.key && ["approved", "archived"].includes(item.status))
       .sort((left, right) => dateValue(right.approved_at || right.created_at) - dateValue(left.approved_at || left.created_at));
-    const live = matches.find((item) => item.status === "approved");
-    if (live && isCurrentPeriod(live, carrier.periodDays)) {
-      received.push({ carrier, item: live });
+    const latestApproved = matches.find((item) => item.status === "approved") || null;
+    if (latestApproved && isCurrentPeriod(latestApproved, carrier.periodDays)) {
+      received.push({ carrier, item: latestApproved });
       return;
     }
     if (matches.length && isOverdue(matches[0], carrier.periodDays)) {
@@ -313,13 +442,15 @@ function renderStatusBoard() {
   elements.receivedCount.textContent = received.length;
   elements.expectedCount.textContent = expected.length;
   elements.overdueCount.textContent = overdue.length;
+
   elements.receivedList.innerHTML = received.length
     ? received.map(({ carrier, item }) => `
         <div class="status-received-row">
           <strong>${escapeHtml(carrier.label)}</strong>
           <span class="mono">${escapeHtml(shortDateTime(item.approved_at || item.created_at))} · ${escapeHtml(item.approved_by || item.uploaded_by || "operator")}</span>
         </div>`).join("")
-    : '<p class="status-empty">Nothing received yet.</p>';
+    : '<p class="status-empty">Nothing in yet.</p>';
+
   elements.expectedList.innerHTML = expected.length
     ? expected.map(({ carrier, item }) => `
         <div class="status-item">
@@ -327,6 +458,7 @@ function renderStatusBoard() {
           <span>${escapeHtml(expectedLabel(carrier, item))}</span>
         </div>`).join("")
     : '<p class="status-empty">Nothing outstanding.</p>';
+
   elements.overdueList.innerHTML = overdue.length
     ? overdue.map(({ carrier, item }) => `
         <div class="status-item">
@@ -334,8 +466,10 @@ function renderStatusBoard() {
           <span>${escapeHtml(overdueLabel(item))}</span>
         </div>`).join("")
     : '<p class="status-empty">No one is late.</p>';
+
   elements.overdueCard.classList.toggle("has-overdue", overdue.length > 0);
   renderCoverageRisk(overdue);
+  renderOnboardingQueue();
 }
 
 function renderCoverageRisk(overdue) {
@@ -351,238 +485,246 @@ function renderCoverageRisk(overdue) {
 function renderUploads() {
   const visible = importState.imports
     .filter((item) => ["approved", "archived"].includes(item.status))
-    .slice(0, 15);
+    .slice(0, 20);
+
   if (!visible.length) {
     elements.uploadsList.innerHTML = '<div class="uploads-empty">No published sheets yet.</div>';
     return;
   }
-  elements.uploadsList.innerHTML = visible.map((item) => `
-    <div class="upload-grid upload-row">
-      <span class="upload-file mono" title="${escapeAttr(item.file_name || "")}">${escapeHtml(item.file_name || "Unknown file")}</span>
-      <strong>${escapeHtml(importCarrierLabel(item))}</strong>
-      <span class="upload-when">${escapeHtml(shortDateTime(item.approved_at || item.created_at))}</span>
-      <span class="upload-lanes mono">${escapeHtml(String(item.lane_count ?? 0))}</span>
-      <span><span class="live-chip${item.status === "archived" ? " archived" : ""}">${item.status === "archived" ? "archived" : "live"}</span></span>
-      <button class="delete-upload" type="button" data-import-id="${escapeAttr(item.import_id)}" data-file-name="${escapeAttr(item.file_name || "this file")}" title="Delete — re-upload a corrected file" aria-label="Delete ${escapeAttr(item.file_name || "upload")}">×</button>
-    </div>
-  `).join("");
+
+  elements.uploadsList.innerHTML = visible.map((item) => {
+    const mapping = mappingSummaryForImport(item);
+    const statusClass = item.status === "approved" ? "live" : "archived";
+    return `
+      <div class="uploads-grid upload-row">
+        <span class="upload-file">${escapeHtml(item.file_name || "file")}</span>
+        <span class="upload-source">${escapeHtml(item.carrier_label || item.carrier_name || item.carrier_key || "Source")}</span>
+        <span class="upload-time">${escapeHtml(shortDateTime(item.approved_at || item.created_at))}</span>
+        <span class="upload-lanes">${escapeHtml(String(item.lane_count || 0))}</span>
+        <span class="upload-mapped">${escapeHtml(mapping)}</span>
+        <span><span class="upload-status ${statusClass}">${escapeHtml(item.status === "approved" ? "live" : "archived")}</span></span>
+        <button class="upload-delete" type="button" data-import-id="${escapeAttr(item.import_id)}" title="Delete upload">×</button>
+      </div>
+    `;
+  }).join("");
+
   elements.uploadsList.querySelectorAll("button[data-import-id]").forEach((button) => {
-    button.addEventListener("click", () => deleteUpload(button.dataset.importId, button.dataset.fileName));
+    button.addEventListener("click", async () => {
+      const importId = button.dataset.importId;
+      await deleteImport(importId);
+    });
   });
 }
 
-async function deleteUpload(importId, fileName) {
-  if (!window.confirm(`Delete ${fileName}? Its published rates will be removed from Quote.`)) return;
-  const response = await fetch(`/api/imports/${encodeURIComponent(importId)}`, { method: "DELETE" });
-  if (!response.ok) {
-    const error = await safeJson(response);
-    showAlert(error.detail || "The upload could not be deleted.", true);
-    return;
+async function deleteImport(importId) {
+  if (!window.confirm("Delete this upload and remove its published rows?")) return;
+  try {
+    const response = await fetch(`/api/imports/${encodeURIComponent(importId)}`, { method: "DELETE" });
+    if (!response.ok) {
+      const error = await safeJson(response);
+      throw new Error(error.detail || "The upload could not be deleted.");
+    }
+    showToast("Upload deleted — drop the corrected sheet when ready");
+    await refreshWorkspace();
+  } catch (error) {
+    showAlert(error.message, true);
   }
-  showToast(`${fileName} deleted — drop the corrected sheet when ready`);
-  await refreshWorkspace();
 }
 
-function setBusy(value) {
-  importState.busy = value;
-  elements.dropZone.classList.toggle("is-busy", value);
-  elements.dropzoneBusy.hidden = !value;
-  elements.sourceFile.disabled = value;
-  if (value) elements.publishButton.disabled = true;
-  else if (importState.preview) renderPreview();
+function mappingSummaryForImport(item) {
+  const warnings = Number(item.validation_summary?.warnings || 0);
+  if (!warnings) return "mapped";
+  return `mapped · ${warnings} warning${warnings === 1 ? "" : "s"}`;
 }
 
 function renderPeriodText() {
   const now = new Date();
-  elements.periodText.textContent = `Week ${isoWeek(now)} · ${now.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}`;
+  const week = isoWeek(now);
+  elements.periodText.textContent = `Week ${week} · ${now.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}`;
 }
 
-function showAlert(message, isError = false) {
-  elements.importAlert.textContent = message;
-  elements.importAlert.classList.toggle("error", isError);
+function setBusy(value) {
+  importState.busy = value;
+  elements.dropzoneBusy.hidden = !value;
+  elements.publishButton.disabled = value || elements.publishButton.disabled;
+}
+
+function showAlert(message, error = false) {
   elements.importAlert.hidden = false;
+  elements.importAlert.className = `desk-alert${error ? " error" : ""}`;
+  elements.importAlert.textContent = message;
 }
 
 function hideAlert() {
   elements.importAlert.hidden = true;
-  elements.importAlert.textContent = "";
-  elements.importAlert.classList.remove("error");
 }
 
 function showToast(message) {
-  clearTimeout(importState.toastTimer);
   elements.toast.textContent = message;
   elements.toast.hidden = false;
+  clearTimeout(importState.toastTimer);
   importState.toastTimer = setTimeout(() => {
     elements.toast.hidden = true;
   }, 3200);
 }
 
-function uniqueLaneCount(rates) {
-  return new Set(rates.map((rate) => laneKey(rate.from_raw, rate.to_raw))).size;
-}
-
-function equipmentSummary(detail) {
-  const equipment = [...new Set((detail.offers_preview || []).map((offer) => offer.equipment_type).filter(Boolean))];
-  return equipment.length ? equipment.map(formatEquipment).join(" / ") : "container rates";
-}
-
-function validationSummary(errors, warnings) {
-  if (errors) return `${errors} blocking error${errors === 1 ? "" : "s"}`;
-  return `${warnings} parser warning${warnings === 1 ? "" : "s"}`;
-}
-
-function formatValidity(from, to) {
-  if (!from && !to) return "No validity dates found";
-  return `${formatDate(from) || "open"} → ${formatDate(to) || "open"}`;
-}
-
-function isCurrentPeriod(item, periodDays) {
-  const today = startOfToday();
-  const validTo = parseDate(item.valid_to);
-  if (validTo) return validTo >= today;
-  const approved = new Date(item.approved_at || item.created_at || 0);
-  return Number.isFinite(approved.getTime()) && (today - approved) / 86400000 <= periodDays;
-}
-
-function isOverdue(item, periodDays) {
-  const validTo = parseDate(item.valid_to);
-  if (validTo) return validTo < startOfToday();
-  const approved = new Date(item.approved_at || item.created_at || 0);
-  return Number.isFinite(approved.getTime()) && (startOfToday() - approved) / 86400000 > periodDays;
-}
-
-function daysLate(item, periodDays) {
-  const validTo = parseDate(item.valid_to);
-  if (validTo) return Math.max(1, Math.floor((startOfToday() - validTo) / 86400000));
-  const approved = new Date(item.approved_at || item.created_at || 0);
-  return Math.max(1, Math.floor((startOfToday() - approved) / 86400000 - periodDays));
-}
-
-function dueSoon(item) {
-  const validTo = parseDate(item?.valid_to);
-  if (!validTo) return false;
-  const days = Math.ceil((validTo - startOfToday()) / 86400000);
-  return days >= 0 && days <= 2;
-}
-
-function expectedLabel(carrier, item) {
-  if (item?.valid_to) return `${carrier.cadence} · current sheet valid to ${formatDate(item.valid_to)}`;
-  return `${carrier.cadence} · waiting for this period's sheet`;
-}
-
-function overdueLabel(item) {
-  return item.valid_to ? `previous sheet expired ${formatDate(item.valid_to)}` : "latest sheet is outside its expected cadence";
-}
-
 function inferCarrierKey(item) {
   if (item.carrier_key) return item.carrier_key;
-  const text = normalized([item.file_name, item.template_id, item.carrier_name, item.carrier_label].filter(Boolean).join(" "));
-  if (text.includes("MSC") && text.includes("PAPER")) return "msc-paper";
-  if (text.includes("MSC")) return "msc-peute";
-  if (text.includes("COSCO")) return "cosco";
-  if (text.includes("MAERSK")) return "maersk";
-  if (text.includes("HAUL")) return "haulage";
+  const text = `${item.carrier_label || ""} ${item.carrier_name || ""} ${item.file_name || ""}`.toLowerCase();
+  if (text.includes("spot")) return "maersk-spot";
+  if (text.includes("maersk")) return "maersk-contract";
+  if (text.includes("peute")) return "msc-peute";
+  if (text.includes("paper")) return "msc-paper";
+  if (text.includes("cosco")) return "cosco";
+  if (text.includes("haulage")) return "haulage";
   return "";
 }
 
-function importCarrierLabel(item) {
-  if (item.carrier_label) return item.carrier_label;
-  const rosterItem = carrierRoster.find((carrier) => carrier.key === inferCarrierKey(item));
-  return rosterItem?.label || item.carrier_name || "Unknown carrier";
+function uniqueLaneCount(rows) {
+  return new Set((rows || []).map((row) => laneKey(row.from_raw, row.to_raw))).size;
 }
 
-function rateOrigin(rate) {
-  return rate.pol || rate.place_of_receipt || rate.origin || "";
-}
-
-function rateDestination(rate) {
-  return rate.final_destination || rate.pod || "";
-}
-
-function laneKey(origin, destination) {
-  return `${normalized(origin)}|${normalized(destination)}`;
-}
-
-function shortDateTime(value) {
-  const date = new Date(value || "");
-  if (Number.isNaN(date.getTime())) return "date unknown";
-  return date.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-}
-
-function dateValue(value) {
-  const date = new Date(value || "");
-  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
-}
-
-function formatDate(value) {
-  const date = parseDate(value);
-  return date ? date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
-}
-
-function parseDate(value) {
-  if (!value) return null;
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function startOfToday() {
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
-
-function isoWeek(date) {
-  const copy = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  copy.setUTCDate(copy.getUTCDate() + 4 - (copy.getUTCDay() || 7));
-  const yearStart = new Date(Date.UTC(copy.getUTCFullYear(), 0, 1));
-  return Math.ceil((((copy - yearStart) / 86400000) + 1) / 7);
-}
-
-function formatEquipment(value) {
-  const equipment = normalized(value).replaceAll(" ", "");
-  if (["40HC", "40HDRY", "40HCDRY", "FEU"].includes(equipment)) return "40′ HC";
-  if (["40", "40DRY", "40DV"].includes(equipment)) return "40′";
-  if (["20", "20DRY", "20DV", "TEU"].includes(equipment)) return "20′";
-  return value;
+function laneKey(fromRaw, toRaw) {
+  return `${normalized(fromRaw)}::${normalized(toRaw)}`;
 }
 
 function displayPlace(value) {
-  const text = String(value || "").trim();
-  if (!text || text !== text.toUpperCase()) return text;
-  return text.toLowerCase().replace(/[a-z]+/g, (word) => word[0].toUpperCase() + word.slice(1));
+  if (!value) return "—";
+  return String(value)
+    .replace(/\bGB([A-Z]{3,4})\b/g, (_, code) => code)
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function formatMoney(value, currency) {
+function rateOrigin(rate) {
+  return firstPresent(rate.pol, rate.place_of_receipt, rate.origin);
+}
+
+function rateDestination(rate) {
+  return firstPresent(rate.final_destination, rate.pod);
+}
+
+function firstPresent(...values) {
+  return values.find((value) => value) || "";
+}
+
+function formatValidity(validFrom, validTo) {
+  if (validFrom && validTo) return `${validFrom} → ${validTo}`;
+  if (validTo) return `to ${validTo}`;
+  if (validFrom) return `from ${validFrom}`;
+  return "open-ended";
+}
+
+function validationSummary(errors, warnings) {
+  if (errors > 0) return `${errors} error${errors === 1 ? "" : "s"} · ${warnings} warning${warnings === 1 ? "" : "s"}`;
+  if (warnings > 0) return `${warnings} warning${warnings === 1 ? "" : "s"}`;
+  return "no validation warnings";
+}
+
+function equipmentSummary(detail) {
+  const offers = detail.offers_preview || [];
+  const equipment = unique(offers.map((offer) => offer.equipment_type).filter(Boolean));
+  return equipment.length ? equipment.join(" / ") : "equipment not detected";
+}
+
+function expectedLabel(carrier, item) {
+  if (!item) return `${carrier.cadence} source not received yet`;
+  return `${carrier.cadence} · last approved ${shortDateTime(item.approved_at || item.created_at)}`;
+}
+
+function overdueLabel(item) {
+  return `last approved ${shortDateTime(item.approved_at || item.created_at)}`;
+}
+
+function isCurrentPeriod(item, periodDays) {
+  const value = dateValue(item.approved_at || item.created_at);
+  if (!value) return false;
+  return (Date.now() - value.getTime()) / 86400000 <= periodDays;
+}
+
+function isOverdue(item, periodDays) {
+  const value = dateValue(item.approved_at || item.created_at);
+  if (!value) return false;
+  return (Date.now() - value.getTime()) / 86400000 > periodDays;
+}
+
+function dueSoon(item) {
+  if (!item) return false;
+  const value = dateValue(item.approved_at || item.created_at);
+  if (!value) return false;
+  const days = (Date.now() - value.getTime()) / 86400000;
+  return days >= 5 && days < 7;
+}
+
+function daysLate(item, periodDays) {
+  const value = dateValue(item.approved_at || item.created_at);
+  if (!value) return 0;
+  return Math.max(0, Math.round((Date.now() - value.getTime()) / 86400000 - periodDays));
+}
+
+function dateValue(value) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function shortDateTime(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value || "—";
+  return parsed.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function formatUsd(value) {
   const number = toNumber(value);
   if (number == null) return "—";
-  const symbols = { USD: "$", GBP: "£", EUR: "€" };
-  const code = String(currency || "USD").toUpperCase();
-  return `${symbols[code] || `${code} `}${formatNumber(number)}`;
+  return `$${Math.round(number).toLocaleString("en-US")}`;
 }
 
 function formatNumber(value) {
-  return Number(value).toLocaleString("en-GB", { maximumFractionDigits: 2 });
-}
-
-function formatList(values) {
-  if (values.length <= 1) return values[0] || "";
-  if (values.length === 2) return `${values[0]} and ${values[1]}`;
-  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
-}
-
-function slugify(value) {
-  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "carrier";
+  const number = toNumber(value);
+  if (number == null) return "0";
+  if (Number.isInteger(number)) return number.toLocaleString("en-US");
+  return number.toFixed(2);
 }
 
 function normalized(value) {
-  return String(value || "").trim().toUpperCase();
+  return String(value || "").trim().toLowerCase();
+}
+
+function slugify(value) {
+  return normalized(value).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "source";
+}
+
+function unique(values) {
+  const seen = new Set();
+  return values.filter((value) => {
+    const key = normalized(value);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function formatList(values) {
+  if (!values.length) return "";
+  if (values.length === 1) return values[0];
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
 }
 
 function toNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
-  return Number.isFinite(number) ? number : null;
+  return Number.isNaN(number) ? null : number;
+}
+
+function isoWeek(date) {
+  const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNr = (target.getUTCDay() + 6) % 7;
+  target.setUTCDate(target.getUTCDate() - dayNr + 3);
+  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
+  const firstDayNr = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNr + 3);
+  return 1 + Math.round((target - firstThursday) / 604800000);
 }
 
 async function safeJson(response) {

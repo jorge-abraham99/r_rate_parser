@@ -23,13 +23,13 @@
       <div id="periodText" class="refresh-text">Loading import period…</div>
     </header>
 
-    <main class="ingest-main">
+    <main class="import-main">
       <div id="importAlert" class="desk-alert" role="status" hidden></div>
 
-      <label id="dropZone" class="rate-dropzone" for="sourceFile">
-        <input id="sourceFile" type="file" accept=".xlsx,.xls,.pdf,.csv" hidden>
+      <label id="dropZone" class="dropzone" for="sourceFile">
+        <input id="sourceFile" type="file" accept=".xlsx,.xls,.eml,.csv,.pdf" hidden>
         <span class="dropzone-title">Drop rate sheets here</span>
-        <span class="dropzone-help">.xlsx / .xls / .pdf / .csv · we'll ask who it's from — or <span>browse files</span></span>
+        <span class="dropzone-help">contract / spot / matrix / email · .xlsx / .xls / .eml — or <span>browse files</span></span>
         <span id="dropzoneBusy" class="dropzone-busy" hidden>Parsing sheet…</span>
       </label>
 
@@ -48,16 +48,30 @@
         </article>
       </section>
 
+      <div class="onboarding-strip">
+        <span class="onboarding-label">Onboarding queue</span>
+        <div id="onboardingQueue" class="onboarding-chips"></div>
+        <span class="onboarding-note">Origin / Freight / Destination classification is Maersk-first today while we harden the broader parser set.</span>
+      </div>
+
       <div id="coverageRisk" class="coverage-risk" hidden>
         <span aria-hidden="true">⚠</span>
         <p></p>
       </div>
 
       <section class="uploads-card" aria-label="Recent uploads">
-        <div class="upload-grid upload-grid-header" aria-hidden="true">
-          <span>File</span><span>Carrier · contract</span><span>Uploaded</span><span class="number">Lanes</span><span>Status</span><span></span>
+        <div class="uploads-grid uploads-grid-header" aria-hidden="true">
+          <span>File</span>
+          <span>Source · product</span>
+          <span>Uploaded</span>
+          <span class="number">Lanes</span>
+          <span>Charges mapped</span>
+          <span>Status</span>
+          <span></span>
         </div>
-        <div id="uploadsList"><div class="uploads-empty">No published sheets yet.</div></div>
+        <div id="uploadsList">
+          <div class="uploads-empty">No published sheets yet.</div>
+        </div>
       </section>
 
       <footer class="import-footnotes">
@@ -73,30 +87,57 @@
         <h2 id="previewTitle">Review parsed sheet</h2>
         <span>nothing goes live until you publish</span>
       </header>
+
       <div class="parse-facts">
-        <div class="fact-row"><span>File</span><strong id="previewFile" class="mono"></strong></div>
+        <div class="fact-row">
+          <span>File</span>
+          <strong id="previewFile" class="mono"></strong>
+        </div>
         <div class="fact-row carrier-fact">
-          <label for="carrierSelect">Who's this rate from?</label>
+          <label for="carrierSelect">Which sheet is this?</label>
           <div class="carrier-choice">
             <select id="carrierSelect">
-              <option value="">Select carrier…</option>
+              <option value="">Select…</option>
             </select>
-            <input id="newCarrierName" type="text" placeholder="Carrier name" hidden>
+            <input id="newCarrierName" type="text" placeholder="Source name" hidden>
           </div>
         </div>
         <div id="parsedFacts" hidden>
-          <div class="fact-row"><span>Validity</span><strong id="previewValidity" class="mono"></strong></div>
-          <div class="fact-row"><span>Lanes parsed</span><strong id="previewLanes"></strong></div>
+          <div class="fact-row">
+            <span>Validity</span>
+            <strong id="previewValidity" class="mono"></strong>
+          </div>
+          <div class="fact-row">
+            <span>Lanes parsed</span>
+            <strong id="previewLanes"></strong>
+          </div>
         </div>
       </div>
 
-      <div id="diffSection" class="diff-section" hidden>
-        <h3>vs. previous published sheet</h3>
-        <div class="diff-grid diff-header"><span>Lane</span><span>Previous</span><span>New</span><span>Δ</span></div>
-        <div id="diffRows"></div>
-        <p id="diffSummary" class="diff-summary"></p>
+      <div id="mapSection" class="modal-section" hidden>
+        <div class="section-title">Charge classification</div>
+        <div class="map-chips">
+          <span class="map-chip"><b id="previewMapOrigin">0</b> origin</span>
+          <span class="map-chip"><b id="previewMapFreight">0</b> freight</span>
+          <span class="map-chip"><b id="previewMapDestination">0</b> destination</span>
+          <span id="previewMapUnmatchedChip" class="map-chip warn"><b id="previewMapUnmatched">0</b> unmatched</span>
+        </div>
+        <div id="previewMapNote" class="modal-note"></div>
       </div>
-      <div id="firstSheetNote" class="first-sheet-note" hidden>First sheet from this carrier — nothing to compare against yet.</div>
+
+      <div id="diffSection" class="modal-section" hidden>
+        <div class="section-title" id="diffTitle">All-in vs. previous live sheet</div>
+        <div class="diff-grid diff-grid-header">
+          <span>Lane</span>
+          <span id="diffPreviousLabel">prev</span>
+          <span>new</span>
+          <span>Δ</span>
+        </div>
+        <div id="diffRows"></div>
+        <div id="diffSummary" class="modal-note"></div>
+      </div>
+
+      <div id="firstSheetNote" class="first-sheet-note" hidden></div>
 
       <footer class="parse-modal-footer">
         <button id="publishButton" class="publish-button" type="button" disabled>Publish — rates go live</button>
@@ -107,6 +148,6 @@
   </div>
 
   <div id="toast" class="toast" role="status" hidden></div>
-  <script src="/ui/app.js?v=2"></script>
+  <script src="/ui/app.js?v=3"></script>
 </body>
 </html>
