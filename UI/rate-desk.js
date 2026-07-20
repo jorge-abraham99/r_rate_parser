@@ -13,6 +13,9 @@ const EQUIPMENT_OPTIONS = [
 ];
 
 const MATERIAL_OPTIONS = ["All materials", "Paper", "Metal", "Tyres"];
+const ANY_ORIGIN = "__any_origin__";
+const ANY_DESTINATION = "__any_destination__";
+const ANY_EQUIPMENT = "__any_equipment__";
 
 const deskState = {
   rates: [],
@@ -98,21 +101,25 @@ function populateFilters() {
     originSelect,
     deskState.filters.origins,
     "No approved origins",
-    defaultRate ? rateOrigin(defaultRate) : null,
+    ANY_ORIGIN,
     displayPlace,
+    [{ value: ANY_ORIGIN, label: "Any origin" }],
   );
   populateSelect(
     destinationSelect,
     deskState.filters.destinations,
     "No approved destinations",
-    defaultRate ? rateDestination(defaultRate) : null,
+    ANY_DESTINATION,
     displayPlace,
+    [{ value: ANY_DESTINATION, label: "Any destination" }],
   );
 
-  equipmentSelect.innerHTML = EQUIPMENT_OPTIONS
-    .map((option) => `<option value="${escapeAttr(option.value)}">${escapeHtml(option.label)}</option>`)
+  equipmentSelect.innerHTML = [
+    `<option value="${escapeAttr(ANY_EQUIPMENT)}">Any size</option>`,
+    ...EQUIPMENT_OPTIONS.map((option) => `<option value="${escapeAttr(option.value)}">${escapeHtml(option.label)}</option>`),
+  ]
     .join("");
-  equipmentSelect.value = defaultRate ? canonicalEquipment(defaultRate.equipment_type) : "40HC";
+  equipmentSelect.value = ANY_EQUIPMENT;
   equipmentSelect.disabled = false;
 
   const materials = deskState.filters.materials?.length
@@ -142,20 +149,21 @@ function populateFilters() {
   }
 }
 
-function populateSelect(select, values, emptyLabel, preferred, formatter = (value) => value) {
+function populateSelect(select, values, emptyLabel, preferred, formatter = (value) => value, leadingOptions = []) {
   const uniqueValues = unique(values || []);
   if (!uniqueValues.length) {
     select.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>`;
     select.disabled = true;
     return;
   }
-  select.innerHTML = uniqueValues
-    .map((value) => `<option value="${escapeAttr(value)}">${escapeHtml(formatter(value))}</option>`)
-    .join("");
-  if (preferred && uniqueValues.some((value) => sameValue(value, preferred))) {
-    select.value = uniqueValues.find((value) => sameValue(value, preferred));
+  select.innerHTML = [
+    ...leadingOptions.map((option) => `<option value="${escapeAttr(option.value)}">${escapeHtml(option.label)}</option>`),
+    ...uniqueValues.map((value) => `<option value="${escapeAttr(value)}">${escapeHtml(formatter(value))}</option>`),
+  ].join("");
+  if (preferred && [...leadingOptions.map((option) => option.value), ...uniqueValues].some((value) => sameValue(value, preferred))) {
+    select.value = [...leadingOptions.map((option) => option.value), ...uniqueValues].find((value) => sameValue(value, preferred));
   } else {
-    select.value = uniqueValues[0];
+    select.value = leadingOptions[0]?.value || uniqueValues[0];
   }
   select.disabled = false;
 }
@@ -183,9 +191,12 @@ function renderDesk() {
   qtyInput.value = quantity;
 
   const laneRates = deskState.rates.filter((rate) => {
-    return sameValue(rateOrigin(rate), selectedOrigin)
-      && sameValue(rateDestination(rate), selectedDestination)
-      && sameEquipment(rate.equipment_type, selectedEquipment)
+    const originMatches = selectedOrigin === ANY_ORIGIN || sameValue(rateOrigin(rate), selectedOrigin);
+    const destinationMatches = selectedDestination === ANY_DESTINATION || sameValue(rateDestination(rate), selectedDestination);
+    const equipmentMatches = selectedEquipment === ANY_EQUIPMENT || sameEquipment(rate.equipment_type, selectedEquipment);
+    return originMatches
+      && destinationMatches
+      && equipmentMatches
       && (selectedMaterial === "All materials" || (rate.materials || []).some((material) => sameValue(material, selectedMaterial)));
   });
 
@@ -194,19 +205,22 @@ function renderDesk() {
     .map((rate) => enrichRate(rate, quantity, selectedDoor))
     .sort(compareEnrichedRates);
 
-  laneTitle.textContent = `${displayPlace(selectedOrigin)} → ${displayPlace(selectedDestination)}`;
+  laneTitle.textContent = buildResultsTitle(selectedOrigin, selectedDestination, selectedEquipment, selectedMaterial);
   renderDoorChip(selectedDoor);
+  const sizeLabel = selectedEquipment === ANY_EQUIPMENT ? "mixed container sizes" : formatEquipment(selectedEquipment);
   figuresNote.textContent = quantity > 1
-    ? `Origin / Freight / Destination columns are USD equivalents for the whole booking (${quantity} × ${formatEquipment(selectedEquipment)}) — per-B/L charges are not multiplied.`
-    : "Origin / Freight / Destination columns are USD equivalents per container.";
+    ? `Origin / Freight / Destination columns are USD equivalents for the whole booking (${quantity} × ${sizeLabel}) — per-B/L charges are not multiplied.`
+    : selectedEquipment === ANY_EQUIPMENT
+      ? "Origin / Freight / Destination columns are USD equivalents per container, using each rate's own equipment size."
+      : "Origin / Freight / Destination columns are USD equivalents per container.";
 
   if (!visibleRates.length) {
-    laneSummary.textContent = "no parsed rates on this lane";
+    laneSummary.textContent = "no parsed rates for this filter";
     const onlyExpired = laneRates.some(isExpired) && !showExpired;
     rateRows.innerHTML = `<div class="rate-empty">${escapeHtml(
       onlyExpired
-        ? "This lane only has expired published rates. Turn on Show expired rates to view them."
-        : "No parsed rates for this lane and container size."
+        ? "These filters only match expired published rates. Turn on Show expired rates to view them."
+        : "No parsed rates match the current filters."
     )}</div>`;
     return;
   }
@@ -695,6 +709,14 @@ function compareRates(left, right) {
   const rightLive = isCurrentlyValid(right);
   if (leftLive !== rightLive) return leftLive ? -1 : 1;
   return (toNumber(left.all_in_usd) ?? Number.MAX_SAFE_INTEGER) - (toNumber(right.all_in_usd) ?? Number.MAX_SAFE_INTEGER);
+}
+
+function buildResultsTitle(selectedOrigin, selectedDestination, selectedEquipment, selectedMaterial) {
+  const lane = `${selectedOrigin === ANY_ORIGIN ? "Any origin" : displayPlace(selectedOrigin)} → ${selectedDestination === ANY_DESTINATION ? "Any destination" : displayPlace(selectedDestination)}`;
+  const tags = [];
+  if (selectedEquipment !== ANY_EQUIPMENT) tags.push(formatEquipment(selectedEquipment));
+  if (selectedMaterial !== "All materials") tags.push(selectedMaterial);
+  return tags.length ? `${lane} · ${tags.join(" · ")}` : lane;
 }
 
 function compareEnrichedRates(left, right) {
