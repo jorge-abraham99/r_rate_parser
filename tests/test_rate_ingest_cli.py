@@ -109,6 +109,53 @@ def test_maersk_offer_block_import_creates_charge_lines(tmp_path: Path, monkeypa
     assert "Basic Ocean Freight" in parsed_charges
 
 
+def test_maersk_rate_desk_exposes_charge_analysis(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    seed_templates(tmp_path)
+    source_bytes = Path("rate_sheet_files/MAERSK Q-1, INDIA AND FAR-EAST.xlsx").read_bytes()
+
+    response = api_client.post(
+        "/api/imports",
+        data={"uploaded_by": "jorge"},
+        files={"file": ("MAERSK Q-1, INDIA AND FAR-EAST.xlsx", source_bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert response.status_code == 200
+    import_id = response.json()["import_id"]
+
+    detail_response = api_client.get(f"/api/imports/{import_id}")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["charge_bucket_summary"]["matched_charge_count"] > 0
+    assert detail["charge_bucket_summary"]["unmatched_charge_count"] == 0
+    assert [group["key"] for group in detail["charge_bucket_summary"]["groups"]] == ["origin", "freight", "destination"]
+
+    approve_response = api_client.post(
+        f"/api/imports/{import_id}/approve",
+        json={
+            "approved_by": "jorge",
+            "carrier_name": "Maersk",
+            "carrier_key": "maersk-demo",
+            "carrier_label": "Maersk Demo",
+            "contract_tag": "SPOT",
+        },
+    )
+    assert approve_response.status_code == 200
+
+    desk_response = api_client.get("/api/rate-desk")
+    assert desk_response.status_code == 200
+    desk = desk_response.json()
+    maersk_rate = next(rate for rate in desk["rates"] if rate["source_file_name"] == "MAERSK Q-1, INDIA AND FAR-EAST.xlsx")
+    analysis = maersk_rate["charge_analysis"]
+    assert analysis["matched_charge_count"] > 0
+    assert analysis["unmatched_charge_count"] == 0
+    assert analysis["total_usd"] > 0
+    assert [group["key"] for group in analysis["groups"]] == ["origin", "freight", "destination"]
+    assert analysis["groups"][0]["subtotal_usd"] >= 0
+    assert analysis["groups"][1]["subtotal_usd"] > 0
+    assert analysis["groups"][2]["subtotal_usd"] >= 0
+    assert maersk_rate["all_in_usd"] == analysis["total_usd"]
+
+
 def test_cma_email_import_creates_canonical_rates(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
     raw_dir = tmp_path / "incoming"

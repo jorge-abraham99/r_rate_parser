@@ -265,6 +265,11 @@ function enrichRate(rate, quantity, selectedDoor) {
 }
 
 function buildChargeGroups(rate, quantity, selectedDoor) {
+  const analysisGroups = buildGroupsFromAnalysis(rate.charge_analysis, quantity);
+  if (analysisGroups) {
+    return applyDoorCharges(analysisGroups, quantity, selectedDoor);
+  }
+
   const rawCharges = Array.isArray(rate.charges) ? rate.charges : [];
   const lines = [];
   const seenBase = rawCharges.some((charge) => isBaseCharge(charge));
@@ -293,16 +298,6 @@ function buildChargeGroups(rate, quantity, selectedDoor) {
     }, quantity));
   }
 
-  const doorCharge = selectedDoor ? selectedDoorRate(selectedDoor) : null;
-  if (doorCharge) {
-    const fuelUnit = roundMoney(doorCharge.amount_gbp * 0.057);
-    const withoutFuel = lines.filter((line) => normalized(line.name) !== normalized("Export Intermodal Fuel Fee"));
-    lines.length = 0;
-    lines.push(...withoutFuel);
-    lines.push(makeSyntheticLine("origin", "Inland Haulage Export", "Container", "GBP", doorCharge.amount_gbp, quantity));
-    lines.push(makeSyntheticLine("origin", "Export Intermodal Fuel Fee", "Percent", "GBP", fuelUnit, quantity));
-  }
-
   const grouped = [
     { key: "origin", label: "Origin charges" },
     { key: "freight", label: "Freight charges" },
@@ -321,7 +316,100 @@ function buildChargeGroups(rate, quantity, selectedDoor) {
     };
   });
 
-  return grouped;
+  return applyDoorCharges(grouped, quantity, selectedDoor);
+}
+
+function buildGroupsFromAnalysis(analysis, quantity) {
+  if (!analysis || !Array.isArray(analysis.groups)) return null;
+
+  const groups = analysis.groups.map((group) => {
+    const rawLines = Array.isArray(group.lines) ? group.lines : [];
+    const normalizedLines = rawLines.map((line) => makeAnalysisLine(group.key, line, quantity));
+    const visibleLines = normalizedLines.filter((line) => !line.zeroRated);
+    const zeroLines = normalizedLines.filter((line) => line.zeroRated);
+    const subtotalUsdExact = normalizedLines.reduce((sum, line) => sum + line.usdExact, 0);
+    return {
+      key: group.key,
+      label: group.label || `${capitalize(group.key)} charges`,
+      lines: visibleLines,
+      zeroLines,
+      subtotalUsdExact,
+      subtotalUsd: formatUsd(subtotalUsdExact),
+      subLabel: group.key === "unmatched"
+        ? "Unmapped subtotal (USD)"
+        : `${(group.label || `${capitalize(group.key)} charges`).replace(" charges", "")} subtotal (USD)`,
+    };
+  });
+
+  const unmatchedLines = Array.isArray(analysis.unmatched_lines)
+    ? analysis.unmatched_lines.map((line) => makeAnalysisLine("unmatched", line, quantity))
+    : [];
+  if (unmatchedLines.length) {
+    const visibleLines = unmatchedLines.filter((line) => !line.zeroRated);
+    const zeroLines = unmatchedLines.filter((line) => line.zeroRated);
+    const subtotalUsdExact = unmatchedLines.reduce((sum, line) => sum + line.usdExact, 0);
+    groups.push({
+      key: "unmatched",
+      label: "Unmapped charges",
+      lines: visibleLines,
+      zeroLines,
+      subtotalUsdExact,
+      subtotalUsd: formatUsd(subtotalUsdExact),
+      subLabel: "Unmapped subtotal (USD)",
+    });
+  }
+
+  return groups;
+}
+
+function makeAnalysisLine(bucket, line, quantity) {
+  const basis = formatBasis(line.basis);
+  const qty = quantityForRule(line.quantity_rule, basis, quantity);
+  const ccy = (line.currency || "USD").toUpperCase();
+  const unit = toNumber(line.unit_amount) || 0;
+  const usdUnit = toNumber(line.usd_unit_amount) || 0;
+  const usdExact = usdUnit * qty;
+  return {
+    bucket,
+    name: line.name || "Charge",
+    basis,
+    qty,
+    ccy,
+    unit,
+    usdExact,
+    usdDisplay: formatUsdWithApprox(usdExact, ccy !== "USD" && unit !== 0),
+    unitDisplay: formatUnit(unit),
+    zeroRated: Boolean(line.zero_rated) || unit === 0,
+    matchedBy: line.matched_by || "",
+  };
+}
+
+function applyDoorCharges(groups, quantity, selectedDoor) {
+  const clonedGroups = groups.map((group) => ({
+    ...group,
+    lines: [...group.lines],
+    zeroLines: [...(group.zeroLines || [])],
+  }));
+  const doorCharge = selectedDoor ? selectedDoorRate(selectedDoor) : null;
+  if (!doorCharge) return clonedGroups;
+
+  const originGroup = clonedGroups.find((group) => group.key === "origin");
+  if (!originGroup) return clonedGroups;
+
+  const fuelUnit = roundMoney(doorCharge.amount_gbp * 0.057);
+  originGroup.lines = originGroup.lines.filter((line) => normalized(line.name) !== normalized("Export Intermodal Fuel Fee"));
+  originGroup.zeroLines = originGroup.zeroLines.filter((line) => normalized(line.name) !== normalized("Export Intermodal Fuel Fee"));
+
+  const inland = makeSyntheticLine("origin", "Inland Haulage Export", "Container", "GBP", doorCharge.amount_gbp, quantity);
+  const fuel = makeSyntheticLine("origin", "Export Intermodal Fuel Fee", "Percent", "GBP", fuelUnit, quantity);
+  const target = fuel.zeroRated ? originGroup.zeroLines : originGroup.lines;
+  originGroup.lines.push(inland);
+  target.push(fuel);
+  const allOriginLines = [...originGroup.lines, ...originGroup.zeroLines];
+  originGroup.subtotalUsdExact = allOriginLines.reduce((sum, line) => sum + line.usdExact, 0);
+  originGroup.subtotalUsd = formatUsd(originGroup.subtotalUsdExact);
+
+  return clonedGroups;
 }
 
 function makeLine(bucket, charge, quantity) {
@@ -397,6 +485,11 @@ function quantityForBasis(basis, quantity) {
   if (text.includes("bill of lading") || text.includes("b/l") || text.includes("bl") || text.includes("booking")) return 1;
   if (text.includes("percent")) return 1;
   return quantity;
+}
+
+function quantityForRule(rule, basis, quantity) {
+  if (rule === "per_bill_of_lading" || rule === "percent") return 1;
+  return quantityForBasis(basis, quantity);
 }
 
 function renderRate(rate, index, bestOfferId) {
@@ -601,7 +694,7 @@ function compareRates(left, right) {
   const leftLive = isCurrentlyValid(left);
   const rightLive = isCurrentlyValid(right);
   if (leftLive !== rightLive) return leftLive ? -1 : 1;
-  return (toNumber(left.all_in_amount) ?? Number.MAX_SAFE_INTEGER) - (toNumber(right.all_in_amount) ?? Number.MAX_SAFE_INTEGER);
+  return (toNumber(left.all_in_usd) ?? Number.MAX_SAFE_INTEGER) - (toNumber(right.all_in_usd) ?? Number.MAX_SAFE_INTEGER);
 }
 
 function compareEnrichedRates(left, right) {
@@ -654,6 +747,11 @@ function formatEquipment(value) {
 
 function normalized(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function capitalize(value) {
+  const text = String(value || "");
+  return text ? text[0].toUpperCase() + text.slice(1) : "";
 }
 
 function sameValue(left, right) {

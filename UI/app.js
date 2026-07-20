@@ -261,6 +261,21 @@ function renderPreview() {
 }
 
 function buildChargeClassification(detail) {
+  const summary = detail.charge_bucket_summary;
+  if (summary && Array.isArray(summary.groups)) {
+    const groupCounts = Object.fromEntries(summary.groups.map((group) => [group.key, Number(group.line_count || 0)]));
+    const unmatched = Number(summary.unmatched_charge_count || 0);
+    return {
+      origin: groupCounts.origin || 0,
+      freight: groupCounts.freight || 0,
+      destination: groupCounts.destination || 0,
+      unmatched,
+      note: unmatched > 0
+        ? `${unmatched} parsed charge line${unmatched === 1 ? "" : "s"} still need explicit mapping before this sheet is fully trustworthy.`
+        : "All parsed charge lines are mapped into Origin / Freight / Destination buckets.",
+    };
+  }
+
   const charges = Array.isArray(detail.charges_preview) ? detail.charges_preview : [];
   const counts = { origin: 0, freight: 0, destination: 0, unmatched: 0 };
   charges.forEach((charge) => {
@@ -273,7 +288,7 @@ function buildChargeClassification(detail) {
   return {
     ...counts,
     note: counts.unmatched > 0
-      ? "Some charge lines are still heuristic and need manual review before this becomes fully trustworthy."
+      ? "Some visible charge lines are still heuristic and need manual review before this becomes fully trustworthy."
       : "All visible charge lines were classified into Origin / Freight / Destination buckets.",
   };
 }

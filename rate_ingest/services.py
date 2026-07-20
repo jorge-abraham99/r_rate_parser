@@ -24,6 +24,16 @@ from rate_ingest.utils import read_csv_rows, read_json, write_csv_rows, write_js
 from rate_ingest.validate import validate_import
 from rate_ingest.warehouse import record_import, remove_import_rows, replace_import, warehouse_paths
 
+FX_RATES = {
+    "USD": 1.0,
+    "GBP": 1.29,
+    "EUR": 1.09,
+    "INR": 0.0104,
+    "THB": 0.0302,
+}
+
+BILL_OF_LADING_BASES = {"bill of lading", "b/l", "bl", "booking"}
+
 
 def find_run_dir(settings: Settings, import_id: str) -> Path:
     candidate = settings.runs_dir / import_id
@@ -172,6 +182,10 @@ def get_import_detail(settings: Settings, import_id: str) -> dict[str, Any]:
     charges = [RateChargeLine(**deserialize_row(row)) for row in payload["rate_charge_lines"]]
     notes = [RateNote(**deserialize_row(row)) for row in payload["rate_notes"]]
     card = cards[0] if cards else None
+    charge_bucket_summary = analyze_charge_collection(
+        charges,
+        base_currency=card.currency_default if card else None,
+    )
     return {
         "import_id": import_id,
         "rate_import": rate_import.model_dump(mode="json"),
@@ -188,6 +202,7 @@ def get_import_detail(settings: Settings, import_id: str) -> dict[str, Any]:
         "approval": payload["approval"],
         "review_markdown": payload["review_markdown"],
         "card": card.model_dump(mode="json") if card else None,
+        "charge_bucket_summary": charge_bucket_summary,
         "offers_preview": [offer.model_dump(mode="json") for offer in offers[:50]],
         "charges_preview": [charge.model_dump(mode="json") for charge in charges[:50]],
         "notes_preview": [note.model_dump(mode="json") for note in notes[:30]],
@@ -352,9 +367,14 @@ def search_approved_offers(
 
         offer_charges = charges_by_offer.get(offer.id, [])
         note_bucket = notes_by_offer.get(offer.id) or notes_by_card.get(card.id, [])
+        charge_analysis = analyze_charge_collection(
+            offer_charges,
+            base_currency=offer.base_currency or card.currency_default,
+            base_amount=offer.base_amount,
+            base_label="All-in as quoted" if offer.all_in_flag is True and not offer_charges else "Basic Ocean Freight",
+        )
         additive_charges = [
-            charge
-            for charge in offer_charges
+            charge for charge in offer_charges
             if not is_base_charge(charge)
             and currencies_match(charge.currency, offer.base_currency or card.currency_default)
         ]
@@ -389,6 +409,7 @@ def search_approved_offers(
                 "base_amount": offer.base_amount,
                 "base_currency": offer.base_currency or card.currency_default,
                 "all_in_amount": all_in_amount,
+                "all_in_usd": charge_analysis["total_usd"],
                 "all_in_flag": offer.all_in_flag,
                 "charge_total": charge_total if offer_charges else None,
                 "valid_from": serialize_date(offer.valid_from or card.valid_from),
@@ -402,12 +423,19 @@ def search_approved_offers(
                 "offer_reference": offer.offer_reference,
                 "raw_row_reference": offer.raw_row_reference,
                 "routing_note": offer.routing_note,
+                "charge_analysis": charge_analysis,
                 "notes_summary": note_bucket[0].note_text if note_bucket else card.notes_summary,
                 "charges": [charge.model_dump(mode="json") for charge in offer_charges],
                 "notes": [note.model_dump(mode="json") for note in note_bucket[:10]],
             }
         )
-    results.sort(key=lambda item: ((item["all_in_amount"] is None), item["all_in_amount"] or 0, item["carrier_name"] or ""))
+    results.sort(
+        key=lambda item: (
+            item["all_in_usd"] is None,
+            item["all_in_usd"] if item["all_in_usd"] is not None else float("inf"),
+            item["carrier_name"] or "",
+        )
+    )
     return results[:limit]
 
 
@@ -451,6 +479,93 @@ def get_rate_desk_data(settings: Settings, limit: int = 2000) -> dict[str, Any]:
             "materials": materials,
             "door_pickups": [],
         },
+    }
+
+
+def analyze_charge_collection(
+    charges: list[RateChargeLine],
+    *,
+    base_currency: str | None = None,
+    base_amount: float | None = None,
+    base_label: str = "Basic Ocean Freight",
+) -> dict[str, Any]:
+    grouped = {
+        "origin": {"key": "origin", "label": "Origin charges", "lines": [], "subtotal_usd": 0.0},
+        "freight": {"key": "freight", "label": "Freight charges", "lines": [], "subtotal_usd": 0.0},
+        "destination": {"key": "destination", "label": "Destination charges", "lines": [], "subtotal_usd": 0.0},
+        "unmatched": {"key": "unmatched", "label": "Unmatched charges", "lines": [], "subtotal_usd": 0.0},
+    }
+    matched_count = 0
+    unmatched_count = 0
+
+    has_base_line = any(is_base_charge(charge) for charge in charges)
+    if charges:
+        for charge in charges:
+            bucket, matched_by = classify_charge_bucket(charge)
+            usd_unit_amount = convert_to_usd(charge.amount, charge.currency or base_currency)
+            line = {
+                "name": charge.charge_name,
+                "basis": charge.basis or "Container",
+                "quantity_rule": quantity_rule(charge.basis),
+                "currency": (charge.currency or base_currency or "USD").upper(),
+                "unit_amount": charge.amount,
+                "usd_unit_amount": usd_unit_amount,
+                "charge_type": charge.charge_type,
+                "bucket": bucket,
+                "matched_by": matched_by,
+                "zero_rated": (charge.amount or 0) == 0,
+            }
+            grouped[bucket]["lines"].append(line)
+            grouped[bucket]["subtotal_usd"] += usd_unit_amount
+            if bucket == "unmatched":
+                unmatched_count += 1
+            else:
+                matched_count += 1
+    if base_amount is not None and not has_base_line:
+        usd_unit_amount = convert_to_usd(base_amount, base_currency)
+        grouped["freight"]["lines"].append(
+            {
+                "name": base_label,
+                "basis": "Container",
+                "quantity_rule": "per_container",
+                "currency": (base_currency or "USD").upper(),
+                "unit_amount": base_amount,
+                "usd_unit_amount": usd_unit_amount,
+                "charge_type": "freight",
+                "bucket": "freight",
+                "matched_by": "synthetic_base",
+                "zero_rated": (base_amount or 0) == 0,
+            }
+        )
+        grouped["freight"]["subtotal_usd"] += usd_unit_amount
+        matched_count += 1
+
+    ordered_groups = []
+    total_usd = 0.0
+    for key in ("origin", "freight", "destination"):
+        group = grouped[key]
+        subtotal = round(group["subtotal_usd"], 2)
+        ordered_groups.append(
+            {
+                "key": key,
+                "label": group["label"],
+                "lines": group["lines"],
+                "line_count": len(group["lines"]),
+                "zero_line_count": sum(1 for line in group["lines"] if line["zero_rated"]),
+                "subtotal_usd": subtotal,
+            }
+        )
+        total_usd += group["subtotal_usd"]
+
+    unmatched_group = grouped["unmatched"]
+    return {
+        "fx_source": "static_demo_fx_v1",
+        "groups": ordered_groups,
+        "unmatched_lines": unmatched_group["lines"],
+        "matched_charge_count": matched_count,
+        "unmatched_charge_count": unmatched_count,
+        "unmatched_subtotal_usd": round(unmatched_group["subtotal_usd"], 2),
+        "total_usd": round(total_usd + unmatched_group["subtotal_usd"], 2),
     }
 
 
@@ -554,3 +669,36 @@ def first_present(*values: str | None) -> str | None:
         if value:
             return value
     return None
+
+
+def classify_charge_bucket(charge: RateChargeLine) -> tuple[str, str]:
+    charge_type = (charge.charge_type or "").strip().lower()
+    if charge_type in {"origin", "freight", "destination"}:
+        return charge_type, "explicit_charge_type"
+
+    name = (charge.charge_name or "").strip().lower()
+    if is_base_charge(charge):
+        return "freight", "base_charge"
+    if any(token in name for token in ("origin", "export", "haulage", "intermodal", "pickup", "inland", "rail", "truck")):
+        return "origin", "heuristic_name"
+    if any(token in name for token in ("destination", "import", "terminal handling", "documentation", "documentation fee", "container protect", "delivery", "dthc")):
+        return "destination", "heuristic_name"
+    if any(token in name for token in ("bunker", "ocean freight", "emission", "peak season", "contingency", "congestion", "freetime extension", "surcharge")):
+        return "freight", "heuristic_name"
+    return "unmatched", "unclassified"
+
+
+def quantity_rule(basis: str | None) -> str:
+    text = (basis or "Container").strip().lower()
+    if text in BILL_OF_LADING_BASES or any(token in text for token in BILL_OF_LADING_BASES):
+        return "per_bill_of_lading"
+    if "percent" in text:
+        return "percent"
+    return "per_container"
+
+
+def convert_to_usd(amount: float | None, currency: str | None) -> float:
+    if amount is None:
+        return 0.0
+    fx = FX_RATES.get((currency or "USD").upper(), 1.0)
+    return round(amount * fx, 6)
