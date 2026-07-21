@@ -251,6 +251,7 @@ function enrichRate(rate, quantity, selectedDoor) {
   const transit = formatTransit(rate);
   const sailing = formatSailing(rate);
   const freetime = formatFreetime(rate);
+  const sourceName = rate.source_file_name || rate.raw_sheet_name || "Approved rate";
   const validity = validityPresentation(rate.valid_to);
   const totalLabel = quantity > 1
     ? `Total per booking (${quantity} × ${formatEquipment(canonicalEquipment(rate.equipment_type))})`
@@ -265,6 +266,7 @@ function enrichRate(rate, quantity, selectedDoor) {
     transit,
     sailing,
     freetime,
+    sourceName,
     validity,
     totalLabel,
     groups,
@@ -523,9 +525,8 @@ function renderRate(rate, index, bestOfferId) {
           ${isBest ? '<span class="best-badge">Best rate</span>' : ""}
           ${rate.flag ? `<span class="flag-badge">${escapeHtml(rate.flag)}</span>` : ""}
         </span>
-        <span class="source-cell" title="${escapeAttr(rate.originalRate.source_file_name || rate.originalRate.raw_sheet_name || "Approved rate")}">
+        <span class="source-cell" title="${escapeAttr(rate.sourceName)}">
           ${rate.tag ? `<span class="mono-chip">${escapeHtml(rate.tag)}</span>` : ""}
-          <span class="source-name">${escapeHtml(rate.originalRate.source_file_name || rate.originalRate.raw_sheet_name || "Approved rate")}</span>
         </span>
         <span class="transit-value">${escapeHtml(rate.transit)}</span>
         <span class="component-value">${escapeHtml(formatUsd(rate.originUsd))}</span>
@@ -543,6 +544,7 @@ function renderBreakdown(rate) {
   return `
     <div class="rate-breakdown">
       <div class="breakdown-meta">
+        <span class="source-detail"><span>Source</span><span class="mono">${escapeHtml(rate.sourceName)}</span></span>
         ${rate.sailing ? `<span class="mono">${escapeHtml(rate.sailing)}</span>` : ""}
         ${rate.freetime ? `<span class="pill">${escapeHtml(rate.freetime)}</span>` : ""}
       </div>
