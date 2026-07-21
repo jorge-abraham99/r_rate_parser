@@ -144,8 +144,14 @@ def test_maersk_rate_desk_exposes_charge_analysis(tmp_path: Path, monkeypatch):
     desk_response = api_client.get("/api/rate-desk")
     assert desk_response.status_code == 200
     desk = desk_response.json()
-    maersk_rate = next(rate for rate in desk["rates"] if rate["source_file_name"] == "MAERSK Q-1, INDIA AND FAR-EAST.xlsx")
+    maersk_rate = next(
+        rate
+        for rate in desk["rates"]
+        if rate["source_file_name"] == "MAERSK Q-1, INDIA AND FAR-EAST.xlsx"
+        and rate["offer_reference"] == "Offer 2-1"
+    )
     analysis = maersk_rate["charge_analysis"]
+    assert maersk_rate["transit_time_days"] == 51
     assert analysis["matched_charge_count"] > 0
     assert analysis["unmatched_charge_count"] == 0
     assert analysis["total_usd"] > 0
