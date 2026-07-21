@@ -454,12 +454,17 @@ pre,
 .component-value,
 .all-in-value {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 .transit-value,
 .component-value {
   font-size: 12.5px;
   color: var(--text);
+}
+
+.component-value {
+  text-align: right;
 }
 
 .all-in-value {
@@ -576,6 +581,7 @@ pre,
 .breakdown-row .money {
   text-align: right;
   color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
 .breakdown-subtotal {
@@ -596,6 +602,7 @@ pre,
 .breakdown-total span:last-child {
   text-align: right;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
   font-weight: 700;
   color: var(--strong);
 }

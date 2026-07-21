@@ -391,7 +391,7 @@ function makeAnalysisLine(bucket, line, quantity) {
     ccy,
     unit,
     usdExact,
-    usdDisplay: formatUsdWithApprox(usdExact, ccy !== "USD" && unit !== 0),
+    usdDisplay: formatUsd(usdExact),
     unitDisplay: formatUnit(unit),
     zeroRated: Boolean(line.zero_rated) || unit === 0,
     matchedBy: line.matched_by || "",
@@ -440,7 +440,7 @@ function makeLine(bucket, charge, quantity) {
     ccy,
     unit,
     usdExact,
-    usdDisplay: formatUsdWithApprox(usdExact, ccy !== "USD" && unit !== 0),
+    usdDisplay: formatUsd(usdExact),
     unitDisplay: formatUnit(unit),
     zeroRated: unit === 0,
   };
@@ -567,7 +567,7 @@ function renderGroup(group) {
       <span style="text-align:right">Qty</span>
       <span>Ccy</span>
       <span style="text-align:right">Unit price</span>
-      <span style="text-align:right">USD</span>
+      <span style="text-align:right" title="Converted to USD where the source charge uses another currency">USD equiv.</span>
     </div>
     ${group.lines.length ? group.lines.map(renderLine).join("") : `
       <div class="breakdown-row">
@@ -815,13 +815,10 @@ function firstPresent(...values) {
 }
 
 function formatUsd(value) {
-  return `$${roundMoney(value).toLocaleString("en-US")}`;
-}
-
-function formatUsdWithApprox(value, approximate) {
-  const rounded = roundMoney(value);
-  if (rounded === 0 && value > 0) return "≈ 0";
-  return `${approximate ? "≈ " : ""}${rounded.toLocaleString("en-US")}`;
+  return `$${roundMoney(value).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function formatUnit(value) {
