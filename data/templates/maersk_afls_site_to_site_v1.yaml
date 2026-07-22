@@ -1,0 +1,48 @@
+template_id: maersk_afls_site_to_site_v1
+template_name: Maersk AFLS Site To Site v1
+provider_name: MAERSK
+parser_family: site_to_site_rows
+document_type: ocean_export
+file_type: xlsx
+active: true
+
+match_rules:
+  filename_contains:
+    - "REUDAN_E1E_E3E_WAP_Q2 2026"
+  required_header_labels:
+    - "Receipt"
+    - "Delivery"
+    - "Rate Basis"
+    - "Commodity Name"
+  sheet_name_contains_any:
+    - "AFLS Quote"
+
+sheet_rules:
+  include_sheet_name_contains:
+    - "AFLS Quote"
+
+field_map:
+  place_of_receipt: "Receipt"
+  pol: "POL"
+  pod: "POD"
+  final_destination: "Delivery"
+  valid_from: "Effective Date"
+  valid_to: "Expiry Date"
+  service_mode: "Service Mode"
+  commodity: "Commodity Name"
+  transit_time: "Transit Time"
+  charge_code: "Charge"
+  rate_basis: "Rate Basis"
+
+site_to_site_rules:
+  quote_sheet_name_contains: "AFLS Quote"
+  abbreviation_sheet_name_contains: "Abbreviation"
+  header_row: 7
+
+defaults:
+  carrier_name: MAERSK
+  currency_default: USD
+
+validation:
+  amount_min: 0
+  amount_max: 100000

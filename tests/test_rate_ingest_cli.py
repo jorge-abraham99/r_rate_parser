@@ -162,6 +162,31 @@ def test_maersk_rate_desk_exposes_charge_analysis(tmp_path: Path, monkeypatch):
     assert maersk_rate["all_in_usd"] == analysis["total_usd"]
 
 
+def test_maersk_afls_site_to_site_import_creates_offers_and_charge_lines(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    raw_dir = tmp_path / "incoming"
+    raw_dir.mkdir()
+    source = raw_dir / "REUDAN_E1E_E3E_WAP_Q2 2026.xlsx"
+    source.write_bytes(Path("rate_sheet_files/REUDAN_E1E_E3E_WAP_Q2 2026.xlsx").read_bytes())
+    seed_templates(tmp_path)
+
+    result = runner.invoke(app, ["import", str(source)])
+    assert result.exit_code == 0
+    assert "Template used: maersk_afls_site_to_site_v1" in result.stdout
+    import_id = next(line.split(": ", 1)[1] for line in result.stdout.splitlines() if line.startswith("Import created:"))
+    run_dir = tmp_path / "data" / "runs" / import_id
+    canonical_rates = json.loads(run_dir.joinpath("canonical_rates.json").read_text(encoding="utf-8"))
+    assert len(canonical_rates) > 1000
+    first = canonical_rates[0]
+    assert first["from_raw"] == "Alcester, GB"
+    assert first["to_raw"] == "Bangkok, TH"
+    assert first["amount"] == 450.0
+    assert first["currency"] == "USD"
+    parsed_charges = run_dir.joinpath("parsed_rate_charge_lines.csv").read_text(encoding="utf-8")
+    assert "Documentation fee - Destination" in parsed_charges
+    assert "Export Service" in parsed_charges
+
+
 def test_cma_email_import_creates_canonical_rates(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
     raw_dir = tmp_path / "incoming"

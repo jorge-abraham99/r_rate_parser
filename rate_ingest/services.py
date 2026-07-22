@@ -16,6 +16,7 @@ from rate_ingest.models import RateCard, RateChargeLine, RateImport, RateNote, R
 from rate_ingest.parsers.email_table import parse_email as parse_email_table
 from rate_ingest.parsers.matrix import parse_workbook as parse_matrix_workbook
 from rate_ingest.parsers.offer_block import parse_workbook as parse_offer_block_workbook
+from rate_ingest.parsers.site_to_site_rows import parse_workbook as parse_site_to_site_workbook
 from rate_ingest.parsers.tabular_lane import parse_workbook as parse_tabular_workbook
 from rate_ingest.review import generate_review_markdown
 from rate_ingest.source_registry import register_source
@@ -582,6 +583,8 @@ def parse_source_by_family(
         return parse_matrix_workbook(source_path, matched_template, rate_import)
     if parser_family == "offer_block":
         return parse_offer_block_workbook(source_path, matched_template, rate_import)
+    if parser_family == "site_to_site_rows":
+        return parse_site_to_site_workbook(source_path, matched_template, rate_import)
     if parser_family == "email_table":
         return parse_email_table(source_path, matched_template, rate_import)
     raise ValueError(f"Template {matched_template.template_id} uses unsupported parser family {parser_family}.")

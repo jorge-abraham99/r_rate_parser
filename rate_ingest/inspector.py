@@ -82,6 +82,8 @@ def guess_parser_family(sheet_summaries: list[dict[str, Any]], source_type: str 
     ).upper()
     if source_type == "eml" and "POO" in flattened and "POL/POD" in flattened and "OFFER GIGO" in flattened:
         return "email_table"
+    if "RECEIPT" in flattened and "DELIVERY" in flattened and "COMMODITY NAME" in flattened and "RATE BASIS" in flattened:
+        return "site_to_site_rows"
     if "OFFER 1-1" in flattened or "SCHEDULED ROUTE" in flattened:
         return "offer_block"
     if "CUSTOMER" in flattened and "POL" in flattened and "POD" in flattened:

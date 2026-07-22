@@ -246,6 +246,7 @@ function enrichRate(rate, quantity, selectedDoor) {
   const groups = buildChargeGroups(rate, quantity, selectedDoor);
   const totalUsdExact = groups.reduce((sum, group) => sum + group.subtotalUsdExact, 0);
   const product = formatProduct(rate);
+  const lane = formatLane(rate);
   const tag = rate.contract_tag || contractTag(rate) || inferTagFromProduct(product);
   const flag = inferFlag(rate, product);
   const transit = formatTransit(rate);
@@ -261,6 +262,7 @@ function enrichRate(rate, quantity, selectedDoor) {
     offerId,
     originalRate: rate,
     product,
+    lane,
     tag,
     flag,
     transit,
@@ -522,6 +524,7 @@ function renderRate(rate, index, bestOfferId) {
         <span class="rank">${index + 1}</span>
         <span class="rate-cell">
           <span class="rate-name">${escapeHtml(rate.product)}</span>
+          <span class="rate-lane">${escapeHtml(rate.lane)}</span>
           ${isBest ? '<span class="best-badge">Best rate</span>' : ""}
           ${rate.flag ? `<span class="flag-badge">${escapeHtml(rate.flag)}</span>` : ""}
         </span>
@@ -544,9 +547,20 @@ function renderBreakdown(rate) {
   return `
     <div class="rate-breakdown">
       <div class="breakdown-meta">
+        <span class="lane-chip">${escapeHtml(rate.lane)}</span>
         <span class="source-detail"><span>Source</span><span class="mono">${escapeHtml(rate.sourceName)}</span></span>
         ${rate.sailing ? `<span class="mono">${escapeHtml(rate.sailing)}</span>` : ""}
         ${rate.freetime ? `<span class="pill">${escapeHtml(rate.freetime)}</span>` : ""}
+      </div>
+      <div class="breakdown-facts">
+        ${renderBreakdownFact("Origin", displayPlace(rate.originalRate.place_of_receipt || rate.originalRate.origin || rate.originalRate.pol))}
+        ${renderBreakdownFact("POL", displayPlace(rate.originalRate.pol))}
+        ${renderBreakdownFact("POD", displayPlace(rate.originalRate.pod))}
+        ${renderBreakdownFact("Delivery", displayPlace(rate.originalRate.final_destination || rate.originalRate.pod))}
+        ${renderBreakdownFact("Equipment", formatEquipment(rate.originalRate.equipment_type))}
+        ${renderBreakdownFact("Validity", formatValidityRange(rate.originalRate.valid_from, rate.originalRate.valid_to))}
+        ${renderBreakdownFact("Service", rate.originalRate.service_mode || "—")}
+        ${renderBreakdownFact("Source Row", rate.originalRate.raw_row_reference || "—")}
       </div>
       <div class="breakdown-panel">
         ${rate.groups.map(renderGroup).join("")}
@@ -557,6 +571,15 @@ function renderBreakdown(rate) {
       </div>
       ${rate.zeroNote ? `<div class="zero-note">${escapeHtml(rate.zeroNote)}</div>` : ""}
       <div class="fine-print">${escapeHtml(rate.fineprint)}</div>
+    </div>
+  `;
+}
+
+function renderBreakdownFact(label, value) {
+  return `
+    <div class="breakdown-fact">
+      <span class="breakdown-fact-label">${escapeHtml(label)}</span>
+      <span class="breakdown-fact-value">${escapeHtml(value || "—")}</span>
     </div>
   `;
 }
@@ -622,6 +645,24 @@ function rateOrigin(rate) {
 
 function rateDestination(rate) {
   return firstPresent(rate.final_destination, rate.pod);
+}
+
+function formatLane(rate) {
+  const origin = rateOrigin(rate);
+  const destination = rateDestination(rate);
+  if (origin && destination) return `${displayPlace(origin)} → ${displayPlace(destination)}`;
+  if (origin) return displayPlace(origin);
+  if (destination) return displayPlace(destination);
+  return "Lane not available";
+}
+
+function formatValidityRange(validFrom, validTo) {
+  const start = parseDate(validFrom);
+  const end = parseDate(validTo);
+  if (start && end) return `${formatDate(start)} → ${formatDate(end)}`;
+  if (start) return `from ${formatDate(start)}`;
+  if (end) return `to ${formatDate(end)}`;
+  return "open";
 }
 
 function formatProduct(rate) {
