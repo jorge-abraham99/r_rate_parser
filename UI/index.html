@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/ui/styles.css?v=13">
+  <link rel="stylesheet" href="/ui/styles.css?v=14">
 </head>
 <body>
   <div class="app-shell">
@@ -55,6 +55,13 @@
         <label for="materialSelect">Material</label>
         <select id="materialSelect" disabled><option>Loading…</option></select>
       </div>
+      <div class="quote-actions">
+        <label class="quote-toggle" for="showExpiredToggle">
+          <input id="showExpiredToggle" type="checkbox">
+          <span>Show expired</span>
+        </label>
+        <button id="showAllQuotesButton" class="quote-reset" type="button">Show all quotes</button>
+      </div>
     </section>
 
     <main class="quote-main">
@@ -96,6 +103,6 @@
 
   <script src="/ui/config.js?v=3"></script>
   <script src="/ui/demo-data.js?v=1"></script>
-  <script src="/ui/rate-desk.js?v=11"></script>
+  <script src="/ui/rate-desk.js?v=12"></script>
 </body>
 </html>

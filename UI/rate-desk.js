@@ -1,6 +1,7 @@
 const RATE_DESK_DEMO_MODE = Boolean(window.RATE_DESK_CONFIG?.demoMode);
 const DEFAULT_FX = { USD: 1, GBP: 1.29, EUR: 1.09, INR: 0.0104, THB: 0.0302 };
 const EQUIPMENT_OPTIONS = [
+  { value: "", label: "All sizes" },
   { value: "20GP", label: "20′" },
   { value: "40GP", label: "40′" },
   { value: "40HC", label: "40′ HC" },
@@ -24,6 +25,8 @@ const elements = {
   equipmentSelect: document.getElementById("equipmentSelect"),
   qtyInput: document.getElementById("qtyInput"),
   materialSelect: document.getElementById("materialSelect"),
+  showExpiredToggle: document.getElementById("showExpiredToggle"),
+  showAllQuotesButton: document.getElementById("showAllQuotesButton"),
   rateRows: document.getElementById("rateRows"),
   laneTitle: document.getElementById("laneTitle"),
   laneSummary: document.getElementById("laneSummary"),
@@ -35,6 +38,8 @@ const elements = {
 
 [elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.equipmentSelect, elements.materialSelect]
   .forEach((element) => element.addEventListener("change", resetAndRender));
+elements.showExpiredToggle.addEventListener("change", resetAndRender);
+elements.showAllQuotesButton.addEventListener("click", showAllQuotes);
 elements.qtyInput.addEventListener("change", () => {
   elements.qtyInput.value = clampQuantity(elements.qtyInput.value);
   resetAndRender();
@@ -81,8 +86,8 @@ function populateDemoFilters() {
   const origins = unique(quote.rates.flatMap((rate) => rate.origins));
   const destinations = unique(quote.rates.flatMap((rate) => rate.destinations));
   populateSelect(elements.collectionSelect, Object.keys(quote.haulage), "None — port drop-off", "Abbots Bromley", true);
-  populateSelect(elements.originSelect, origins, "No origins", "Felixstowe");
-  populateSelect(elements.destinationSelect, destinations, "No destinations", "Laem Chabang");
+  populateSelect(elements.originSelect, origins, "Any origin", "Felixstowe", true);
+  populateSelect(elements.destinationSelect, destinations, "Any destination", "Laem Chabang", true);
   populateEquipment("40HC");
   populateSelect(elements.materialSelect, MATERIAL_OPTIONS, "No materials", "All materials");
   setCollectionVisibility(true);
@@ -97,8 +102,8 @@ function populateConnectedFilters() {
   const materials = unique(deskState.filters.materials || rates.flatMap((rate) => rate.materials || []));
   const pickups = Array.isArray(deskState.filters.door_pickups) ? deskState.filters.door_pickups : [];
 
-  populateSelect(elements.originSelect, origins, "No approved origins", rateOrigin(defaultRate) || origins[0] || "");
-  populateSelect(elements.destinationSelect, destinations, "No approved destinations", rateDestination(defaultRate) || destinations[0] || "");
+  populateSelect(elements.originSelect, origins, "Any origin", rateOrigin(defaultRate) || origins[0] || "", true);
+  populateSelect(elements.destinationSelect, destinations, "Any destination", rateDestination(defaultRate) || destinations[0] || "", true);
   populateEquipment(canonicalEquipment(defaultRate.equipment_type || equipment[0] || "40HC"));
   populateSelect(
     elements.materialSelect,
@@ -166,21 +171,35 @@ function renderDesk() {
     elements.originSelect.value || "Any origin",
     elements.destinationSelect.value || "Any destination",
   ];
-  elements.laneTitle.textContent = laneParts.join(" → ");
+  elements.laneTitle.textContent = isAllQuotesView()
+    ? "All approved quotes"
+    : laneParts.join(" → ");
   elements.figuresNote.textContent = quantity > 1
     ? `Figures are USD equivalents for the whole booking (${quantity} × ${formatEquipment(elements.equipmentSelect.value)}). Per-B/L charges are not multiplied.`
     : `Figures are USD equivalents per ${formatEquipment(elements.equipmentSelect.value)}.`;
 
   if (!rows.length) {
-    elements.laneSummary.textContent = "no parsed rates on this lane";
-    elements.rateRows.innerHTML = '<div class="rate-empty">No parsed rates for this lane and container size.</div>';
+    const hasExpiredHidden = !elements.showExpiredToggle.checked && hasExpiredMatches();
+    elements.laneSummary.textContent = isAllQuotesView()
+      ? "no approved quotes match the current filters"
+      : "no parsed rates on this lane";
+    elements.rateRows.innerHTML = `<div class="rate-empty">${
+      hasExpiredHidden
+        ? "No current rates match these filters. Turn on Show expired to inspect expired quotes."
+        : "No parsed rates match the current filters."
+    }</div>`;
     return;
   }
 
   const best = rows.find((row) => !row.poa);
-  elements.laneSummary.textContent = collection
-    ? `${rows.length} routing option${rows.length === 1 ? "" : "s"}${best ? ` · best ${formatUsd(best.totalUsd)} all-in` : ""}`
-    : `${rows.length} contract rate${rows.length === 1 ? "" : "s"}${best ? ` · best ${formatUsd(best.totalUsd)} all-in` : ""}`;
+  const expiredCount = rows.filter((row) => row.expired).length;
+  const hiddenExpiredCount = !elements.showExpiredToggle.checked ? countHiddenExpiredMatches() : 0;
+  const scopeLabel = collection ? "routing option" : "contract rate";
+  const countLabel = `${rows.length} ${scopeLabel}${rows.length === 1 ? "" : "s"}`;
+  const bestLabel = best ? ` · best ${formatUsd(best.totalUsd)} all-in` : "";
+  const expiredLabel = expiredCount ? ` · ${expiredCount} expired` : "";
+  const hiddenLabel = hiddenExpiredCount ? ` · ${hiddenExpiredCount} expired hidden` : "";
+  elements.laneSummary.textContent = `${countLabel}${bestLabel}${expiredLabel}${hiddenLabel}`;
 
   const showBest = rows.filter((row) => !row.poa).length > 1;
   elements.rateRows.innerHTML = rows.map((row, index) => renderRate(row, index, showBest && row.id === best?.id)).join("");
@@ -200,9 +219,9 @@ function buildDemoRows(quantity) {
   const material = elements.materialSelect.value;
   const collection = elements.collectionSelect.value;
   const baseRates = quote.rates.filter((rate) =>
-    rate.origins.includes(origin)
-    && rate.destinations.includes(destination)
-    && canonicalEquipment(rate.equipment) === equipment
+    matchesFilter(rate.origins, origin)
+    && matchesFilter(rate.destinations, destination)
+    && (!equipment || canonicalEquipment(rate.equipment) === equipment)
     && (material === "All materials" || rate.materials.includes(material)));
 
   const rows = [];
@@ -321,10 +340,11 @@ function buildConnectedRows(quantity) {
   const collection = elements.collectionSelect.value;
   const baseRates = deskState.connectedRates
     .filter((rate) =>
-      sameValue(rateOrigin(rate), origin)
-      && sameValue(rateDestination(rate), destination)
-      && canonicalEquipment(rate.equipment_type) === equipment
+      matchesFilter(rateOrigin(rate), origin)
+      && matchesFilter(rateDestination(rate), destination)
+      && (!equipment || canonicalEquipment(rate.equipment_type) === equipment)
       && (material === "All materials" || (rate.materials || []).some((item) => sameValue(item, material))))
+    .filter((rate) => elements.showExpiredToggle.checked || !isExpiredRate(rate))
     .filter((rate) => !isHaulageRate(rate));
 
   if (!collection) {
@@ -345,6 +365,7 @@ function makeConnectedRow(rate, quantity) {
   const totalUsd = sumGroups(groups);
   const sourceFile = rate.source_file_name || rate.raw_sheet_name || "Approved rate";
   const tag = rate.contract_tag || rate.offer_reference || "KEY";
+  const expired = isExpiredRate(rate);
   return {
     id: String(rate.offer_id || `${sourceFile}-${rate.raw_row_reference || "row"}`),
     type: "CONTRACT",
@@ -352,7 +373,7 @@ function makeConnectedRow(rate, quantity) {
     routingDetail: rate.routing_note || formatRouting(rate),
     sources: [{ tag, file: sourceFile }],
     transit: rate.transit_time_days ? `${rate.transit_time_days}d` : extractTransit(rate.routing_note || ""),
-    validity: validityLabel(rate.valid_to),
+    validity: validityLabel(rate.valid_from, rate.valid_to, expired),
     sailing: rate.routing_note || "",
     freetime: extractFreetime(rate),
     groups,
@@ -362,6 +383,7 @@ function makeConnectedRow(rate, quantity) {
     destinationUsd: groupTotal(groups, "destination"),
     totalUsd,
     poa: false,
+    expired,
     zeroChargeCount: groups.reduce((sum, group) => sum + group.zeroLines.length, 0),
     fineprint: "",
     quantity,
@@ -496,7 +518,7 @@ function renderRate(row, index, isBest) {
   const expanded = deskState.expandedId === row.id;
   return `
     <article class="rate-record">
-      <button class="quote-grid quote-row${row.poa ? " poa-row" : ""}" type="button" data-rate-id="${escapeAttr(row.id)}" aria-expanded="${expanded}">
+      <button class="quote-grid quote-row${row.poa ? " poa-row" : ""}${row.expired ? " expired-row" : ""}" type="button" data-rate-id="${escapeAttr(row.id)}" aria-expanded="${expanded}">
         <span><span class="type-chip">CONTRACT</span></span>
         <span class="${isBest ? "rank best-rank" : "rank"}">${index + 1}</span>
         <span class="routing-cell" title="${escapeAttr(row.routingDetail)}">${escapeHtml(row.routing)}</span>
@@ -510,7 +532,7 @@ function renderRate(row, index, isBest) {
           <strong>${escapeHtml(formatUsd(row.totalUsd))}</strong>
           ${row.poa ? '<small>+ haulage POA</small>' : ""}
         </span>
-        <span class="number validity-text">${escapeHtml(row.validity)}</span>
+        <span class="number validity-text${row.expired ? " is-expired" : ""}">${escapeHtml(row.validity)}</span>
       </button>
       ${expanded ? renderBreakdown(row) : ""}
     </article>
@@ -581,6 +603,7 @@ function renderLine(line) {
 }
 
 function compareViewRows(left, right) {
+  if (left.expired !== right.expired) return left.expired ? 1 : -1;
   if (left.poa !== right.poa) return left.poa ? 1 : -1;
   if (left.totalUsd !== right.totalUsd) return left.totalUsd - right.totalUsd;
   return left.routing.localeCompare(right.routing);
@@ -600,9 +623,14 @@ function formatRouting(rate) {
   return "CY/CY";
 }
 
-function validityLabel(validTo) {
-  const date = parseDate(validTo);
-  return date ? `to ${date.toLocaleDateString(undefined, { day: "numeric", month: "short" })}` : "open";
+function validityLabel(validFrom, validTo, expired = false) {
+  const start = parseDate(validFrom);
+  const end = parseDate(validTo);
+  if (expired && end) return `expired ${shortDate(end)}`;
+  if (start && end) return `${shortDate(start)} → ${shortDate(end)}`;
+  if (end) return `to ${shortDate(end)}`;
+  if (start) return `from ${shortDate(start)}`;
+  return "open";
 }
 
 function extractTransit(value) {
@@ -700,10 +728,73 @@ function shortDateTime(value) {
     : date.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+function shortDate(value) {
+  return value.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
 function parseDate(value) {
   if (!value) return null;
   const date = new Date(`${value}T00:00:00Z`);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function todayUtc() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+function isExpiredRate(rate) {
+  const end = parseDate(rate.valid_to);
+  return Boolean(end && end.getTime() < todayUtc().getTime());
+}
+
+function matchesFilter(valueOrValues, selected) {
+  if (!normalized(selected)) return true;
+  if (Array.isArray(valueOrValues)) {
+    return valueOrValues.some((value) => sameValue(value, selected));
+  }
+  return sameValue(valueOrValues, selected);
+}
+
+function showAllQuotes() {
+  elements.collectionSelect.value = "";
+  elements.originSelect.value = "";
+  elements.destinationSelect.value = "";
+  elements.equipmentSelect.value = "";
+  elements.materialSelect.value = "All materials";
+  elements.showExpiredToggle.checked = true;
+  resetAndRender();
+}
+
+function isAllQuotesView() {
+  return !elements.collectionSelect.value
+    && !elements.originSelect.value
+    && !elements.destinationSelect.value
+    && !elements.equipmentSelect.value
+    && elements.materialSelect.value === "All materials";
+}
+
+function countHiddenExpiredMatches() {
+  return matchingConnectedRates({ includeExpired: true }).filter((rate) => isExpiredRate(rate)).length;
+}
+
+function hasExpiredMatches() {
+  return countHiddenExpiredMatches() > 0;
+}
+
+function matchingConnectedRates({ includeExpired }) {
+  const origin = elements.originSelect.value;
+  const destination = elements.destinationSelect.value;
+  const equipment = elements.equipmentSelect.value;
+  const material = elements.materialSelect.value;
+  return deskState.connectedRates
+    .filter((rate) =>
+      matchesFilter(rateOrigin(rate), origin)
+      && matchesFilter(rateDestination(rate), destination)
+      && (!equipment || canonicalEquipment(rate.equipment_type) === equipment)
+      && (material === "All materials" || (rate.materials || []).some((item) => sameValue(item, material))))
+    .filter((rate) => includeExpired || !isExpiredRate(rate))
+    .filter((rate) => !isHaulageRate(rate));
 }
 
 function firstPresent(...values) {

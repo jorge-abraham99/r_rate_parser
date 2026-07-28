@@ -247,6 +247,49 @@ label:focus-within {
   min-width: 130px;
 }
 
+.quote-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-left: auto;
+  padding-bottom: 1px;
+}
+
+.quote-toggle {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1.5px solid var(--ink);
+  border-radius: 5px;
+  background: #fff;
+  padding: 0 12px;
+  color: var(--body);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.quote-toggle input {
+  margin: 0;
+}
+
+.quote-reset {
+  height: 38px;
+  border: 1.5px solid var(--ink);
+  border-radius: 5px;
+  background: var(--navy);
+  padding: 0 14px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.quote-reset:hover {
+  background: var(--blue);
+}
+
 .route-arrow {
   padding-bottom: 11px;
   color: var(--quiet);
@@ -368,6 +411,14 @@ label:focus-within {
   opacity: 0.88;
 }
 
+.quote-row.expired-row {
+  background: #fff6f2;
+}
+
+.quote-row.expired-row:hover {
+  background: #fff0ea;
+}
+
 .type-chip {
   display: inline-block;
   border: 1px solid var(--green-line);
@@ -472,6 +523,11 @@ label:focus-within {
   color: var(--body);
   font-size: 11.5px;
   white-space: nowrap;
+}
+
+.validity-text.is-expired {
+  color: var(--danger);
+  font-weight: 700;
 }
 
 .rate-breakdown {
@@ -1139,6 +1195,12 @@ label:focus-within {
   .collection-field select {
     min-width: 170px;
   }
+
+  .quote-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 980px) {
@@ -1188,6 +1250,12 @@ label:focus-within {
     min-width: 0 !important;
   }
 
+  .quote-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: space-between;
+  }
+
   .quote-qty {
     max-width: 90px;
   }
@@ -1233,6 +1301,16 @@ label:focus-within {
 
   .quote-search-band .lookup-field {
     flex-basis: 100%;
+  }
+
+  .quote-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .quote-toggle,
+  .quote-reset {
+    justify-content: center;
   }
 
   .quote-qty {
