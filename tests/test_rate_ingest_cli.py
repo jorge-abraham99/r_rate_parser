@@ -272,14 +272,20 @@ def test_api_import_approve_and_search_flow(tmp_path: Path, monkeypatch):
     assert "Reudan Rate Desk" in ui_response.text
     assert "Origin port (POL)" in ui_response.text
     assert "Material" in ui_response.text
-    assert "Show expired rates" in ui_response.text
+    assert "Collection place" in ui_response.text
+    assert "Query API" not in ui_response.text
     assert "Import Rate File" not in ui_response.text
 
     import_ui_response = api_client.get("/ui/import.html")
     assert import_ui_response.status_code == 200
     assert "Drop rate sheets here" in import_ui_response.text
     assert "Review parsed sheet" in import_ui_response.text
-    assert "Which sheet is this?" in import_ui_response.text
+    assert "Current file" in import_ui_response.text
+    assert "Contract type" in import_ui_response.text
+    assert "Query API" not in import_ui_response.text
+
+    removed_query_ui_response = api_client.get("/ui/query-api.html")
+    assert removed_query_ui_response.status_code == 404
 
     replacement_response = api_client.post(
         "/api/imports",

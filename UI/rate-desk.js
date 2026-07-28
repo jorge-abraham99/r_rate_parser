@@ -1,642 +1,597 @@
-const FX_RATES = {
-  USD: 1,
-  GBP: 1.29,
-  EUR: 1.09,
-  INR: 0.0104,
-  THB: 0.0302,
-};
-
+const RATE_DESK_DEMO_MODE = Boolean(window.RATE_DESK_CONFIG?.demoMode);
+const DEFAULT_FX = { USD: 1, GBP: 1.29, EUR: 1.09, INR: 0.0104, THB: 0.0302 };
 const EQUIPMENT_OPTIONS = [
   { value: "20GP", label: "20′" },
   { value: "40GP", label: "40′" },
   { value: "40HC", label: "40′ HC" },
 ];
-
 const MATERIAL_OPTIONS = ["All materials", "Paper", "Metal", "Tyres"];
-const ANY_ORIGIN = "__any_origin__";
-const ANY_DESTINATION = "__any_destination__";
-const ANY_EQUIPMENT = "__any_equipment__";
 
 const deskState = {
-  rates: [],
-  filters: {
-    origins: [],
-    destinations: [],
-    equipment_types: [],
-    materials: [],
-    door_pickups: [],
-  },
   loaded: false,
-  expandedOfferId: null,
+  expandedId: null,
+  connectedRates: [],
+  filters: {},
 };
 
-const originSelect = document.getElementById("originSelect");
-const destinationSelect = document.getElementById("destinationSelect");
-const equipmentSelect = document.getElementById("equipmentSelect");
-const qtyInput = document.getElementById("qtyInput");
-const materialSelect = document.getElementById("materialSelect");
-const doorSelect = document.getElementById("doorSelect");
-const showExpiredToggle = document.getElementById("showExpiredToggle");
-const rateRows = document.getElementById("rateRows");
-const laneTitle = document.getElementById("laneTitle");
-const laneSummary = document.getElementById("laneSummary");
-const refreshText = document.getElementById("refreshText");
-const doorChip = document.getElementById("doorChip");
-const deskAlert = document.getElementById("deskAlert");
-const figuresNote = document.getElementById("figuresNote");
+const elements = {
+  collectionField: document.getElementById("collectionField"),
+  collectionArrow: document.getElementById("collectionArrow"),
+  collectionSelect: document.getElementById("collectionSelect"),
+  originSelect: document.getElementById("originSelect"),
+  destinationSelect: document.getElementById("destinationSelect"),
+  equipmentSelect: document.getElementById("equipmentSelect"),
+  qtyInput: document.getElementById("qtyInput"),
+  materialSelect: document.getElementById("materialSelect"),
+  rateRows: document.getElementById("rateRows"),
+  laneTitle: document.getElementById("laneTitle"),
+  laneSummary: document.getElementById("laneSummary"),
+  refreshText: document.getElementById("refreshText"),
+  demoBadge: document.getElementById("demoBadge"),
+  deskAlert: document.getElementById("deskAlert"),
+  figuresNote: document.getElementById("figuresNote"),
+};
 
-[originSelect, destinationSelect, equipmentSelect, materialSelect].forEach((select) => {
-  select.addEventListener("change", () => {
-    deskState.expandedOfferId = null;
+[elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.equipmentSelect, elements.materialSelect]
+  .forEach((element) => element.addEventListener("change", resetAndRender));
+elements.qtyInput.addEventListener("change", () => {
+  elements.qtyInput.value = clampQuantity(elements.qtyInput.value);
+  resetAndRender();
+});
+elements.qtyInput.addEventListener("input", () => {
+  if (elements.qtyInput.value !== "") resetAndRender();
+});
+
+bootRateDesk();
+
+async function bootRateDesk() {
+  elements.demoBadge.hidden = !RATE_DESK_DEMO_MODE;
+  if (RATE_DESK_DEMO_MODE) {
+    deskState.loaded = true;
+    populateDemoFilters();
+    elements.refreshText.textContent = "Frontend preview · session only";
     renderDesk();
-  });
-});
+    return;
+  }
 
-qtyInput.addEventListener("change", () => {
-  qtyInput.value = clampQuantity(qtyInput.value);
-  deskState.expandedOfferId = null;
-  renderDesk();
-});
-
-doorSelect.addEventListener("change", () => {
-  deskState.expandedOfferId = null;
-  renderDesk();
-});
-
-showExpiredToggle.addEventListener("change", () => {
-  deskState.expandedOfferId = null;
-  renderDesk();
-});
-
-loadRateDesk();
-
-async function loadRateDesk() {
   try {
     const response = await fetch("/api/rate-desk?limit=5000");
     if (!response.ok) throw new Error("The approved-rate service did not respond.");
     const payload = await response.json();
-    deskState.rates = Array.isArray(payload.rates) ? payload.rates : [];
-    deskState.filters = { ...deskState.filters, ...(payload.filters || {}) };
+    deskState.connectedRates = (Array.isArray(payload.rates) ? payload.rates : []).filter((rate) => !isSpotRate(rate));
+    deskState.filters = payload.filters || {};
     deskState.loaded = true;
-    populateFilters();
-    renderRefreshText(payload.last_refreshed);
+    populateConnectedFilters();
+    elements.refreshText.textContent = payload.last_refreshed
+      ? `Rates refreshed ${shortDateTime(payload.last_refreshed)}`
+      : "Rates refreshed from approved data";
     renderDesk();
   } catch (error) {
     deskState.loaded = true;
-    showDeskAlert(`Could not load approved rates: ${error.message}`, true);
-    refreshText.textContent = "Rate service unavailable";
-    laneTitle.textContent = "Approved rate lookup";
-    laneSummary.textContent = "could not load rates";
-    rateRows.innerHTML = '<div class="rate-empty">The Rate Desk could not connect to the local API.</div>';
+    showAlert(`Could not load approved rates: ${error.message}`);
+    elements.refreshText.textContent = "Rate service unavailable";
+    elements.rateRows.innerHTML = '<div class="rate-empty">The Rate Desk could not connect to the local service.</div>';
   }
 }
 
-function populateFilters() {
-  const defaultRate = deskState.rates
-    .filter(isCurrentlyValid)
-    .sort(compareRates)
-    [0] || deskState.rates.sort(compareRates)[0];
+function populateDemoFilters() {
+  const quote = window.RATE_DESK_DEMO.quote;
+  const origins = unique(quote.rates.flatMap((rate) => rate.origins));
+  const destinations = unique(quote.rates.flatMap((rate) => rate.destinations));
+  populateSelect(elements.collectionSelect, Object.keys(quote.haulage), "None — port drop-off", "Abbots Bromley", true);
+  populateSelect(elements.originSelect, origins, "No origins", "Felixstowe");
+  populateSelect(elements.destinationSelect, destinations, "No destinations", "Laem Chabang");
+  populateEquipment("40HC");
+  populateSelect(elements.materialSelect, MATERIAL_OPTIONS, "No materials", "All materials");
+  setCollectionVisibility(true);
+}
 
+function populateConnectedFilters() {
+  const rates = deskState.connectedRates;
+  const defaultRate = rates[0] || {};
+  const origins = unique(deskState.filters.origins || rates.map(rateOrigin));
+  const destinations = unique(deskState.filters.destinations || rates.map(rateDestination));
+  const equipment = unique(deskState.filters.equipment_types || rates.map((rate) => rate.equipment_type));
+  const materials = unique(deskState.filters.materials || rates.flatMap((rate) => rate.materials || []));
+  const pickups = Array.isArray(deskState.filters.door_pickups) ? deskState.filters.door_pickups : [];
+
+  populateSelect(elements.originSelect, origins, "No approved origins", rateOrigin(defaultRate) || origins[0] || "");
+  populateSelect(elements.destinationSelect, destinations, "No approved destinations", rateDestination(defaultRate) || destinations[0] || "");
+  populateEquipment(canonicalEquipment(defaultRate.equipment_type || equipment[0] || "40HC"));
   populateSelect(
-    originSelect,
-    deskState.filters.origins,
-    "No approved origins",
-    ANY_ORIGIN,
-    displayPlace,
-    [{ value: ANY_ORIGIN, label: "Any origin" }],
-  );
-  populateSelect(
-    destinationSelect,
-    deskState.filters.destinations,
-    "No approved destinations",
-    ANY_DESTINATION,
-    displayPlace,
-    [{ value: ANY_DESTINATION, label: "Any destination" }],
+    elements.materialSelect,
+    ["All materials", ...(materials.length ? materials : MATERIAL_OPTIONS.slice(1))],
+    "No materials",
+    "All materials",
   );
 
-  equipmentSelect.innerHTML = [
-    `<option value="${escapeAttr(ANY_EQUIPMENT)}">Any size</option>`,
-    ...EQUIPMENT_OPTIONS.map((option) => `<option value="${escapeAttr(option.value)}">${escapeHtml(option.label)}</option>`),
-  ]
-    .join("");
-  equipmentSelect.value = ANY_EQUIPMENT;
-  equipmentSelect.disabled = false;
-
-  const materials = deskState.filters.materials?.length
-    ? ["All materials", ...deskState.filters.materials.filter((value) => value && value !== "All materials")]
-    : MATERIAL_OPTIONS;
-  materialSelect.innerHTML = materials
-    .map((value) => `<option value="${escapeAttr(value)}">${escapeHtml(value)}</option>`)
-    .join("");
-  materialSelect.value = "All materials";
-  materialSelect.disabled = false;
-
-  const doorPickups = deskState.filters.door_pickups || [];
-  if (!doorPickups.length) {
-    doorSelect.innerHTML = '<option value="">Port drop-off (none)</option>';
-    doorSelect.disabled = true;
+  if (pickups.length) {
+    const names = pickups.map((pickup) => pickup.name || pickup.location).filter(Boolean);
+    populateSelect(elements.collectionSelect, names, "None — port drop-off", "", true);
+    setCollectionVisibility(true);
   } else {
-    doorSelect.innerHTML = [
-      '<option value="">Port drop-off (none)</option>',
-      ...doorPickups.map((item) => {
-        const name = item.name || item.location || "Unknown";
-        const amount = item.amount_gbp ?? item.amount;
-        const label = amount == null ? name : `${name} · £${formatNumber(amount)}`;
-        return `<option value="${escapeAttr(name)}">${escapeHtml(label)}</option>`;
-      }),
-    ].join("");
-    doorSelect.disabled = false;
+    elements.collectionSelect.innerHTML = '<option value="">None — port drop-off</option>';
+    elements.collectionSelect.value = "";
+    elements.collectionSelect.disabled = true;
+    setCollectionVisibility(false);
   }
 }
 
-function populateSelect(select, values, emptyLabel, preferred, formatter = (value) => value, leadingOptions = []) {
-  const uniqueValues = unique(values || []);
-  if (!uniqueValues.length) {
+function populateEquipment(preferred) {
+  elements.equipmentSelect.innerHTML = EQUIPMENT_OPTIONS
+    .map((item) => `<option value="${item.value}">${item.label}</option>`)
+    .join("");
+  elements.equipmentSelect.value = EQUIPMENT_OPTIONS.some((item) => item.value === preferred) ? preferred : "40HC";
+  elements.equipmentSelect.disabled = false;
+}
+
+function populateSelect(select, values, emptyLabel, preferred = "", includeBlank = false) {
+  const clean = unique(values.filter(Boolean));
+  select.innerHTML = [
+    ...(includeBlank ? [`<option value="">${escapeHtml(emptyLabel)}</option>`] : []),
+    ...clean.map((value) => `<option value="${escapeAttr(value)}">${escapeHtml(value)}</option>`),
+  ].join("");
+  if (!clean.length && !includeBlank) {
     select.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>`;
     select.disabled = true;
     return;
   }
-  select.innerHTML = [
-    ...leadingOptions.map((option) => `<option value="${escapeAttr(option.value)}">${escapeHtml(option.label)}</option>`),
-    ...uniqueValues.map((value) => `<option value="${escapeAttr(value)}">${escapeHtml(formatter(value))}</option>`),
-  ].join("");
-  if (preferred && [...leadingOptions.map((option) => option.value), ...uniqueValues].some((value) => sameValue(value, preferred))) {
-    select.value = [...leadingOptions.map((option) => option.value), ...uniqueValues].find((value) => sameValue(value, preferred));
-  } else {
-    select.value = leadingOptions[0]?.value || uniqueValues[0];
-  }
+  select.value = [...(includeBlank ? [""] : []), ...clean].includes(preferred) ? preferred : (includeBlank ? "" : clean[0]);
   select.disabled = false;
+}
+
+function setCollectionVisibility(visible) {
+  elements.collectionField.hidden = !visible;
+  elements.collectionArrow.hidden = !visible;
+}
+
+function resetAndRender() {
+  deskState.expandedId = null;
+  renderDesk();
 }
 
 function renderDesk() {
   if (!deskState.loaded) return;
-  hideDeskAlert();
+  hideAlert();
 
-  if (!deskState.rates.length) {
-    laneTitle.textContent = "Approved rate lookup";
-    laneSummary.textContent = "no approved rates available";
-    rateRows.innerHTML = '<div class="rate-empty">No rates have been published yet. Import and publish a carrier file in Import to populate this desk.</div>';
-    figuresNote.textContent = "Origin / Freight / Destination columns are USD equivalents per container.";
-    doorChip.hidden = true;
+  const quantity = clampQuantity(elements.qtyInput.value);
+  elements.qtyInput.value = quantity;
+  const rows = RATE_DESK_DEMO_MODE ? buildDemoRows(quantity) : buildConnectedRows(quantity);
+
+  const collection = elements.collectionSelect.value;
+  const laneParts = [
+    ...(collection ? [collection] : []),
+    elements.originSelect.value || "Any origin",
+    elements.destinationSelect.value || "Any destination",
+  ];
+  elements.laneTitle.textContent = laneParts.join(" → ");
+  elements.figuresNote.textContent = quantity > 1
+    ? `Figures are USD equivalents for the whole booking (${quantity} × ${formatEquipment(elements.equipmentSelect.value)}). Per-B/L charges are not multiplied.`
+    : `Figures are USD equivalents per ${formatEquipment(elements.equipmentSelect.value)}.`;
+
+  if (!rows.length) {
+    elements.laneSummary.textContent = "no parsed rates on this lane";
+    elements.rateRows.innerHTML = '<div class="rate-empty">No parsed rates for this lane and container size.</div>';
     return;
   }
 
-  const selectedOrigin = originSelect.value;
-  const selectedDestination = destinationSelect.value;
-  const selectedEquipment = equipmentSelect.value;
-  const selectedMaterial = materialSelect.value;
-  const selectedDoor = doorSelect.value;
-  const showExpired = showExpiredToggle.checked;
-  const quantity = clampQuantity(qtyInput.value);
-  qtyInput.value = quantity;
+  const best = rows.find((row) => !row.poa);
+  elements.laneSummary.textContent = collection
+    ? `${rows.length} routing option${rows.length === 1 ? "" : "s"}${best ? ` · best ${formatUsd(best.totalUsd)} all-in` : ""}`
+    : `${rows.length} contract rate${rows.length === 1 ? "" : "s"}${best ? ` · best ${formatUsd(best.totalUsd)} all-in` : ""}`;
 
-  const laneRates = deskState.rates.filter((rate) => {
-    const originMatches = selectedOrigin === ANY_ORIGIN || sameValue(rateOrigin(rate), selectedOrigin);
-    const destinationMatches = selectedDestination === ANY_DESTINATION || sameValue(rateDestination(rate), selectedDestination);
-    const equipmentMatches = selectedEquipment === ANY_EQUIPMENT || sameEquipment(rate.equipment_type, selectedEquipment);
-    return originMatches
-      && destinationMatches
-      && equipmentMatches
-      && (selectedMaterial === "All materials" || (rate.materials || []).some((material) => sameValue(material, selectedMaterial)));
-  });
-
-  const visibleRates = laneRates
-    .filter((rate) => isCurrentlyValid(rate) || (showExpired && isExpired(rate)))
-    .map((rate) => enrichRate(rate, quantity, selectedDoor))
-    .sort(compareEnrichedRates);
-
-  laneTitle.textContent = buildResultsTitle(selectedOrigin, selectedDestination, selectedEquipment, selectedMaterial);
-  renderDoorChip(selectedDoor);
-  const sizeLabel = selectedEquipment === ANY_EQUIPMENT ? "mixed container sizes" : formatEquipment(selectedEquipment);
-  figuresNote.textContent = quantity > 1
-    ? `Origin / Freight / Destination columns are USD equivalents for the whole booking (${quantity} × ${sizeLabel}) — per-B/L charges are not multiplied.`
-    : selectedEquipment === ANY_EQUIPMENT
-      ? "Origin / Freight / Destination columns are USD equivalents per container, using each rate's own equipment size."
-      : "Origin / Freight / Destination columns are USD equivalents per container.";
-
-  if (!visibleRates.length) {
-    laneSummary.textContent = "no parsed rates for this filter";
-    const onlyExpired = laneRates.some(isExpired) && !showExpired;
-    rateRows.innerHTML = `<div class="rate-empty">${escapeHtml(
-      onlyExpired
-        ? "These filters only match expired published rates. Turn on Show expired rates to view them."
-        : "No parsed rates match the current filters."
-    )}</div>`;
-    return;
-  }
-
-  const bestLive = visibleRates.find((rate) => isCurrentlyValid(rate.originalRate)) || null;
-  const bestSummary = bestLive
-    ? `${visibleRates.length} rate${visibleRates.length === 1 ? "" : "s"} · best ${formatUsd(bestLive.totalUsd)} ${bestLive.product}`
-    : `${visibleRates.length} expired rate${visibleRates.length === 1 ? "" : "s"} · shown for reference only`;
-  laneSummary.textContent = bestSummary;
-
-  rateRows.innerHTML = visibleRates.map((rate, index) => renderRate(rate, index, bestLive?.offerId || null)).join("");
-  rateRows.querySelectorAll("button[data-offer-id]").forEach((button) => {
+  const showBest = rows.filter((row) => !row.poa).length > 1;
+  elements.rateRows.innerHTML = rows.map((row, index) => renderRate(row, index, showBest && row.id === best?.id)).join("");
+  elements.rateRows.querySelectorAll("button[data-rate-id]").forEach((button) => {
     button.addEventListener("click", () => {
-      const offerId = button.dataset.offerId;
-      deskState.expandedOfferId = deskState.expandedOfferId === offerId ? null : offerId;
+      deskState.expandedId = deskState.expandedId === button.dataset.rateId ? null : button.dataset.rateId;
       renderDesk();
     });
   });
 }
 
-function enrichRate(rate, quantity, selectedDoor) {
-  const offerId = String(rate.offer_id || `${carrierName(rate)}-${rate.raw_row_reference || "row"}`);
-  const groups = buildChargeGroups(rate, quantity, selectedDoor);
-  const totalUsdExact = groups.reduce((sum, group) => sum + group.subtotalUsdExact, 0);
-  const product = formatProduct(rate);
-  const lane = formatLane(rate);
-  const tag = rate.contract_tag || contractTag(rate) || inferTagFromProduct(product);
-  const flag = inferFlag(rate, product);
-  const transit = formatTransit(rate);
-  const sailing = formatSailing(rate);
-  const freetime = formatFreetime(rate);
-  const sourceName = rate.source_file_name || rate.raw_sheet_name || "Approved rate";
-  const validity = validityPresentation(rate.valid_to);
-  const totalLabel = quantity > 1
-    ? `Total per booking (${quantity} × ${formatEquipment(canonicalEquipment(rate.equipment_type))})`
-    : `Total per ${formatEquipment(canonicalEquipment(rate.equipment_type))}`;
+function buildDemoRows(quantity) {
+  const quote = window.RATE_DESK_DEMO.quote;
+  const origin = elements.originSelect.value;
+  const destination = elements.destinationSelect.value;
+  const equipment = elements.equipmentSelect.value;
+  const material = elements.materialSelect.value;
+  const collection = elements.collectionSelect.value;
+  const baseRates = quote.rates.filter((rate) =>
+    rate.origins.includes(origin)
+    && rate.destinations.includes(destination)
+    && canonicalEquipment(rate.equipment) === equipment
+    && (material === "All materials" || rate.materials.includes(material)));
 
+  const rows = [];
+  baseRates.forEach((rate) => {
+    if (!collection) {
+      rows.push(makeDemoVariant(rate, "key", quantity, origin, ""));
+      return;
+    }
+    rows.push(makeDemoVariant(rate, "door", quantity, origin, collection));
+    rows.push(makeDemoVariant(rate, "haulier", quantity, origin, collection));
+  });
+  return rows.sort(compareViewRows);
+}
+
+function makeDemoVariant(rate, mode, quantity, origin, collection) {
+  const quote = window.RATE_DESK_DEMO.quote;
+  const fx = quote.fx;
+  const originLines = rate.origin.map((line) => makeDemoLine(line, quantity, fx));
+  let freightLines = rate.freight.map((line) => makeDemoLine(line, quantity, fx));
+  const destinationLines = rate.destination.map((line) => makeDemoLine(line, quantity, fx));
+  let inlandLines = [];
+  let poa = false;
+  let routing = "CY/CY";
+  let routingDetail = "CY/CY · port drop-off";
+  let sourceFile = rate.sourceFile;
+  let sourceTag = rate.sourceTag;
+  let fineprint = "";
+
+  if (mode === "door") {
+    const uplift = quote.doorUplift[collection] || 0;
+    freightLines = freightLines.map((line) => line.name === "Basic Ocean Freight"
+      ? makeLineView({ ...line, name: "Basic Ocean Freight — door-to-key", unit: line.unit + uplift }, quantity, fx)
+      : line);
+    inlandLines = [makeLineView({
+      name: `Inland Haulage Export — ${collection}`,
+      basis: "Container",
+      ccy: "—",
+      unit: 0,
+      included: true,
+    }, quantity, fx)];
+    routing = "Door → CY";
+    routingDetail = "Door-to-key · carrier haulage included in freight, not itemised";
+    sourceFile = "MAERSK_DOOR_299077037_JUL.xlsx";
+    sourceTag = "DOOR";
+    fineprint = `Inland haulage from ${collection} is included in the freight price — Maersk door rates do not itemise it.`;
+  }
+
+  if (mode === "haulier") {
+    const tariff = quote.haulage[collection]?.[origin];
+    poa = !tariff;
+    inlandLines = [makeLineView({
+      name: `Inland Haulage — ${collection} → ${origin} (UK Inland Haulage)`,
+      basis: "Container",
+      ccy: "GBP",
+      unit: tariff || 0,
+      poa,
+    }, quantity, fx)];
+    routing = "CY/CY + haulier";
+    routingDetail = poa
+      ? "CY/CY + merchant haulage · no tariff rate on this corridor"
+      : `CY/CY + merchant haulage · £${formatNumber(tariff)}/ctn · separate haulier booking`;
+    if (poa) {
+      fineprint = `UK Inland Haulage has no ${collection} → ${origin} rate — request a haulage quote to price this routing.`;
+    }
+  }
+
+  const groups = [
+    ...(inlandLines.length ? [makeGroup("inland", "Inland haulage", inlandLines)] : []),
+    makeGroup("origin", "Origin", originLines),
+    makeGroup("freight", "Freight", freightLines),
+    makeGroup("destination", "Destination", destinationLines),
+  ];
+  const totalUsd = sumGroups(groups);
+  const sources = [{ tag: sourceTag, file: sourceFile }];
+  if (mode === "haulier" && !poa) {
+    sources.push({ tag: "HAUL·Q2", file: "UK Haulage — Export Haulage all UK POLs, Q2 2026 validity.xlsx" });
+  }
   return {
-    offerId,
-    originalRate: rate,
-    product,
-    lane,
-    tag,
-    flag,
-    transit,
-    sailing,
-    freetime,
-    sourceName,
-    validity,
-    totalLabel,
+    id: `${rate.id}-${mode}`,
+    type: "CONTRACT",
+    routing,
+    routingDetail,
+    sources,
+    transit: extractTransit(rate.sailing),
+    validity: rate.validity,
+    sailing: rate.sailing,
+    freetime: rate.freetime,
     groups,
-    originUsd: groups[0]?.subtotalUsdExact || 0,
-    freightUsd: groups[1]?.subtotalUsdExact || 0,
-    destinationUsd: groups[2]?.subtotalUsdExact || 0,
-    totalUsd: totalUsdExact,
-    totalUsdRounded: roundMoney(totalUsdExact),
-    zeroNote: buildZeroNote(groups),
-    fineprint: buildFinePrint(rate, groups),
+    inlandUsd: groupTotal(groups, "inland"),
+    originUsd: groupTotal(groups, "origin"),
+    freightUsd: groupTotal(groups, "freight"),
+    destinationUsd: groupTotal(groups, "destination"),
+    totalUsd,
+    poa,
+    zeroChargeCount: rate.zeroChargeCount || 0,
+    fineprint,
+    quantity,
+    equipment: rate.equipment,
   };
 }
 
-function buildChargeGroups(rate, quantity, selectedDoor) {
-  const analysisGroups = buildGroupsFromAnalysis(rate.charge_analysis, quantity);
-  if (analysisGroups) {
-    return applyDoorCharges(analysisGroups, quantity, selectedDoor);
-  }
-
-  const rawCharges = Array.isArray(rate.charges) ? rate.charges : [];
-  const lines = [];
-  const seenBase = rawCharges.some((charge) => isBaseCharge(charge));
-
-  if (!seenBase && rate.base_amount != null) {
-    lines.push(makeLine("freight", {
-      charge_name: rate.all_in_flag === true ? "All-in as quoted" : "Basic Ocean Freight",
-      basis: "Container",
-      currency: rate.base_currency || "USD",
-      amount: rate.base_amount,
-      synthetic: true,
-    }, quantity));
-  }
-
-  rawCharges.forEach((charge) => {
-    lines.push(makeLine(bucketForCharge(charge), charge, quantity));
-  });
-
-  if (!rawCharges.length && rate.all_in_amount != null && rate.base_amount == null) {
-    lines.push(makeLine("freight", {
-      charge_name: "All-in as quoted",
-      basis: "Container",
-      currency: rate.base_currency || "USD",
-      amount: rate.all_in_amount,
-      synthetic: true,
-    }, quantity));
-  }
-
-  const grouped = [
-    { key: "origin", label: "Origin charges" },
-    { key: "freight", label: "Freight charges" },
-    { key: "destination", label: "Destination charges" },
-  ].map((group) => {
-    const groupLines = lines.filter((line) => line.bucket === group.key);
-    const subtotalUsdExact = groupLines.reduce((sum, line) => sum + line.usdExact, 0);
-    return {
-      key: group.key,
-      label: group.label,
-      lines: groupLines.filter((line) => !line.zeroRated),
-      zeroLines: groupLines.filter((line) => line.zeroRated),
-      subtotalUsdExact,
-      subtotalUsd: formatUsd(subtotalUsdExact),
-      subLabel: `${group.label.replace(" charges", "")} subtotal (USD)`,
-    };
-  });
-
-  return applyDoorCharges(grouped, quantity, selectedDoor);
+function makeDemoLine(tuple, quantity, fx) {
+  return makeLineView({
+    name: tuple[0],
+    basis: tuple[1],
+    ccy: tuple[2],
+    unit: tuple[3],
+  }, quantity, fx);
 }
 
-function buildGroupsFromAnalysis(analysis, quantity) {
-  if (!analysis || !Array.isArray(analysis.groups)) return null;
-
-  const groups = analysis.groups.map((group) => {
-    const rawLines = Array.isArray(group.lines) ? group.lines : [];
-    const normalizedLines = rawLines.map((line) => makeAnalysisLine(group.key, line, quantity));
-    const visibleLines = normalizedLines.filter((line) => !line.zeroRated);
-    const zeroLines = normalizedLines.filter((line) => line.zeroRated);
-    const subtotalUsdExact = normalizedLines.reduce((sum, line) => sum + line.usdExact, 0);
-    return {
-      key: group.key,
-      label: group.label || `${capitalize(group.key)} charges`,
-      lines: visibleLines,
-      zeroLines,
-      subtotalUsdExact,
-      subtotalUsd: formatUsd(subtotalUsdExact),
-      subLabel: group.key === "unmatched"
-        ? "Unmapped subtotal (USD)"
-        : `${(group.label || `${capitalize(group.key)} charges`).replace(" charges", "")} subtotal (USD)`,
-    };
-  });
-
-  const unmatchedLines = Array.isArray(analysis.unmatched_lines)
-    ? analysis.unmatched_lines.map((line) => makeAnalysisLine("unmatched", line, quantity))
-    : [];
-  if (unmatchedLines.length) {
-    const visibleLines = unmatchedLines.filter((line) => !line.zeroRated);
-    const zeroLines = unmatchedLines.filter((line) => line.zeroRated);
-    const subtotalUsdExact = unmatchedLines.reduce((sum, line) => sum + line.usdExact, 0);
-    groups.push({
-      key: "unmatched",
-      label: "Unmapped charges",
-      lines: visibleLines,
-      zeroLines,
-      subtotalUsdExact,
-      subtotalUsd: formatUsd(subtotalUsdExact),
-      subLabel: "Unmapped subtotal (USD)",
-    });
-  }
-
-  return groups;
+function buildConnectedRows(quantity) {
+  const origin = elements.originSelect.value;
+  const destination = elements.destinationSelect.value;
+  const equipment = elements.equipmentSelect.value;
+  const material = elements.materialSelect.value;
+  return deskState.connectedRates
+    .filter((rate) =>
+      sameValue(rateOrigin(rate), origin)
+      && sameValue(rateDestination(rate), destination)
+      && canonicalEquipment(rate.equipment_type) === equipment
+      && (material === "All materials" || (rate.materials || []).some((item) => sameValue(item, material))))
+    .map((rate) => makeConnectedRow(rate, quantity))
+    .sort(compareViewRows);
 }
 
-function makeAnalysisLine(bucket, line, quantity) {
-  const basis = formatBasis(line.basis);
-  const qty = quantityForRule(line.quantity_rule, basis, quantity);
-  const ccy = (line.currency || "USD").toUpperCase();
-  const unit = toNumber(line.unit_amount) || 0;
-  const usdUnit = toNumber(line.usd_unit_amount) || 0;
-  const usdExact = usdUnit * qty;
+function makeConnectedRow(rate, quantity) {
+  const groups = connectedGroups(rate, quantity);
+  const totalUsd = sumGroups(groups);
+  const sourceFile = rate.source_file_name || rate.raw_sheet_name || "Approved rate";
+  const tag = rate.contract_tag || rate.offer_reference || "KEY";
   return {
-    bucket,
+    id: String(rate.offer_id || `${sourceFile}-${rate.raw_row_reference || "row"}`),
+    type: "CONTRACT",
+    routing: formatRouting(rate),
+    routingDetail: rate.routing_note || formatRouting(rate),
+    sources: [{ tag, file: sourceFile }],
+    transit: rate.transit_time_days ? `${rate.transit_time_days}d` : extractTransit(rate.routing_note || ""),
+    validity: validityLabel(rate.valid_to),
+    sailing: rate.routing_note || "",
+    freetime: extractFreetime(rate),
+    groups,
+    inlandUsd: groupTotal(groups, "inland"),
+    originUsd: groupTotal(groups, "origin"),
+    freightUsd: groupTotal(groups, "freight"),
+    destinationUsd: groupTotal(groups, "destination"),
+    totalUsd,
+    poa: false,
+    zeroChargeCount: groups.reduce((sum, group) => sum + group.zeroLines.length, 0),
+    fineprint: "",
+    quantity,
+    equipment: rate.equipment_type,
+  };
+}
+
+function connectedGroups(rate, quantity) {
+  const analysisGroups = Array.isArray(rate.charge_analysis?.groups) ? rate.charge_analysis.groups : null;
+  if (analysisGroups) {
+    const groups = analysisGroups.map((group) => {
+      const lines = (group.lines || []).map((line) => makeLineView({
+        name: line.name,
+        basis: line.basis,
+        ccy: line.currency || "USD",
+        unit: numberValue(line.unit_amount) || 0,
+        usdUnit: numberValue(line.usd_unit_amount),
+        zeroRated: Boolean(line.zero_rated),
+      }, quantity, DEFAULT_FX, line.quantity_rule));
+      return makeGroup(group.key, (group.label || group.key).replace(" charges", ""), lines);
+    });
+    if (Array.isArray(rate.charge_analysis.unmatched_lines) && rate.charge_analysis.unmatched_lines.length) {
+      const lines = rate.charge_analysis.unmatched_lines.map((line) => makeLineView({
+        name: line.name,
+        basis: line.basis,
+        ccy: line.currency || "USD",
+        unit: numberValue(line.unit_amount) || 0,
+        usdUnit: numberValue(line.usd_unit_amount),
+        zeroRated: Boolean(line.zero_rated),
+      }, quantity, DEFAULT_FX, line.quantity_rule));
+      groups.push(makeGroup("unmatched", "Unmapped", lines));
+    }
+    return orderGroups(groups);
+  }
+
+  const raw = Array.isArray(rate.charges) ? rate.charges : [];
+  const lines = raw.map((charge) => makeLineView({
+    name: charge.charge_name || charge.name || "Charge",
+    basis: charge.basis || "Container",
+    ccy: charge.currency || charge.ccy || rate.base_currency || "USD",
+    unit: numberValue(charge.amount ?? charge.unit) || 0,
+  }, quantity, DEFAULT_FX));
+  if (!raw.some(isBaseCharge) && rate.base_amount != null) {
+    lines.push(makeLineView({
+      name: rate.all_in_flag === true ? "All-in as quoted" : "Basic Ocean Freight",
+      basis: "Container",
+      ccy: rate.base_currency || "USD",
+      unit: numberValue(rate.base_amount) || 0,
+    }, quantity, DEFAULT_FX));
+  }
+  return orderGroups(["origin", "freight", "destination"].map((key) =>
+    makeGroup(key, capitalize(key), lines.filter((line) => bucketForLine(line) === key))));
+}
+
+function makeLineView(line, quantity, fx, quantityRule = "") {
+  const basis = line.basis || "Container";
+  const qty = quantityRule === "per_bill_of_lading" || quantityRule === "percent"
+    ? 1
+    : quantityForBasis(basis, quantity);
+  const ccy = (line.ccy || "USD").toUpperCase();
+  const unit = numberValue(line.unit) || 0;
+  const usdExact = line.included || line.poa
+    ? 0
+    : line.usdUnit != null
+      ? line.usdUnit * qty
+      : unit * qty * (fx[ccy] || 1);
+  return {
     name: line.name || "Charge",
     basis,
     qty,
     ccy,
     unit,
     usdExact,
-    usdDisplay: formatUsd(usdExact),
-    unitDisplay: formatUnit(unit),
-    zeroRated: Boolean(line.zero_rated) || unit === 0,
-    matchedBy: line.matched_by || "",
+    included: Boolean(line.included),
+    poa: Boolean(line.poa),
+    zeroRated: Boolean(line.zeroRated) || (!line.included && !line.poa && unit === 0),
   };
 }
 
-function applyDoorCharges(groups, quantity, selectedDoor) {
-  const clonedGroups = groups.map((group) => ({
-    ...group,
-    lines: [...group.lines],
-    zeroLines: [...(group.zeroLines || [])],
-  }));
-  const doorCharge = selectedDoor ? selectedDoorRate(selectedDoor) : null;
-  if (!doorCharge) return clonedGroups;
-
-  const originGroup = clonedGroups.find((group) => group.key === "origin");
-  if (!originGroup) return clonedGroups;
-
-  const fuelUnit = roundMoney(doorCharge.amount_gbp * 0.057);
-  originGroup.lines = originGroup.lines.filter((line) => normalized(line.name) !== normalized("Export Intermodal Fuel Fee"));
-  originGroup.zeroLines = originGroup.zeroLines.filter((line) => normalized(line.name) !== normalized("Export Intermodal Fuel Fee"));
-
-  const inland = makeSyntheticLine("origin", "Inland Haulage Export", "Container", "GBP", doorCharge.amount_gbp, quantity);
-  const fuel = makeSyntheticLine("origin", "Export Intermodal Fuel Fee", "Percent", "GBP", fuelUnit, quantity);
-  const target = fuel.zeroRated ? originGroup.zeroLines : originGroup.lines;
-  originGroup.lines.push(inland);
-  target.push(fuel);
-  const allOriginLines = [...originGroup.lines, ...originGroup.zeroLines];
-  originGroup.subtotalUsdExact = allOriginLines.reduce((sum, line) => sum + line.usdExact, 0);
-  originGroup.subtotalUsd = formatUsd(originGroup.subtotalUsdExact);
-
-  return clonedGroups;
-}
-
-function makeLine(bucket, charge, quantity) {
-  const basis = formatBasis(charge.basis);
-  const qty = quantityForBasis(basis, quantity);
-  const ccy = (charge.currency || charge.ccy || "USD").toUpperCase();
-  const unit = toNumber(charge.amount ?? charge.unit) || 0;
-  const usdExact = unit * qty * fxRate(ccy);
+function makeGroup(key, label, allLines) {
+  const lines = allLines.filter((line) => !line.zeroRated);
+  const zeroLines = allLines.filter((line) => line.zeroRated);
   return {
-    bucket,
-    name: charge.charge_name || charge.name || "Charge",
-    basis,
-    qty,
-    ccy,
-    unit,
-    usdExact,
-    usdDisplay: formatUsd(usdExact),
-    unitDisplay: formatUnit(unit),
-    zeroRated: unit === 0,
+    key,
+    label,
+    lines,
+    zeroLines,
+    subtotalUsd: allLines.reduce((sum, line) => sum + line.usdExact, 0),
+    hasPoa: allLines.some((line) => line.poa),
   };
 }
 
-function makeSyntheticLine(bucket, name, basis, ccy, unit, quantity) {
-  return makeLine(bucket, {
-    charge_name: name,
-    basis,
-    currency: ccy,
-    amount: unit,
-  }, quantity);
+function orderGroups(groups) {
+  const order = ["inland", "origin", "freight", "destination", "unmatched"];
+  return groups
+    .filter((group) => group.lines.length || group.zeroLines.length || group.subtotalUsd)
+    .sort((left, right) => order.indexOf(left.key) - order.indexOf(right.key));
 }
 
-function bucketForCharge(charge) {
-  const name = normalized(charge.charge_name);
-  const type = normalized(charge.charge_type);
-  if (type === "base" || name.includes("ocean freight") || name.includes("bunker") || name.includes("emission") || name.includes("fuel eu")) {
-    return "freight";
-  }
-  if (
-    name.includes("origin")
-    || name.includes("export")
-    || name.includes("haulage")
-    || name.includes("intermodal")
-    || name.includes("rail")
-    || name.includes("truck")
-    || name.includes("pick")
-  ) {
-    return "origin";
-  }
-  if (
-    name.includes("destination")
-    || name.includes("import")
-    || name.includes("terminal handling")
-    || name.includes("documentation")
-    || name.includes("container protect")
-    || name.includes("dthc")
-    || name.includes("thc")
-    || name.includes("delivery")
-  ) {
-    return "destination";
-  }
-  if (name.includes("doc")) return "destination";
-  return "freight";
-}
-
-function formatBasis(value) {
-  const text = (value || "Container").trim();
-  if (!text) return "Container";
-  return text;
-}
-
-function quantityForBasis(basis, quantity) {
-  const text = normalized(basis);
-  if (text.includes("bill of lading") || text.includes("b/l") || text.includes("bl") || text.includes("booking")) return 1;
-  if (text.includes("percent")) return 1;
-  return quantity;
-}
-
-function quantityForRule(rule, basis, quantity) {
-  if (rule === "per_bill_of_lading" || rule === "percent") return 1;
-  return quantityForBasis(basis, quantity);
-}
-
-function renderRate(rate, index, bestOfferId) {
-  const expanded = deskState.expandedOfferId === rate.offerId;
-  const isBest = Boolean(bestOfferId && bestOfferId === rate.offerId && isCurrentlyValid(rate.originalRate));
+function renderRate(row, index, isBest) {
+  const expanded = deskState.expandedId === row.id;
   return `
     <article class="rate-record">
-      <button
-        class="quote-grid quote-row${isBest ? " best" : ""}${rate.validity.expired ? " expired" : ""}"
-        type="button"
-        data-offer-id="${escapeAttr(rate.offerId)}"
-        aria-expanded="${expanded}"
-      >
-        <span class="rank">${index + 1}</span>
-        <span class="rate-cell">
-          <span class="rate-name">${escapeHtml(rate.product)}</span>
-          <span class="rate-lane">${escapeHtml(rate.lane)}</span>
-          ${isBest ? '<span class="best-badge">Best rate</span>' : ""}
-          ${rate.flag ? `<span class="flag-badge">${escapeHtml(rate.flag)}</span>` : ""}
+      <button class="quote-grid quote-row${row.poa ? " poa-row" : ""}" type="button" data-rate-id="${escapeAttr(row.id)}" aria-expanded="${expanded}">
+        <span><span class="type-chip">CONTRACT</span></span>
+        <span class="${isBest ? "rank best-rank" : "rank"}">${index + 1}</span>
+        <span class="routing-cell" title="${escapeAttr(row.routingDetail)}">${escapeHtml(row.routing)}</span>
+        <span class="source-tags">${row.sources.map((source) => `<span title="${escapeAttr(source.file)}">${escapeHtml(source.tag)}</span>`).join("")}</span>
+        <span class="mono transit-value">${escapeHtml(row.transit || "—")}</span>
+        <span class="number">${renderInland(row)}</span>
+        <span class="number component-value">${escapeHtml(formatUsd(row.originUsd))}</span>
+        <span class="number component-value">${escapeHtml(formatUsd(row.freightUsd))}</span>
+        <span class="number component-value">${escapeHtml(formatUsd(row.destinationUsd))}</span>
+        <span class="number all-in-cell">
+          <strong>${escapeHtml(formatUsd(row.totalUsd))}</strong>
+          ${row.poa ? '<small>+ haulage POA</small>' : ""}
         </span>
-        <span class="source-cell" title="${escapeAttr(rate.sourceName)}">
-          ${rate.tag ? `<span class="mono-chip">${escapeHtml(rate.tag)}</span>` : ""}
-        </span>
-        <span class="transit-value">${escapeHtml(rate.transit)}</span>
-        <span class="component-value">${escapeHtml(formatUsd(rate.originUsd))}</span>
-        <span class="component-value">${escapeHtml(formatUsd(rate.freightUsd))}</span>
-        <span class="component-value">${escapeHtml(formatUsd(rate.destinationUsd))}</span>
-        <span class="all-in-value">${escapeHtml(formatUsd(rate.totalUsd))}</span>
-        <span><span class="validity-chip${rate.validity.warning ? " warning" : ""}${rate.validity.expired ? " expired" : ""}">${escapeHtml(rate.validity.label)}</span></span>
+        <span class="number validity-text">${escapeHtml(row.validity)}</span>
       </button>
-      ${expanded ? renderBreakdown(rate) : ""}
+      ${expanded ? renderBreakdown(row) : ""}
     </article>
   `;
 }
 
-function renderBreakdown(rate) {
-  return `
-    <div class="rate-breakdown">
-      <div class="breakdown-meta">
-        <span class="lane-chip">${escapeHtml(rate.lane)}</span>
-        <span class="source-detail"><span>Source</span><span class="mono">${escapeHtml(rate.sourceName)}</span></span>
-        ${rate.sailing ? `<span class="mono">${escapeHtml(rate.sailing)}</span>` : ""}
-        ${rate.freetime ? `<span class="pill">${escapeHtml(rate.freetime)}</span>` : ""}
-      </div>
-      <div class="breakdown-facts">
-        ${renderBreakdownFact("Origin", displayPlace(rate.originalRate.place_of_receipt || rate.originalRate.origin || rate.originalRate.pol))}
-        ${renderBreakdownFact("POL", displayPlace(rate.originalRate.pol))}
-        ${renderBreakdownFact("POD", displayPlace(rate.originalRate.pod))}
-        ${renderBreakdownFact("Delivery", displayPlace(rate.originalRate.final_destination || rate.originalRate.pod))}
-        ${renderBreakdownFact("Equipment", formatEquipment(rate.originalRate.equipment_type))}
-        ${renderBreakdownFact("Validity", formatValidityRange(rate.originalRate.valid_from, rate.originalRate.valid_to))}
-        ${renderBreakdownFact("Service", rate.originalRate.service_mode || "—")}
-        ${renderBreakdownFact("Source Row", rate.originalRate.raw_row_reference || "—")}
-      </div>
-      <div class="breakdown-panel">
-        ${rate.groups.map(renderGroup).join("")}
-        <div class="breakdown-total">
-          <span>${escapeHtml(rate.totalLabel)}</span>
-          <span>${escapeHtml(formatUsd(rate.totalUsd))}</span>
-        </div>
-      </div>
-      ${rate.zeroNote ? `<div class="zero-note">${escapeHtml(rate.zeroNote)}</div>` : ""}
-      <div class="fine-print">${escapeHtml(rate.fineprint)}</div>
-    </div>
-  `;
+function renderInland(row) {
+  if (row.poa) return '<span class="poa-chip">POA</span>';
+  if (!row.groups.some((group) => group.key === "inland") || row.groups.find((group) => group.key === "inland")?.lines.some((line) => line.included)) {
+    return '<span class="muted-mono">—</span>';
+  }
+  return `<span class="component-value">${escapeHtml(formatUsd(row.inlandUsd))}</span>`;
 }
 
-function renderBreakdownFact(label, value) {
+function renderBreakdown(row) {
+  const totalLabel = row.quantity > 1
+    ? `Total per booking (${row.quantity} × ${formatEquipment(row.equipment)})`
+    : `Total per ${formatEquipment(row.equipment)}`;
   return `
-    <div class="breakdown-fact">
-      <span class="breakdown-fact-label">${escapeHtml(label)}</span>
-      <span class="breakdown-fact-value">${escapeHtml(value || "—")}</span>
+    <div class="rate-breakdown">
+      ${(row.sailing || row.freetime) ? `
+        <div class="breakdown-meta">
+          ${row.sailing ? `<span class="mono">${escapeHtml(row.sailing)}</span>` : ""}
+          ${row.freetime ? `<span class="freetime-chip">${escapeHtml(row.freetime)}</span>` : ""}
+        </div>` : ""}
+      <div class="breakdown-panel">
+        <div class="breakdown-header">
+          <span>Charge</span><span>Basis</span><span class="number">Unit price</span><span class="number">USD</span>
+        </div>
+        ${row.groups.map(renderGroup).join("")}
+        <div class="breakdown-total">
+          <span>${escapeHtml(totalLabel)}${row.poa ? " — priced legs only" : ""}</span>
+          <strong>${escapeHtml(formatUsd(row.totalUsd))}</strong>
+        </div>
+      </div>
+      ${row.zeroChargeCount ? `<div class="zero-note">+ ${row.zeroChargeCount} charges on the sheet at 0 — collapsed from this view.</div>` : ""}
+      ${row.fineprint ? `<div class="fine-print">${escapeHtml(row.fineprint)}</div>` : ""}
     </div>
   `;
 }
 
 function renderGroup(group) {
+  const subtotal = group.hasPoa ? `${formatUsd(group.subtotalUsd)} + POA` : formatUsd(group.subtotalUsd);
   return `
-    <div class="breakdown-group-header">
-      <span>${escapeHtml(group.label)}</span>
-      <span>Basis</span>
-      <span style="text-align:right">Qty</span>
-      <span>Ccy</span>
-      <span style="text-align:right">Unit price</span>
-      <span style="text-align:right" title="Converted to USD where the source charge uses another currency">USD equiv.</span>
-    </div>
-    ${group.lines.length ? group.lines.map(renderLine).join("") : `
-      <div class="breakdown-row">
-        <span>No mapped charges</span><span class="dim">—</span><span class="qty">—</span><span class="ccy">—</span><span class="money">—</span><span class="money">—</span>
-      </div>
-    `}
-    <div class="breakdown-subtotal">
-      <span>${escapeHtml(group.subLabel)}</span>
-      <span>${escapeHtml(group.subtotalUsd)}</span>
-    </div>
+    <div class="breakdown-band"><span>${escapeHtml(group.label)}</span><strong>${escapeHtml(subtotal)}</strong></div>
+    ${group.lines.map(renderLine).join("")}
   `;
 }
 
 function renderLine(line) {
+  let unit = `${line.ccy} ${formatNumber(line.unit)}${line.qty > 1 ? ` × ${line.qty}` : ""}`;
+  let usd = `${line.ccy !== "USD" && line.usdExact !== 0 ? "≈ " : ""}${formatNumber(line.usdExact)}`;
+  if (line.included) {
+    unit = "—";
+    usd = "Incl.";
+  } else if (line.poa) {
+    unit = `${line.ccy} POA`;
+    usd = "—";
+  }
   return `
     <div class="breakdown-row">
       <span>${escapeHtml(line.name)}</span>
       <span class="dim">${escapeHtml(line.basis)}</span>
-      <span class="qty">${escapeHtml(String(line.qty))}</span>
-      <span class="ccy">${escapeHtml(line.ccy)}</span>
-      <span class="money">${escapeHtml(line.unitDisplay)}</span>
-      <span class="money">${escapeHtml(line.usdDisplay)}</span>
+      <span class="number mono">${escapeHtml(unit)}</span>
+      <span class="number mono">${escapeHtml(usd)}</span>
     </div>
   `;
 }
 
-function buildZeroNote(groups) {
-  const zeroCount = groups.reduce((sum, group) => sum + group.zeroLines.length, 0);
-  if (!zeroCount) return "";
-  return `${zeroCount} zero-rated charge${zeroCount === 1 ? "" : "s"} collapsed into a footnote by default.`;
+function compareViewRows(left, right) {
+  if (left.poa !== right.poa) return left.poa ? 1 : -1;
+  if (left.totalUsd !== right.totalUsd) return left.totalUsd - right.totalUsd;
+  return left.routing.localeCompare(right.routing);
 }
 
-function buildFinePrint(rate, groups) {
-  const parts = [];
-  if (rate.transit_time_days) parts.push(`Transit ${rate.transit_time_days} days`);
-  if (rate.routing_note) parts.push(rate.routing_note);
-  if (rate.notes_summary) parts.push(rate.notes_summary);
-  (rate.notes || []).forEach((note) => {
-    if (note.note_text) parts.push(note.note_text);
-  });
-  if (!parts.length && groups.every((group) => group.lines.every((line) => line.zeroRated))) {
-    parts.push("No additional source notes were recorded for this rate.");
-  }
-  return unique(parts.map((value) => value.trim()).filter(Boolean)).join(" · ") || "No additional source notes were recorded for this rate.";
+function sumGroups(groups) {
+  return groups.reduce((sum, group) => sum + group.subtotalUsd, 0);
+}
+
+function groupTotal(groups, key) {
+  return groups.find((group) => group.key === key)?.subtotalUsd || 0;
+}
+
+function formatRouting(rate) {
+  const mode = normalized(rate.service_mode);
+  if (mode.includes("door")) return "Door → CY";
+  return "CY/CY";
+}
+
+function validityLabel(validTo) {
+  const date = parseDate(validTo);
+  return date ? `to ${date.toLocaleDateString(undefined, { day: "numeric", month: "short" })}` : "open";
+}
+
+function extractTransit(value) {
+  const match = String(value || "").match(/(\d+d(?:\s+\d+h)?)/i);
+  return match ? match[1] : "—";
+}
+
+function extractFreetime(rate) {
+  const text = [rate.notes_summary, ...(rate.notes || []).map((note) => note.note_text)].filter(Boolean).join(" ");
+  return text.match(/(\d+\s*d[^·,.]*)/i)?.[1] || "";
+}
+
+function quantityForBasis(basis, quantity) {
+  const value = normalized(basis);
+  if (value.includes("bill of lading") || value.includes("b/l") || value === "bl" || value.includes("booking") || value.includes("percent")) return 1;
+  return quantity;
+}
+
+function bucketForLine(line) {
+  const name = normalized(line.name);
+  if (name.includes("origin") || name.includes("export") || name.includes("haulage") || name.includes("intermodal") || name.includes("pick")) return "origin";
+  if (name.includes("destination") || name.includes("import") || name.includes("terminal") || name.includes("documentation") || name.includes("protect") || name.includes("delivery") || name.includes("thc")) return "destination";
+  return "freight";
+}
+
+function isBaseCharge(charge) {
+  const name = normalized(charge.charge_name || charge.name);
+  return normalized(charge.charge_type) === "base" || name.includes("basic ocean freight") || name === "ocean freight";
+}
+
+function isSpotRate(rate) {
+  return [rate.contract_tag, rate.carrier_label, rate.offer_reference, rate.source_file_name]
+    .filter(Boolean)
+    .some((value) => normalized(value).includes("spot"));
 }
 
 function rateOrigin(rate) {
@@ -647,167 +602,59 @@ function rateDestination(rate) {
   return firstPresent(rate.final_destination, rate.pod);
 }
 
-function formatLane(rate) {
-  const origin = rateOrigin(rate);
-  const destination = rateDestination(rate);
-  if (origin && destination) return `${displayPlace(origin)} → ${displayPlace(destination)}`;
-  if (origin) return displayPlace(origin);
-  if (destination) return displayPlace(destination);
-  return "Lane not available";
-}
-
-function formatValidityRange(validFrom, validTo) {
-  const start = parseDate(validFrom);
-  const end = parseDate(validTo);
-  if (start && end) return `${formatDate(start)} → ${formatDate(end)}`;
-  if (start) return `from ${formatDate(start)}`;
-  if (end) return `to ${formatDate(end)}`;
-  return "open";
-}
-
-function formatProduct(rate) {
-  const carrier = carrierName(rate);
-  if (normalized(rate.contract_tag) === "spot") return `${carrier} · Spot`;
-  if (rate.contract_tag) return `${carrier} · Contract`;
-  if (rate.offer_reference) return `${carrier} · Spot`;
-  return carrier;
-}
-
-function inferTagFromProduct(product) {
-  if (product.toLowerCase().includes("spot")) return "SPOT";
-  return "";
-}
-
-function inferFlag(rate, product) {
-  if (product.toLowerCase().includes("spot")) return "spot";
-  return "";
-}
-
-function formatTransit(rate) {
-  if (rate.transit_time_days) return `${rate.transit_time_days}d`;
-  const note = `${rate.routing_note || ""} ${(rate.notes || []).map((item) => item.note_text || "").join(" ")}`.toLowerCase();
-  const match = note.match(/(\d+)\s*d/);
-  return match ? `${match[1]}d` : "—";
-}
-
-function formatSailing(rate) {
-  if (rate.routing_note) return rate.routing_note;
-  return "";
-}
-
-function formatFreetime(rate) {
-  const notes = [rate.notes_summary, ...(rate.notes || []).map((note) => note.note_text)].filter(Boolean).join(" ");
-  const match = notes.match(/(\d+\s*d[^·,.]*)/i);
-  return match ? match[1] : "";
-}
-
-function carrierName(rate) {
-  return rate.carrier_label || rate.carrier_name || rate.provider_name || "Carrier";
-}
-
-function contractTag(rate) {
-  if (rate.contract_tag) return rate.contract_tag;
-  if (rate.offer_reference) return rate.offer_reference;
-  return "";
-}
-
-function renderDoorChip(selectedDoor) {
-  if (!selectedDoor) {
-    doorChip.hidden = true;
-    return;
-  }
-  const pickup = selectedDoorRate(selectedDoor);
-  if (!pickup) {
-    doorChip.hidden = true;
-    return;
-  }
-  doorChip.hidden = false;
-  doorChip.textContent = `Door: ${pickup.name} → inland haulage £${formatNumber(pickup.amount_gbp)} / ctn added to origin charges`;
-}
-
-function selectedDoorRate(selectedDoor) {
-  return (deskState.filters.door_pickups || []).find((item) => sameValue(item.name || item.location, selectedDoor)) || null;
-}
-
-function renderRefreshText(value) {
-  if (!value) {
-    refreshText.textContent = "Rates refreshed from approved data";
-    return;
-  }
-  refreshText.textContent = `Rates refreshed ${shortDateTime(value)}`;
-}
-
-function showDeskAlert(message, error = false) {
-  deskAlert.hidden = false;
-  deskAlert.className = `desk-alert${error ? " error" : ""}`;
-  deskAlert.textContent = message;
-}
-
-function hideDeskAlert() {
-  deskAlert.hidden = true;
-}
-
-function compareRates(left, right) {
-  const leftLive = isCurrentlyValid(left);
-  const rightLive = isCurrentlyValid(right);
-  if (leftLive !== rightLive) return leftLive ? -1 : 1;
-  return (toNumber(left.all_in_usd) ?? Number.MAX_SAFE_INTEGER) - (toNumber(right.all_in_usd) ?? Number.MAX_SAFE_INTEGER);
-}
-
-function buildResultsTitle(selectedOrigin, selectedDestination, selectedEquipment, selectedMaterial) {
-  const lane = `${selectedOrigin === ANY_ORIGIN ? "Any origin" : displayPlace(selectedOrigin)} → ${selectedDestination === ANY_DESTINATION ? "Any destination" : displayPlace(selectedDestination)}`;
-  const tags = [];
-  if (selectedEquipment !== ANY_EQUIPMENT) tags.push(formatEquipment(selectedEquipment));
-  if (selectedMaterial !== "All materials") tags.push(selectedMaterial);
-  return tags.length ? `${lane} · ${tags.join(" · ")}` : lane;
-}
-
-function compareEnrichedRates(left, right) {
-  const leftLive = isCurrentlyValid(left.originalRate);
-  const rightLive = isCurrentlyValid(right.originalRate);
-  if (leftLive !== rightLive) return leftLive ? -1 : 1;
-  if (left.totalUsdRounded !== right.totalUsdRounded) return left.totalUsdRounded - right.totalUsdRounded;
-  return left.product.localeCompare(right.product);
-}
-
-function isCurrentlyValid(rate) {
-  const today = todayUtc();
-  const start = parseDate(rate.valid_from);
-  const end = parseDate(rate.valid_to);
-  if (start && start > today) return false;
-  if (end && end < today) return false;
-  return true;
-}
-
-function isExpired(rate) {
-  const end = parseDate(rate.valid_to);
-  return Boolean(end && end < todayUtc());
-}
-
-function validityPresentation(validTo) {
-  const end = parseDate(validTo);
-  if (!end) return { label: "open", warning: false, expired: false };
-  const diffDays = Math.round((end.getTime() - todayUtc().getTime()) / 86400000);
-  if (diffDays < 0) return { label: `expired ${formatDate(end)}`, warning: false, expired: true };
-  if (diffDays <= 7) return { label: `expires ${formatDate(end)}`, warning: true, expired: false };
-  return { label: `to ${formatDate(end)}`, warning: false, expired: false };
-}
-
-function sameEquipment(left, right) {
-  return canonicalEquipment(left) === canonicalEquipment(right);
-}
-
 function canonicalEquipment(value) {
   const text = normalized(value);
-  if (text === "20" || text === "20gp" || text === "20ft" || text === "20dv") return "20GP";
-  if (text === "40" || text === "40gp") return "40GP";
-  if (text === "40hc" || text === "40hq" || text === "40'hc" || text === "40′hc" || text === "feu") return "40HC";
-  return (value || "").toUpperCase();
+  if (["20", "20gp", "20ft", "20dv"].includes(text)) return "20GP";
+  if (["40", "40gp"].includes(text)) return "40GP";
+  if (["40hc", "40hq", "40'hc", "40′hc", "feu"].includes(text)) return "40HC";
+  return String(value || "").toUpperCase();
 }
 
 function formatEquipment(value) {
   const canonical = canonicalEquipment(value);
-  return EQUIPMENT_OPTIONS.find((option) => option.value === canonical)?.label || canonical || "—";
+  return EQUIPMENT_OPTIONS.find((item) => item.value === canonical)?.label || canonical || "container";
+}
+
+function clampQuantity(value) {
+  const number = Math.round(Number(value));
+  return Number.isFinite(number) ? Math.min(999, Math.max(1, number)) : 1;
+}
+
+function formatUsd(value) {
+  return `$${Math.round(numberValue(value) || 0).toLocaleString("en-US")}`;
+}
+
+function formatNumber(value) {
+  const number = numberValue(value) || 0;
+  if (Number.isInteger(number)) return number.toLocaleString("en-US");
+  return number.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function numberValue(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function shortDateTime(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? String(value || "—")
+    : date.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function parseDate(value) {
+  if (!value) return null;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function firstPresent(...values) {
+  return values.find(Boolean) || "";
+}
+
+function sameValue(left, right) {
+  return normalized(left) === normalized(right);
 }
 
 function normalized(value) {
@@ -817,85 +664,6 @@ function normalized(value) {
 function capitalize(value) {
   const text = String(value || "");
   return text ? text[0].toUpperCase() + text.slice(1) : "";
-}
-
-function sameValue(left, right) {
-  return normalized(left) === normalized(right);
-}
-
-function parseDate(value) {
-  if (!value) return null;
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function todayUtc() {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-}
-
-function formatDate(dateValue) {
-  return dateValue.toLocaleDateString(undefined, { day: "numeric", month: "short" });
-}
-
-function shortDateTime(value) {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-}
-
-function displayPlace(value) {
-  if (!value) return "—";
-  return String(value)
-    .replace(/\bGB([A-Z]{3,4})\b/g, (_, code) => code)
-    .replace(/\b([A-Z]{5})\b/g, (_, code) => code)
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function firstPresent(...values) {
-  return values.find((value) => value) || "";
-}
-
-function formatUsd(value) {
-  return `$${roundMoney(value).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-function formatUnit(value) {
-  const number = toNumber(value) || 0;
-  if (number === 0) return "0";
-  if (Number.isInteger(number)) return number.toLocaleString("en-US");
-  return number.toFixed(2);
-}
-
-function formatNumber(value) {
-  const number = toNumber(value);
-  if (number == null) return "0";
-  if (Number.isInteger(number)) return number.toLocaleString("en-US");
-  return number.toFixed(2);
-}
-
-function roundMoney(value) {
-  return Math.round((toNumber(value) || 0) * 100) / 100;
-}
-
-function toNumber(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const number = Number(value);
-  return Number.isNaN(number) ? null : number;
-}
-
-function fxRate(ccy) {
-  return FX_RATES[(ccy || "USD").toUpperCase()] || 1;
-}
-
-function clampQuantity(value) {
-  const parsed = Math.round(Number(value));
-  if (!Number.isFinite(parsed) || parsed < 1) return 1;
-  return Math.min(999, parsed);
 }
 
 function unique(values) {
@@ -908,10 +676,14 @@ function unique(values) {
   });
 }
 
-function isBaseCharge(charge) {
-  const name = normalized(charge.charge_name || charge.name);
-  const type = normalized(charge.charge_type);
-  return type === "base" || name === "ocean freight" || name.includes("basic ocean freight");
+function showAlert(message) {
+  elements.deskAlert.hidden = false;
+  elements.deskAlert.className = "desk-alert error";
+  elements.deskAlert.textContent = message;
+}
+
+function hideAlert() {
+  elements.deskAlert.hidden = true;
 }
 
 function escapeHtml(value) {
