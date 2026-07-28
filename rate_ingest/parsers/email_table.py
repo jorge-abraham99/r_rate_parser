@@ -72,6 +72,7 @@ def parse_email(
             offers.append(
                 RateOffer(
                     rate_card_id=card.id,
+                    commodity=card.commodity,
                     origin=poo_code or None,
                     place_of_receipt=location_name or poo_code or None,
                     pol=pol_code or None,

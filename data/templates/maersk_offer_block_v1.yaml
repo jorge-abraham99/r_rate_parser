@@ -9,6 +9,7 @@ active: true
 match_rules:
   filename_contains:
     - "MAERSK"
+    - "QT-MAEU"
   required_header_labels:
     - "Scheduled Route"
     - "Rate Validity"

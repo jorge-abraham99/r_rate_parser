@@ -12,6 +12,7 @@ const deskState = {
   expandedId: null,
   connectedRates: [],
   filters: {},
+  haulageTariffs: {},
 };
 
 const elements = {
@@ -60,6 +61,7 @@ async function bootRateDesk() {
     const payload = await response.json();
     deskState.connectedRates = (Array.isArray(payload.rates) ? payload.rates : []).filter((rate) => !isSpotRate(rate));
     deskState.filters = payload.filters || {};
+    deskState.haulageTariffs = payload.haulage_tariffs || {};
     deskState.loaded = true;
     populateConnectedFilters();
     elements.refreshText.textContent = payload.last_refreshed
@@ -316,13 +318,25 @@ function buildConnectedRows(quantity) {
   const destination = elements.destinationSelect.value;
   const equipment = elements.equipmentSelect.value;
   const material = elements.materialSelect.value;
-  return deskState.connectedRates
+  const collection = elements.collectionSelect.value;
+  const baseRates = deskState.connectedRates
     .filter((rate) =>
       sameValue(rateOrigin(rate), origin)
       && sameValue(rateDestination(rate), destination)
       && canonicalEquipment(rate.equipment_type) === equipment
       && (material === "All materials" || (rate.materials || []).some((item) => sameValue(item, material))))
-    .map((rate) => makeConnectedRow(rate, quantity))
+    .filter((rate) => !isHaulageRate(rate));
+
+  if (!collection) {
+    return baseRates
+      .filter((rate) => !isDoorRate(rate))
+      .map((rate) => makeConnectedRow(rate, quantity))
+      .sort(compareViewRows);
+  }
+
+  return baseRates
+    .filter((rate) => !isDoorRate(rate))
+    .map((rate) => makeConnectedHaulierRow(rate, quantity, collection))
     .sort(compareViewRows);
 }
 
@@ -352,6 +366,37 @@ function makeConnectedRow(rate, quantity) {
     fineprint: "",
     quantity,
     equipment: rate.equipment_type,
+  };
+}
+
+function makeConnectedHaulierRow(rate, quantity, collection) {
+  const row = makeConnectedRow(rate, quantity);
+  const port = rateOrigin(rate);
+  const tariff = deskState.haulageTariffs?.[collection]?.[port];
+  const poa = tariff == null;
+  const inlandLines = [makeLineView({
+    name: `Inland Haulage — ${collection} → ${port} (UK Inland Haulage)`,
+    basis: "Container",
+    ccy: "GBP",
+    unit: tariff || 0,
+    poa,
+  }, quantity, DEFAULT_FX)];
+  const groups = orderGroups([makeGroup("inland", "Inland haulage", inlandLines), ...row.groups]);
+  return {
+    ...row,
+    id: `${row.id}-haulage-${slugify(collection)}`,
+    routing: "CY/CY + haulier",
+    routingDetail: poa
+      ? `CY/CY + merchant haulage · no tariff rate for ${collection} → ${port}`
+      : `CY/CY + merchant haulage · £${formatNumber(tariff)}/ctn · separate haulier booking`,
+    sources: [...row.sources, { tag: "HAUL", file: "UK Inland Haulage" }],
+    groups,
+    inlandUsd: groupTotal(groups, "inland"),
+    totalUsd: sumGroups(groups),
+    poa,
+    fineprint: poa
+      ? `UK Inland Haulage has no ${collection} → ${port} tariff in the approved sheet — request a haulage quote.`
+      : row.fineprint,
   };
 }
 
@@ -594,6 +639,18 @@ function isSpotRate(rate) {
     .some((value) => normalized(value).includes("spot"));
 }
 
+function isDoorRate(rate) {
+  return [rate.contract_tag, rate.carrier_key, rate.carrier_label]
+    .filter(Boolean)
+    .some((value) => normalized(value).includes("door"));
+}
+
+function isHaulageRate(rate) {
+  return [rate.contract_tag, rate.carrier_key, rate.carrier_label, rate.carrier_name, rate.document_type]
+    .filter(Boolean)
+    .some((value) => normalized(value).includes("haulage") || normalized(value).includes("inland_export"));
+}
+
 function rateOrigin(rate) {
   return firstPresent(rate.pol, rate.place_of_receipt, rate.origin);
 }
@@ -664,6 +721,10 @@ function normalized(value) {
 function capitalize(value) {
   const text = String(value || "");
   return text ? text[0].toUpperCase() + text.slice(1) : "";
+}
+
+function slugify(value) {
+  return normalized(value).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 function unique(values) {

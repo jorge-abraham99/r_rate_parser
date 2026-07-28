@@ -1,0 +1,29 @@
+template_id: uk_haulage_matrix_v1
+template_name: UK Inland Haulage Matrix v1
+provider_name: UK Inland Haulage
+parser_family: haulage_matrix
+document_type: inland_export
+file_type: xlsx
+active: true
+
+match_rules:
+  filename_contains:
+    - "HAULAGE"
+    - "GBLGP"
+    - "GBTIL"
+  required_header_labels:
+    - "CITY NAME"
+  sheet_name_contains_any:
+    - "POL"
+    - "TILBURY"
+    - "GATEWAY"
+
+defaults:
+  carrier_name: UK Inland Haulage
+  currency_default: GBP
+  commodity: WASTEPAPER
+  all_in_flag: false
+
+validation:
+  amount_min: 0
+  amount_max: 100000

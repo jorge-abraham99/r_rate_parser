@@ -80,6 +80,7 @@ def parse_workbook(
             offers.append(
                 RateOffer(
                     rate_card_id=card.id,
+                    commodity=card.commodity,
                     origin=origin,
                     place_of_receipt=origin,
                     pol=pol_text,

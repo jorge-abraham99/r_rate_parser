@@ -47,10 +47,14 @@ def parse_date_range(raw: object) -> tuple[date | None, date | None]:
     text = normalize_text(raw)
     if not text:
         return None, None
-    if " - " in text:
-        start_text, end_text = text.split(" - ", 1)
+    cleaned = re.sub(r"(\d)(st|nd|rd|th)\b", r"\1", text, flags=re.IGNORECASE)
+    if " - " in cleaned:
+        start_text, end_text = cleaned.split(" - ", 1)
         return parse_date_value(start_text), parse_date_value(end_text)
-    return parse_date_value(text), None
+    match = re.search(r"from\s+(.+?)\s+(?:to|until)\s+(.+)$", cleaned, re.IGNORECASE)
+    if match:
+        return parse_date_value(match.group(1)), parse_date_value(match.group(2))
+    return parse_date_value(cleaned), None
 
 
 def parse_date_value(raw: object) -> date | None:
@@ -61,4 +65,3 @@ def parse_date_value(raw: object) -> date | None:
         return date_parser.parse(text, dayfirst=True, fuzzy=True).date()
     except (ValueError, TypeError, OverflowError):
         return None
-

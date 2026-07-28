@@ -14,6 +14,7 @@ from rate_ingest.config import Settings
 from rate_ingest.inspector import inspect_source
 from rate_ingest.models import RateCard, RateChargeLine, RateImport, RateNote, RateOffer, ValidationReport, new_id
 from rate_ingest.parsers.email_table import parse_email as parse_email_table
+from rate_ingest.parsers.haulage_matrix import parse_workbook as parse_haulage_matrix_workbook
 from rate_ingest.parsers.matrix import parse_workbook as parse_matrix_workbook
 from rate_ingest.parsers.offer_block import parse_workbook as parse_offer_block_workbook
 from rate_ingest.parsers.site_to_site_rows import parse_workbook as parse_site_to_site_workbook
@@ -387,8 +388,9 @@ def search_approved_offers(
         else:
             all_in_amount = round((offer.base_amount or 0) + charge_total, 2)
         source_payload = source_by_import.get(card.rate_import_id, {})
+        offer_commodity = offer.commodity or card.commodity
         materials = infer_materials(
-            card.commodity,
+            offer_commodity,
             source_payload.get("operator_carrier_key"),
             source_payload.get("file_name"),
             offer.raw_sheet_name,
@@ -400,7 +402,7 @@ def search_approved_offers(
                 "provider_name": card.provider_name,
                 "carrier_name": card.carrier_name,
                 "document_type": card.document_type,
-                "commodity": card.commodity,
+                "commodity": offer_commodity,
                 "origin": offer.origin,
                 "place_of_receipt": offer.place_of_receipt,
                 "pol": offer.pol,
@@ -442,7 +444,9 @@ def search_approved_offers(
 
 
 def get_rate_desk_data(settings: Settings, limit: int = 2000) -> dict[str, Any]:
-    rates = search_approved_offers(settings, limit=limit)
+    all_rates = search_approved_offers(settings, limit=max(limit * 20, 50000))
+    haulage_rates = [rate for rate in all_rates if is_haulage_rate(rate)]
+    rates = [rate for rate in all_rates if not is_haulage_rate(rate)][:limit]
     imports = list_imports(settings, limit=500)
     approved_at = [item.get("approved_at") for item in imports if item.get("approved_at")]
     last_refreshed = max(approved_at, key=parse_datetime_sort_key) if approved_at else None
@@ -470,16 +474,18 @@ def get_rate_desk_data(settings: Settings, limit: int = 2000) -> dict[str, Any]:
         }
     )
     materials = sorted({material for rate in rates for material in rate.get("materials", [])})
+    haulage_tariffs, door_pickups = build_haulage_lookup(haulage_rates)
     return {
         "last_refreshed": last_refreshed,
         "rates": rates,
+        "haulage_tariffs": haulage_tariffs,
         "filters": {
             "origins": origins,
             "destinations": destinations,
             "equipment_types": equipment_types,
             "carriers": carriers,
             "materials": materials,
-            "door_pickups": [],
+            "door_pickups": door_pickups,
         },
     }
 
@@ -581,6 +587,8 @@ def parse_source_by_family(
         return parse_tabular_workbook(source_path, matched_template, rate_import)
     if parser_family == "matrix":
         return parse_matrix_workbook(source_path, matched_template, rate_import)
+    if parser_family == "haulage_matrix":
+        return parse_haulage_matrix_workbook(source_path, matched_template, rate_import)
     if parser_family == "offer_block":
         return parse_offer_block_workbook(source_path, matched_template, rate_import)
     if parser_family == "site_to_site_rows":
@@ -622,6 +630,44 @@ def infer_materials(
     if any(token in text for token in ["tyre", "tire", "rubber"]):
         materials.append("Tyres")
     return materials
+
+
+def is_haulage_rate(rate: dict[str, Any]) -> bool:
+    values = [
+        rate.get("carrier_key"),
+        rate.get("carrier_label"),
+        rate.get("carrier_name"),
+        rate.get("contract_tag"),
+        rate.get("document_type"),
+        rate.get("source_file_name"),
+    ]
+    text = " ".join(str(value) for value in values if value).lower()
+    return "haulage" in text or "inland_export" in text or " haul " in f" {text} "
+
+
+def build_haulage_lookup(haulage_rates: list[dict[str, Any]]) -> tuple[dict[str, dict[str, float]], list[dict[str, Any]]]:
+    pickups: dict[str, dict[str, Any]] = {}
+    tariffs: dict[str, dict[str, float]] = {}
+    for rate in haulage_rates:
+        collection = first_present(rate.get("place_of_receipt"), rate.get("origin"))
+        port = first_present(rate.get("pol"), rate.get("final_destination"), rate.get("pod"))
+        amount = rate.get("base_amount")
+        currency = (rate.get("base_currency") or "").upper()
+        if not collection:
+            continue
+        pickups.setdefault(
+            collection,
+            {
+                "name": collection,
+                "valid_from": rate.get("valid_from"),
+                "valid_to": rate.get("valid_to"),
+                "source_file_name": rate.get("source_file_name"),
+            },
+        )
+        if not port or amount is None or currency != "GBP":
+            continue
+        tariffs.setdefault(collection, {})[port] = round(float(amount), 2)
+    return tariffs, sorted(pickups.values(), key=lambda item: item["name"])
 
 
 def is_base_charge(charge: RateChargeLine) -> bool:

@@ -67,6 +67,7 @@ def parse_workbook(path: Path, template: ParserTemplate, rate_import: RateImport
 
             offer = RateOffer(
                 rate_card_id=card.id,
+                commodity=card.commodity,
                 zone=clean_nullable(normalize_text(value_at(row, field_indexes.get("zone")))),
                 pol=normalize_text(value_at(row, field_indexes.get("pol"))) or None,
                 pod=normalize_text(value_at(row, field_indexes.get("pod"))) or None,

@@ -129,6 +129,7 @@ def parse_offer_block(sheet_name, sheet, start_row: int, end_row: int, card: Rat
     offer = RateOffer(
         rate_card_id=card.id,
         offer_reference=offer_reference,
+        commodity=metadata.get("Commodity"),
         origin=raw_place_of_receipt,
         place_of_receipt=raw_place_of_receipt,
         final_destination=raw_place_of_delivery,

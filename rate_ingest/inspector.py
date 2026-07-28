@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import csv
 
 from openpyxl import load_workbook
 
@@ -30,6 +31,25 @@ def inspect_source(source_document: SourceDocument) -> InspectResult:
             provider_guess=provider_guess,
             parser_family_guess=guess_parser_family(sheet_summaries, source_type=source_type),
             sheet_summaries=sheet_summaries,
+        )
+
+    if source_type == "csv":
+        rows: list[list[str]] = []
+        with source_path.open(encoding="utf-8-sig", newline="") as handle:
+            reader = csv.reader(handle)
+            for index, row in enumerate(reader):
+                values = [normalize_cell(value) for value in row]
+                if any(values):
+                    rows.append(values[:12])
+                if index >= 9:
+                    break
+        provider_guess = provider_from_name(source_document.file_name)
+        return InspectResult(
+            source_document=source_document,
+            workbook_type=source_type,
+            provider_guess=provider_guess,
+            parser_family_guess=guess_parser_family([{"sheet_name": "csv_1", "top_rows": rows}], source_type=source_type),
+            sheet_summaries=[{"sheet_name": "csv_1", "dimensions": "csv", "top_rows": rows}],
         )
 
     if source_type not in {"xlsx", "xlsm", "xls"}:
@@ -70,6 +90,8 @@ def provider_from_name(file_name: str) -> str | None:
     upper = file_name.upper()
     if "CMA" in upper:
         return "CMA CGM"
+    if "QT-MAEU" in upper or "MAEU" in upper:
+        return "MAERSK"
     for provider in ("MSC", "COSCO", "MAERSK"):
         if provider in upper:
             return provider
@@ -82,6 +104,8 @@ def guess_parser_family(sheet_summaries: list[dict[str, Any]], source_type: str 
     ).upper()
     if source_type == "eml" and "POO" in flattened and "POL/POD" in flattened and "OFFER GIGO" in flattened:
         return "email_table"
+    if "CITY NAME" in flattened and ("GBFXT" in flattened or "GBSOU" in flattened or "GBLGP" in flattened):
+        return "haulage_matrix"
     if "RECEIPT" in flattened and "DELIVERY" in flattened and "COMMODITY NAME" in flattened and "RATE BASIS" in flattened:
         return "site_to_site_rows"
     if "OFFER 1-1" in flattened or "SCHEDULED ROUTE" in flattened:

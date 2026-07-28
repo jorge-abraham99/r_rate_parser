@@ -90,6 +90,7 @@ def parse_workbook(
                 offer = RateOffer(
                     rate_card_id=card.id,
                     offer_reference=metadata.get("Quote Number"),
+                    commodity=commodity,
                     origin=receipt,
                     place_of_receipt=receipt,
                     pol=pol,

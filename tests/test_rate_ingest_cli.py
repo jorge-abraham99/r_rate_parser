@@ -105,8 +105,31 @@ def test_maersk_offer_block_import_creates_charge_lines(tmp_path: Path, monkeypa
     run_dir = tmp_path / "data" / "runs" / import_id
     canonical_rates = json.loads(run_dir.joinpath("canonical_rates.json").read_text(encoding="utf-8"))
     assert canonical_rates
+    assert canonical_rates[0]["valid_from"] == "2025-12-01"
+    assert canonical_rates[0]["valid_to"] == "2025-12-31"
     parsed_charges = run_dir.joinpath("parsed_rate_charge_lines.csv").read_text(encoding="utf-8")
     assert "Basic Ocean Freight" in parsed_charges
+
+
+def test_maersk_qtmaeu_offer_block_autodetects_and_carries_material(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    raw_dir = tmp_path / "incoming"
+    raw_dir.mkdir()
+    source = raw_dir / "QT-MAEU-50875469-0.xlsx"
+    source.write_bytes(Path("rate_sheet_files/Maersk Rates - Apr to June /QT-MAEU-50875469-0.xlsx").read_bytes())
+    seed_templates(tmp_path)
+
+    result = runner.invoke(app, ["import", str(source)])
+    assert result.exit_code == 0
+    assert "Template used: maersk_offer_block_v1" in result.stdout
+    import_id = next(line.split(": ", 1)[1] for line in result.stdout.splitlines() if line.startswith("Import created:"))
+    run_dir = tmp_path / "data" / "runs" / import_id
+    canonical_rates = json.loads(run_dir.joinpath("canonical_rates.json").read_text(encoding="utf-8"))
+    assert canonical_rates
+    assert canonical_rates[0]["valid_from"] == "2026-04-01"
+    assert canonical_rates[0]["valid_to"] == "2026-04-30"
+    offers = [row for row in detail_rows(run_dir / "parsed_rate_offers.csv")]
+    assert offers[0]["commodity"] == "WASTEPAPER"
 
 
 def test_maersk_rate_desk_exposes_charge_analysis(tmp_path: Path, monkeypatch):
@@ -152,6 +175,8 @@ def test_maersk_rate_desk_exposes_charge_analysis(tmp_path: Path, monkeypatch):
     )
     analysis = maersk_rate["charge_analysis"]
     assert maersk_rate["transit_time_days"] == 51
+    assert maersk_rate["valid_from"] == "2025-12-01"
+    assert maersk_rate["valid_to"] == "2025-12-31"
     assert analysis["matched_charge_count"] > 0
     assert analysis["unmatched_charge_count"] == 0
     assert analysis["total_usd"] > 0
@@ -185,6 +210,49 @@ def test_maersk_afls_site_to_site_import_creates_offers_and_charge_lines(tmp_pat
     parsed_charges = run_dir.joinpath("parsed_rate_charge_lines.csv").read_text(encoding="utf-8")
     assert "Documentation fee - Destination" in parsed_charges
     assert "Export Service" in parsed_charges
+    offers = [row for row in detail_rows(run_dir / "parsed_rate_offers.csv")]
+    assert offers[0]["commodity"] == "WASTEPAPER"
+
+
+def test_haulage_matrix_import_autodetects_and_exposes_tariffs(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    raw_dir = tmp_path / "incoming"
+    raw_dir.mkdir()
+    source = raw_dir / "Export Waste Haulage Bristol + ALL other UK POLS INC GBLGP - GBTIL - Q2 2026 VALIDITY.xlsx"
+    source.write_bytes(
+        Path("rate_sheet_files/Export Waste Haulage Bristol + ALL other UK POLS INC GBLGP - GBTIL - Q2 2026 VALIDITY.xlsx").read_bytes()
+    )
+    seed_templates(tmp_path)
+
+    result = runner.invoke(app, ["import", str(source)])
+    assert result.exit_code == 0
+    assert "Template used: uk_haulage_matrix_v1" in result.stdout
+    import_id = next(line.split(": ", 1)[1] for line in result.stdout.splitlines() if line.startswith("Import created:"))
+    run_dir = tmp_path / "data" / "runs" / import_id
+    canonical_rates = json.loads(run_dir.joinpath("canonical_rates.json").read_text(encoding="utf-8"))
+    assert canonical_rates
+    assert canonical_rates[0]["rate_type"] == "inland_export"
+    assert canonical_rates[0]["currency"] == "GBP"
+    assert canonical_rates[0]["valid_from"] == "2026-04-01"
+    assert canonical_rates[0]["valid_to"] == "2026-06-30"
+
+    approve_response = api_client.post(
+        f"/api/imports/{import_id}/approve",
+        json={
+            "approved_by": "jorge",
+            "carrier_name": "UK Inland Haulage",
+            "carrier_key": "haulage-q2",
+            "carrier_label": "UK Inland Haulage",
+            "contract_tag": "HAUL",
+        },
+    )
+    assert approve_response.status_code == 200
+
+    desk = api_client.get("/api/rate-desk").json()
+    assert desk["filters"]["door_pickups"]
+    assert any(item["name"] == "ABBOTS BROMLEY" for item in desk["filters"]["door_pickups"])
+    assert desk["haulage_tariffs"]["ABBOTS BROMLEY"]["Felixstowe"] == 140.14
+    assert desk["haulage_tariffs"]["ABBOTS BROMLEY"]["Southampton"] == 105.21
 
 
 def test_cma_email_import_creates_canonical_rates(tmp_path: Path, monkeypatch):
@@ -315,3 +383,10 @@ def test_api_import_approve_and_search_flow(tmp_path: Path, monkeypatch):
     delete_response = api_client.delete(f"/api/imports/{replacement_id}")
     assert delete_response.status_code == 200
     assert api_client.get("/api/rate-desk").json()["rates"] == []
+
+
+def detail_rows(path: Path) -> list[dict[str, str]]:
+    import csv
+
+    with path.open(encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))

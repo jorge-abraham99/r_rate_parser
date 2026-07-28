@@ -60,6 +60,7 @@ class RateOffer(BaseModel):
     id: str = Field(default_factory=lambda: new_id("offer"))
     rate_card_id: str
     offer_reference: str | None = None
+    commodity: str | None = None
     origin: str | None = None
     place_of_receipt: str | None = None
     pol: str | None = None
