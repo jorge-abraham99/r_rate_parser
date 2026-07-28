@@ -7,6 +7,12 @@ const EQUIPMENT_OPTIONS = [
   { value: "40HC", label: "40′ HC" },
 ];
 const MATERIAL_OPTIONS = ["All materials", "Paper", "Metal", "Tyres"];
+const ROUTING_MODE_OPTIONS = [
+  { value: "all", label: "All routings" },
+  { value: "port", label: "Port drop-off" },
+  { value: "door", label: "Carrier door-to-key" },
+  { value: "haulage", label: "Merchant haulage" },
+];
 
 const deskState = {
   loaded: false,
@@ -23,6 +29,7 @@ const elements = {
   originSelect: document.getElementById("originSelect"),
   destinationSelect: document.getElementById("destinationSelect"),
   equipmentSelect: document.getElementById("equipmentSelect"),
+  routingModeSelect: document.getElementById("routingModeSelect"),
   qtyInput: document.getElementById("qtyInput"),
   materialSelect: document.getElementById("materialSelect"),
   showExpiredToggle: document.getElementById("showExpiredToggle"),
@@ -36,7 +43,7 @@ const elements = {
   figuresNote: document.getElementById("figuresNote"),
 };
 
-[elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.equipmentSelect, elements.materialSelect]
+[elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.equipmentSelect, elements.routingModeSelect, elements.materialSelect]
   .forEach((element) => element.addEventListener("change", resetAndRender));
 elements.showExpiredToggle.addEventListener("change", resetAndRender);
 elements.showAllQuotesButton.addEventListener("click", showAllQuotes);
@@ -89,6 +96,7 @@ function populateDemoFilters() {
   populateSelect(elements.originSelect, origins, "Any origin", "Felixstowe", true);
   populateSelect(elements.destinationSelect, destinations, "Any destination", "Laem Chabang", true);
   populateEquipment("40HC");
+  populateRoutingModes("all");
   populateSelect(elements.materialSelect, MATERIAL_OPTIONS, "No materials", "All materials");
   setCollectionVisibility(true);
 }
@@ -105,6 +113,7 @@ function populateConnectedFilters() {
   populateSelect(elements.originSelect, origins, "Any origin", rateOrigin(defaultRate) || origins[0] || "", true);
   populateSelect(elements.destinationSelect, destinations, "Any destination", rateDestination(defaultRate) || destinations[0] || "", true);
   populateEquipment(canonicalEquipment(defaultRate.equipment_type || equipment[0] || "40HC"));
+  populateRoutingModes("all");
   populateSelect(
     elements.materialSelect,
     ["All materials", ...(materials.length ? materials : MATERIAL_OPTIONS.slice(1))],
@@ -130,6 +139,14 @@ function populateEquipment(preferred) {
     .join("");
   elements.equipmentSelect.value = EQUIPMENT_OPTIONS.some((item) => item.value === preferred) ? preferred : "40HC";
   elements.equipmentSelect.disabled = false;
+}
+
+function populateRoutingModes(preferred) {
+  elements.routingModeSelect.innerHTML = ROUTING_MODE_OPTIONS
+    .map((item) => `<option value="${item.value}">${item.label}</option>`)
+    .join("");
+  elements.routingModeSelect.value = ROUTING_MODE_OPTIONS.some((item) => item.value === preferred) ? preferred : "all";
+  elements.routingModeSelect.disabled = false;
 }
 
 function populateSelect(select, values, emptyLabel, preferred = "", includeBlank = false) {
@@ -172,7 +189,7 @@ function renderDesk() {
     elements.destinationSelect.value || "Any destination",
   ];
   elements.laneTitle.textContent = isAllQuotesView()
-    ? "All approved quotes"
+    ? allQuotesTitle()
     : laneParts.join(" → ");
   elements.figuresNote.textContent = quantity > 1
     ? `Figures are USD equivalents for the whole booking (${quantity} × ${formatEquipment(elements.equipmentSelect.value)}). Per-B/L charges are not multiplied.`
@@ -180,11 +197,14 @@ function renderDesk() {
 
   if (!rows.length) {
     const hasExpiredHidden = !elements.showExpiredToggle.checked && hasExpiredMatches();
+    const needsCollection = elements.routingModeSelect.value === "haulage" && !elements.collectionSelect.value;
     elements.laneSummary.textContent = isAllQuotesView()
       ? "no approved quotes match the current filters"
       : "no parsed rates on this lane";
     elements.rateRows.innerHTML = `<div class="rate-empty">${
-      hasExpiredHidden
+      needsCollection
+        ? "Select a collection place to see merchant-haulage options."
+        : hasExpiredHidden
         ? "No current rates match these filters. Turn on Show expired to inspect expired quotes."
         : "No parsed rates match the current filters."
     }</div>`;
@@ -218,6 +238,7 @@ function buildDemoRows(quantity) {
   const equipment = elements.equipmentSelect.value;
   const material = elements.materialSelect.value;
   const collection = elements.collectionSelect.value;
+  const mode = elements.routingModeSelect.value || "all";
   const baseRates = quote.rates.filter((rate) =>
     matchesFilter(rate.origins, origin)
     && matchesFilter(rate.destinations, destination)
@@ -226,12 +247,15 @@ function buildDemoRows(quantity) {
 
   const rows = [];
   baseRates.forEach((rate) => {
-    if (!collection) {
+    if (!collection && mode !== "door") {
       rows.push(makeDemoVariant(rate, "key", quantity, origin, ""));
       return;
     }
-    rows.push(makeDemoVariant(rate, "door", quantity, origin, collection));
-    rows.push(makeDemoVariant(rate, "haulier", quantity, origin, collection));
+    if (mode === "all" || mode === "port") rows.push(makeDemoVariant(rate, "key", quantity, origin, ""));
+    if (mode === "all" || mode === "door") rows.push(makeDemoVariant(rate, "door", quantity, origin, collection));
+    if (collection && (mode === "all" || mode === "haulage")) {
+      rows.push(makeDemoVariant(rate, "haulier", quantity, origin, collection));
+    }
   });
   return rows.sort(compareViewRows);
 }
@@ -301,7 +325,7 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
   }
   return {
     id: `${rate.id}-${mode}`,
-    type: "CONTRACT",
+    type: mode === "door" ? "DOOR" : (mode === "haulier" ? "HAULIER" : "CONTRACT"),
     routing,
     routingDetail,
     sources,
@@ -333,31 +357,22 @@ function makeDemoLine(tuple, quantity, fx) {
 }
 
 function buildConnectedRows(quantity) {
-  const origin = elements.originSelect.value;
-  const destination = elements.destinationSelect.value;
-  const equipment = elements.equipmentSelect.value;
-  const material = elements.materialSelect.value;
   const collection = elements.collectionSelect.value;
-  const baseRates = deskState.connectedRates
-    .filter((rate) =>
-      matchesFilter(rateOrigin(rate), origin)
-      && matchesFilter(rateDestination(rate), destination)
-      && (!equipment || canonicalEquipment(rate.equipment_type) === equipment)
-      && (material === "All materials" || (rate.materials || []).some((item) => sameValue(item, material))))
-    .filter((rate) => elements.showExpiredToggle.checked || !isExpiredRate(rate))
-    .filter((rate) => !isHaulageRate(rate));
+  const mode = elements.routingModeSelect.value || "all";
+  const portRates = filterConnectedRates({ includeExpired: elements.showExpiredToggle.checked, kind: "port" })
+    .map((rate) => makeConnectedRow(rate, quantity));
+  const doorRates = filterConnectedRates({ includeExpired: elements.showExpiredToggle.checked, kind: "door" })
+    .map((rate) => makeConnectedDoorRow(rate, quantity));
+  const haulageRates = collection
+    ? filterConnectedRates({ includeExpired: elements.showExpiredToggle.checked, kind: "port" })
+      .map((rate) => makeConnectedHaulierRow(rate, quantity, collection))
+    : [];
 
-  if (!collection) {
-    return baseRates
-      .filter((rate) => !isDoorRate(rate))
-      .map((rate) => makeConnectedRow(rate, quantity))
-      .sort(compareViewRows);
-  }
-
-  return baseRates
-    .filter((rate) => !isDoorRate(rate))
-    .map((rate) => makeConnectedHaulierRow(rate, quantity, collection))
-    .sort(compareViewRows);
+  const rows = [];
+  if (mode === "all" || mode === "port") rows.push(...portRates);
+  if (mode === "all" || mode === "door") rows.push(...doorRates);
+  if (mode === "all" || mode === "haulage") rows.push(...haulageRates);
+  return rows.sort(compareViewRows);
 }
 
 function makeConnectedRow(rate, quantity) {
@@ -368,9 +383,9 @@ function makeConnectedRow(rate, quantity) {
   const expired = isExpiredRate(rate);
   return {
     id: String(rate.offer_id || `${sourceFile}-${rate.raw_row_reference || "row"}`),
-    type: "CONTRACT",
+    type: isDoorRate(rate) ? "DOOR" : "CONTRACT",
     routing: formatRouting(rate),
-    routingDetail: rate.routing_note || formatRouting(rate),
+    routingDetail: laneDetail(rate),
     sources: [{ tag, file: sourceFile }],
     transit: rate.transit_time_days ? `${rate.transit_time_days}d` : extractTransit(rate.routing_note || ""),
     validity: validityLabel(rate.valid_from, rate.valid_to, expired),
@@ -391,6 +406,15 @@ function makeConnectedRow(rate, quantity) {
   };
 }
 
+function makeConnectedDoorRow(rate, quantity) {
+  return {
+    ...makeConnectedRow(rate, quantity),
+    type: "DOOR",
+    routing: "Door → key",
+    routingDetail: laneDetail(rate),
+  };
+}
+
 function makeConnectedHaulierRow(rate, quantity, collection) {
   const row = makeConnectedRow(rate, quantity);
   const port = rateOrigin(rate);
@@ -407,10 +431,11 @@ function makeConnectedHaulierRow(rate, quantity, collection) {
   return {
     ...row,
     id: `${row.id}-haulage-${slugify(collection)}`,
+    type: "HAULIER",
     routing: "CY/CY + haulier",
     routingDetail: poa
-      ? `CY/CY + merchant haulage · no tariff rate for ${collection} → ${port}`
-      : `CY/CY + merchant haulage · £${formatNumber(tariff)}/ctn · separate haulier booking`,
+      ? `${collection} → ${port} → ${rateDestination(rate)} · no tariff rate for ${collection} → ${port}`
+      : `${collection} → ${port} → ${rateDestination(rate)} · £${formatNumber(tariff)}/ctn · separate haulier booking`,
     sources: [...row.sources, { tag: "HAUL", file: "UK Inland Haulage" }],
     groups,
     inlandUsd: groupTotal(groups, "inland"),
@@ -519,7 +544,7 @@ function renderRate(row, index, isBest) {
   return `
     <article class="rate-record">
       <button class="quote-grid quote-row${row.poa ? " poa-row" : ""}${row.expired ? " expired-row" : ""}" type="button" data-rate-id="${escapeAttr(row.id)}" aria-expanded="${expanded}">
-        <span><span class="type-chip">CONTRACT</span></span>
+        <span><span class="type-chip">${escapeHtml(row.type)}</span></span>
         <span class="${isBest ? "rank best-rank" : "rank"}">${index + 1}</span>
         <span class="routing-cell" title="${escapeAttr(row.routingDetail)}">${escapeHtml(row.routing)}</span>
         <span class="source-tags">${row.sources.map((source) => `<span title="${escapeAttr(source.file)}">${escapeHtml(source.tag)}</span>`).join("")}</span>
@@ -605,6 +630,7 @@ function renderLine(line) {
 function compareViewRows(left, right) {
   if (left.expired !== right.expired) return left.expired ? 1 : -1;
   if (left.poa !== right.poa) return left.poa ? 1 : -1;
+  if (left.type !== right.type) return left.type.localeCompare(right.type);
   if (left.totalUsd !== right.totalUsd) return left.totalUsd - right.totalUsd;
   return left.routing.localeCompare(right.routing);
 }
@@ -619,8 +645,19 @@ function groupTotal(groups, key) {
 
 function formatRouting(rate) {
   const mode = normalized(rate.service_mode);
-  if (mode.includes("door")) return "Door → CY";
+  if (mode.includes("door")) return "Door → key";
   return "CY/CY";
+}
+
+function laneDetail(rate) {
+  if (isDoorRate(rate)) {
+    const receipt = firstPresent(rate.place_of_receipt, rate.origin);
+    const delivery = firstPresent(rate.final_destination, rate.pod);
+    return [receipt, delivery].filter(Boolean).join(" → ") || formatRouting(rate);
+  }
+  const origin = firstPresent(rate.pol, rate.place_of_receipt, rate.origin);
+  const destination = firstPresent(rate.final_destination, rate.pod);
+  return [origin, destination].filter(Boolean).join(" → ") || formatRouting(rate);
 }
 
 function validityLabel(validFrom, validTo, expired = false) {
@@ -668,7 +705,7 @@ function isSpotRate(rate) {
 }
 
 function isDoorRate(rate) {
-  return [rate.contract_tag, rate.carrier_key, rate.carrier_label]
+  return [rate.contract_tag, rate.carrier_key, rate.carrier_label, rate.service_mode]
     .filter(Boolean)
     .some((value) => normalized(value).includes("door"));
 }
@@ -761,6 +798,7 @@ function showAllQuotes() {
   elements.originSelect.value = "";
   elements.destinationSelect.value = "";
   elements.equipmentSelect.value = "";
+  elements.routingModeSelect.value = "all";
   elements.materialSelect.value = "All materials";
   elements.showExpiredToggle.checked = true;
   resetAndRender();
@@ -774,8 +812,17 @@ function isAllQuotesView() {
     && elements.materialSelect.value === "All materials";
 }
 
+function allQuotesTitle() {
+  return {
+    all: "All approved quotes",
+    port: "All port drop-off quotes",
+    door: "All carrier door quotes",
+    haulage: "All merchant-haulage quotes",
+  }[elements.routingModeSelect.value || "all"] || "All approved quotes";
+}
+
 function countHiddenExpiredMatches() {
-  return matchingConnectedRates({ includeExpired: true }).filter((rate) => isExpiredRate(rate)).length;
+  return filterConnectedRates({ includeExpired: true, kind: "all" }).filter((rate) => isExpiredRate(rate)).length;
 }
 
 function hasExpiredMatches() {
@@ -783,18 +830,32 @@ function hasExpiredMatches() {
 }
 
 function matchingConnectedRates({ includeExpired }) {
+  return filterConnectedRates({ includeExpired, kind: "port" });
+}
+
+function filterConnectedRates({ includeExpired, kind }) {
   const origin = elements.originSelect.value;
   const destination = elements.destinationSelect.value;
   const equipment = elements.equipmentSelect.value;
   const material = elements.materialSelect.value;
+  const collection = elements.collectionSelect.value;
   return deskState.connectedRates
-    .filter((rate) =>
-      matchesFilter(rateOrigin(rate), origin)
-      && matchesFilter(rateDestination(rate), destination)
-      && (!equipment || canonicalEquipment(rate.equipment_type) === equipment)
-      && (material === "All materials" || (rate.materials || []).some((item) => sameValue(item, material))))
-    .filter((rate) => includeExpired || !isExpiredRate(rate))
-    .filter((rate) => !isHaulageRate(rate));
+    .filter((rate) => {
+      if (isHaulageRate(rate)) return false;
+      if (kind === "port" && isDoorRate(rate)) return false;
+      if (kind === "door" && !isDoorRate(rate)) return false;
+      if (!includeExpired && isExpiredRate(rate)) return false;
+      if (!matchesFilter(rateDestination(rate), destination)) return false;
+      if (equipment && canonicalEquipment(rate.equipment_type) !== equipment) return false;
+      if (!(material === "All materials" || (rate.materials || []).some((item) => sameValue(item, material)))) return false;
+      if (kind === "door") {
+        if (collection && !matchesFilter(firstPresent(rate.place_of_receipt, rate.origin), collection)) return false;
+        const explicitPort = rate.pol || "";
+        if (origin && explicitPort && !matchesFilter(explicitPort, origin)) return false;
+        return true;
+      }
+      return matchesFilter(rateOrigin(rate), origin);
+    });
 }
 
 function firstPresent(...values) {

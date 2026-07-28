@@ -239,6 +239,10 @@ label:focus-within {
   min-width: 110px;
 }
 
+.quote-mode select {
+  min-width: 170px;
+}
+
 .quote-qty input {
   width: 74px;
 }
