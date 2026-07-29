@@ -215,6 +215,40 @@ def test_maersk_afls_site_to_site_import_creates_offers_and_charge_lines(tmp_pat
     assert offers[0]["commodity"] == "WASTEPAPER"
 
 
+def test_maersk_afls_rate_desk_preserves_service_mode(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    seed_templates(tmp_path)
+    source_bytes = Path("rate_sheet_files/REUDAN_E1E_E3E_WAP_Q2 2026.xlsx").read_bytes()
+
+    response = api_client.post(
+        "/api/imports",
+        data={"uploaded_by": "jorge"},
+        files={"file": ("REUDAN_E1E_E3E_WAP_Q2 2026.xlsx", source_bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert response.status_code == 200
+    import_id = response.json()["import_id"]
+
+    approve_response = api_client.post(
+        f"/api/imports/{import_id}/approve",
+        json={
+            "approved_by": "jorge",
+            "carrier_name": "Maersk",
+            "carrier_key": "maersk-contract",
+            "carrier_label": "Maersk · Contract",
+            "contract_tag": "CONTRACT",
+        },
+    )
+    assert approve_response.status_code == 200
+
+    desk = api_client.get("/api/rate-desk").json()
+    row = next(
+        item
+        for item in desk["rates"]
+        if item.get("place_of_receipt") == "Alcester, GB" and item.get("final_destination") == "Bangkok, TH"
+    )
+    assert row["service_mode"] == "SD / CY"
+
+
 def test_haulage_matrix_import_autodetects_and_exposes_tariffs(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
     raw_dir = tmp_path / "incoming"

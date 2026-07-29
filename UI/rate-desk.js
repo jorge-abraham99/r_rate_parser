@@ -658,7 +658,7 @@ function groupTotal(groups, key) {
 
 function formatRouting(rate) {
   const mode = normalized(rate.service_mode);
-  if (mode.includes("door")) return "Door → quay";
+  if (isDoorServiceMode(mode)) return "Door → quay";
   return "CY/CY";
 }
 
@@ -720,7 +720,15 @@ function isSpotRate(rate) {
 function isDoorRate(rate) {
   return [rate.contract_tag, rate.carrier_key, rate.carrier_label, rate.service_mode]
     .filter(Boolean)
-    .some((value) => normalized(value).includes("door"));
+    .some((value) => {
+      const text = normalized(value);
+      return text.includes("door") || isDoorServiceMode(text);
+    });
+}
+
+function isDoorServiceMode(value) {
+  const text = normalized(value);
+  return text === "sd / cy" || text === "sd/cy" || text === "sd-cy" || text.startsWith("sd ");
 }
 
 function isHaulageRate(rate) {

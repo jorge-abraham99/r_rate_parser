@@ -409,6 +409,7 @@ def search_approved_offers(
                 "pod": offer.pod,
                 "final_destination": offer.final_destination,
                 "equipment_type": offer.equipment_type,
+                "service_mode": offer.service_mode,
                 "transit_time_days": offer.transit_time_days,
                 "base_amount": offer.base_amount,
                 "base_currency": offer.base_currency or card.currency_default,
