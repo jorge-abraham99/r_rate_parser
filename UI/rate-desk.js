@@ -111,6 +111,12 @@ function populateConnectedFilters() {
   const equipment = unique(deskState.filters.equipment_types || rates.map((rate) => rate.equipment_type));
   const materials = unique(deskState.filters.materials || rates.flatMap((rate) => rate.materials || []));
   const pickups = Array.isArray(deskState.filters.door_pickups) ? deskState.filters.door_pickups : [];
+  const doorCollections = unique(
+    rates
+      .filter((rate) => isDoorRate(rate))
+      .map((rate) => firstPresent(rate.place_of_receipt, rate.origin))
+      .filter(Boolean)
+  );
 
   populateSelect(elements.originSelect, origins, "Any origin", rateOrigin(defaultRate) || origins[0] || "", true);
   populateSelect(elements.destinationSelect, destinations, "Any destination", rateDestination(defaultRate) || destinations[0] || "", true);
@@ -123,12 +129,16 @@ function populateConnectedFilters() {
     "All materials",
   );
 
-  if (pickups.length) {
-    const names = pickups.map((pickup) => pickup.name || pickup.location).filter(Boolean);
-    populateSelect(elements.collectionSelect, names, "None — port drop-off", "", true);
+  const pickupNames = unique([
+    ...pickups.map((pickup) => pickup.name || pickup.location).filter(Boolean),
+    ...doorCollections,
+  ]);
+
+  if (pickupNames.length) {
+    populateSelect(elements.collectionSelect, pickupNames, "None — not filtered", "", true);
     setCollectionVisibility(true);
   } else {
-    elements.collectionSelect.innerHTML = '<option value="">None — port drop-off</option>';
+    elements.collectionSelect.innerHTML = '<option value="">None — not filtered</option>';
     elements.collectionSelect.value = "";
     elements.collectionSelect.disabled = true;
     setCollectionVisibility(false);
