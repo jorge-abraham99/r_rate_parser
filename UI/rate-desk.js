@@ -44,8 +44,12 @@ const elements = {
   figuresNote: document.getElementById("figuresNote"),
 };
 
-[elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.equipmentSelect, elements.routingModeSelect, elements.materialSelect]
+[elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.equipmentSelect, elements.materialSelect]
   .forEach((element) => element.addEventListener("change", resetAndRender));
+elements.routingModeSelect.addEventListener("change", () => {
+  refreshCollectionOptions();
+  resetAndRender();
+});
 elements.showExpiredToggle.addEventListener("change", resetAndRender);
 elements.showAllQuotesButton.addEventListener("click", showAllQuotes);
 elements.qtyInput.addEventListener("change", () => {
@@ -133,14 +137,29 @@ function populateConnectedFilters() {
     "No materials",
     "All materials",
   );
+  refreshCollectionOptions();
+}
 
-  const pickupNames = unique([
-    ...pickups.map((pickup) => pickup.name || pickup.location).filter(Boolean),
-    ...doorCollections,
-  ]);
+function refreshCollectionOptions() {
+  if (RATE_DESK_DEMO_MODE) return;
+  const pickups = Array.isArray(deskState.filters.door_pickups) ? deskState.filters.door_pickups : [];
+  const haulagePickupNames = unique(pickups.map((pickup) => pickup.name || pickup.location).filter(Boolean));
+  const doorCollections = unique(
+    deskState.connectedRates
+      .filter((rate) => isDoorRate(rate))
+      .map((rate) => firstPresent(rate.place_of_receipt, rate.origin))
+      .filter(Boolean)
+  );
+  const current = elements.collectionSelect.value || "";
+  const mode = elements.routingModeSelect.value || "all";
+  const pickupNames = mode === "haulage"
+    ? haulagePickupNames
+    : mode === "door"
+      ? doorCollections
+      : unique([...haulagePickupNames, ...doorCollections]);
 
   if (pickupNames.length) {
-    populateSelect(elements.collectionSelect, pickupNames, "None — not filtered", "", true);
+    populateSelect(elements.collectionSelect, pickupNames, "None — not filtered", current, true);
     setCollectionVisibility(true);
   } else {
     elements.collectionSelect.innerHTML = '<option value="">None — not filtered</option>';
