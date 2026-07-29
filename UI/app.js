@@ -1,7 +1,7 @@
 const IMPORT_DEMO_MODE = Boolean(window.RATE_DESK_CONFIG?.demoMode);
 const SOURCE_DEFINITIONS = [
-  { key: "maersk-contract", name: "Maersk Key-to-key", cadence: "monthly" },
-  { key: "maersk-door", name: "Maersk Door-to-key", cadence: "monthly" },
+  { key: "maersk-contract", name: "Maersk Quay-to-quay", cadence: "monthly" },
+  { key: "maersk-door", name: "Maersk Door-to-quay", cadence: "monthly" },
   { key: "haulage-q2", name: "UK Inland Haulage", cadence: "quarterly" },
 ];
 
@@ -553,7 +553,7 @@ function sourcePayload(preview, sourceKey) {
     approved_by: "Rate Desk operator",
     carrier_name: "Maersk",
     carrier_key: sourceKey,
-    carrier_label: door ? "Maersk · Door-to-key" : "Maersk · Key-to-key",
+    carrier_label: door ? "Maersk · Door-to-quay" : "Maersk · Quay-to-quay",
     contract_tag: door ? "DOOR" : "KEY",
   };
 }

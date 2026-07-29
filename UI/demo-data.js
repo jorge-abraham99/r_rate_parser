@@ -2,7 +2,7 @@ window.RATE_DESK_DEMO = Object.freeze({
   sources: [
     {
       key: "maersk-contract",
-      name: "Maersk Key-to-key",
+      name: "Maersk Quay-to-quay",
       cadence: "monthly",
       current: {
         id: "demo-maersk-key-jul",
@@ -18,7 +18,7 @@ window.RATE_DESK_DEMO = Object.freeze({
     },
     {
       key: "maersk-door",
-      name: "Maersk Door-to-key",
+      name: "Maersk Door-to-quay",
       cadence: "monthly",
       current: {
         id: "demo-maersk-door-jul",

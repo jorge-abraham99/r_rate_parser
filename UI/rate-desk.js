@@ -10,7 +10,7 @@ const MATERIAL_OPTIONS = ["All materials", "Paper", "Metal", "Tyres"];
 const ROUTING_MODE_OPTIONS = [
   { value: "all", label: "All routings" },
   { value: "port", label: "Port drop-off" },
-  { value: "door", label: "Carrier door-to-key" },
+  { value: "door", label: "Carrier door-to-quay" },
   { value: "haulage", label: "Merchant haulage" },
 ];
 
@@ -277,7 +277,7 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
   if (mode === "door") {
     const uplift = quote.doorUplift[collection] || 0;
     freightLines = freightLines.map((line) => line.name === "Basic Ocean Freight"
-      ? makeLineView({ ...line, name: "Basic Ocean Freight — door-to-key", unit: line.unit + uplift }, quantity, fx)
+      ? makeLineView({ ...line, name: "Basic Ocean Freight — door-to-quay", unit: line.unit + uplift }, quantity, fx)
       : line);
     inlandLines = [makeLineView({
       name: `Inland Haulage Export — ${collection}`,
@@ -286,8 +286,8 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
       unit: 0,
       included: true,
     }, quantity, fx)];
-    routing = "Door → CY";
-    routingDetail = "Door-to-key · carrier haulage included in freight, not itemised";
+    routing = "Door → quay";
+    routingDetail = "Door-to-quay · carrier haulage included in freight, not itemised";
     sourceFile = "MAERSK_DOOR_299077037_JUL.xlsx";
     sourceTag = "DOOR";
     fineprint = `Inland haulage from ${collection} is included in the freight price — Maersk door rates do not itemise it.`;
@@ -410,7 +410,7 @@ function makeConnectedDoorRow(rate, quantity) {
   return {
     ...makeConnectedRow(rate, quantity),
     type: "DOOR",
-    routing: "Door → key",
+    routing: "Door → quay",
     routingDetail: laneDetail(rate),
   };
 }
@@ -645,7 +645,7 @@ function groupTotal(groups, key) {
 
 function formatRouting(rate) {
   const mode = normalized(rate.service_mode);
-  if (mode.includes("door")) return "Door → key";
+  if (mode.includes("door")) return "Door → quay";
   return "CY/CY";
 }
 
