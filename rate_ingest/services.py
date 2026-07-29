@@ -474,11 +474,12 @@ def get_rate_desk_data(settings: Settings, limit: int = 2000) -> dict[str, Any]:
         }
     )
     materials = sorted({material for rate in rates for material in rate.get("materials", [])})
-    haulage_tariffs, door_pickups = build_haulage_lookup(haulage_rates)
+    haulage_tariffs, door_pickups, haulage_currency = build_haulage_lookup(haulage_rates)
     return {
         "last_refreshed": last_refreshed,
         "rates": rates,
         "haulage_tariffs": haulage_tariffs,
+        "haulage_currency": haulage_currency,
         "filters": {
             "origins": origins,
             "destinations": destinations,
@@ -645,14 +646,17 @@ def is_haulage_rate(rate: dict[str, Any]) -> bool:
     return "haulage" in text or "inland_export" in text or " haul " in f" {text} "
 
 
-def build_haulage_lookup(haulage_rates: list[dict[str, Any]]) -> tuple[dict[str, dict[str, float]], list[dict[str, Any]]]:
+def build_haulage_lookup(haulage_rates: list[dict[str, Any]]) -> tuple[dict[str, dict[str, float]], list[dict[str, Any]], str | None]:
     pickups: dict[str, dict[str, Any]] = {}
     tariffs: dict[str, dict[str, float]] = {}
+    haulage_currency: str | None = None
     for rate in haulage_rates:
         collection = first_present(rate.get("place_of_receipt"), rate.get("origin"))
         port = first_present(rate.get("pol"), rate.get("final_destination"), rate.get("pod"))
         amount = rate.get("base_amount")
         currency = (rate.get("base_currency") or "").upper()
+        if currency and haulage_currency is None:
+            haulage_currency = currency
         if not collection:
             continue
         pickups.setdefault(
@@ -664,10 +668,12 @@ def build_haulage_lookup(haulage_rates: list[dict[str, Any]]) -> tuple[dict[str,
                 "source_file_name": rate.get("source_file_name"),
             },
         )
-        if not port or amount is None or currency != "GBP":
+        if not port or amount is None:
+            continue
+        if haulage_currency and currency and currency != haulage_currency:
             continue
         tariffs.setdefault(collection, {})[port] = round(float(amount), 2)
-    return tariffs, sorted(pickups.values(), key=lambda item: item["name"])
+    return tariffs, sorted(pickups.values(), key=lambda item: item["name"]), haulage_currency
 
 
 def is_base_charge(charge: RateChargeLine) -> bool:

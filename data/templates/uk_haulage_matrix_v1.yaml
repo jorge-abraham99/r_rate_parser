@@ -20,7 +20,7 @@ match_rules:
 
 defaults:
   carrier_name: UK Inland Haulage
-  currency_default: GBP
+  currency_default: USD
   commodity: WASTEPAPER
   all_in_flag: false
 

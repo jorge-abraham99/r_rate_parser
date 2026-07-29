@@ -233,7 +233,7 @@ def test_haulage_matrix_import_autodetects_and_exposes_tariffs(tmp_path: Path, m
     canonical_rates = json.loads(run_dir.joinpath("canonical_rates.json").read_text(encoding="utf-8"))
     assert canonical_rates
     assert canonical_rates[0]["rate_type"] == "inland_export"
-    assert canonical_rates[0]["currency"] == "GBP"
+    assert canonical_rates[0]["currency"] == "USD"
     assert canonical_rates[0]["valid_from"] == "2026-04-01"
     assert canonical_rates[0]["valid_to"] == "2026-06-30"
 
@@ -251,6 +251,7 @@ def test_haulage_matrix_import_autodetects_and_exposes_tariffs(tmp_path: Path, m
 
     desk = api_client.get("/api/rate-desk").json()
     assert desk["filters"]["door_pickups"]
+    assert desk["haulage_currency"] == "USD"
     assert any(item["name"] == "ABBOTS BROMLEY" for item in desk["filters"]["door_pickups"])
     assert desk["haulage_tariffs"]["ABBOTS BROMLEY"]["Felixstowe"] == 140.14
     assert desk["haulage_tariffs"]["ABBOTS BROMLEY"]["Southampton"] == 105.21

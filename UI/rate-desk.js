@@ -20,6 +20,7 @@ const deskState = {
   connectedRates: [],
   filters: {},
   haulageTariffs: {},
+  haulageCurrency: "USD",
 };
 
 const elements = {
@@ -74,6 +75,7 @@ async function bootRateDesk() {
     deskState.connectedRates = (Array.isArray(payload.rates) ? payload.rates : []).filter((rate) => !isSpotRate(rate));
     deskState.filters = payload.filters || {};
     deskState.haulageTariffs = payload.haulage_tariffs || {};
+    deskState.haulageCurrency = payload.haulage_currency || "USD";
     deskState.loaded = true;
     populateConnectedFilters();
     elements.refreshText.textContent = payload.last_refreshed
@@ -424,7 +426,7 @@ function makeConnectedHaulierRow(rate, quantity, collection) {
   const inlandLines = [makeLineView({
     name: `Inland Haulage — ${collection} → ${port} (UK Inland Haulage)`,
     basis: "Container",
-    ccy: "GBP",
+    ccy: deskState.haulageCurrency || "USD",
     unit: tariff || 0,
     poa,
   }, quantity, DEFAULT_FX)];
@@ -436,7 +438,7 @@ function makeConnectedHaulierRow(rate, quantity, collection) {
     routing: "CY/CY + haulier",
     routingDetail: poa
       ? `${collection} → ${port} → ${rateDestination(rate)} · no tariff rate for ${collection} → ${port}`
-      : `${collection} → ${port} → ${rateDestination(rate)} · £${formatNumber(tariff)}/ctn · separate haulier booking`,
+      : `${collection} → ${port} → ${rateDestination(rate)} · ${formatMoney(tariff, deskState.haulageCurrency)}/ctn · separate haulier booking`,
     sources: [...row.sources, { tag: "HAUL", file: "UK Inland Haulage" }],
     groups,
     inlandUsd: groupTotal(groups, "inland"),
@@ -761,6 +763,15 @@ function clampQuantity(value) {
 
 function formatUsd(value) {
   return `$${Math.round(numberValue(value) || 0).toLocaleString("en-US")}`;
+}
+
+function formatMoney(value, currency = "USD") {
+  const amount = formatNumber(value);
+  const code = String(currency || "").toUpperCase();
+  if (code === "USD") return `$${amount}`;
+  if (code === "GBP") return `£${amount}`;
+  if (code === "EUR") return `EUR ${amount}`;
+  return `${code || "USD"} ${amount}`;
 }
 
 function formatNumber(value) {
