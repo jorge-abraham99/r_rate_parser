@@ -130,6 +130,7 @@ def test_maersk_qtmaeu_offer_block_autodetects_and_carries_material(tmp_path: Pa
     assert canonical_rates[0]["valid_to"] == "2026-04-30"
     offers = [row for row in detail_rows(run_dir / "parsed_rate_offers.csv")]
     assert offers[0]["commodity"] == "WASTEPAPER"
+    assert offers[0]["pol"] == "Antwerp"
 
 
 def test_maersk_rate_desk_exposes_charge_analysis(tmp_path: Path, monkeypatch):

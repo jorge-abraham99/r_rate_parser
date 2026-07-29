@@ -126,12 +126,14 @@ def parse_offer_block(sheet_name, sheet, start_row: int, end_row: int, card: Rat
 
     raw_place_of_receipt = metadata.get("Place of Receipt")
     raw_place_of_delivery = metadata.get("Place of Delivery")
+    pol = infer_port_from_place(raw_place_of_receipt)
     offer = RateOffer(
         rate_card_id=card.id,
         offer_reference=offer_reference,
         commodity=metadata.get("Commodity"),
         origin=raw_place_of_receipt,
         place_of_receipt=raw_place_of_receipt,
+        pol=pol,
         final_destination=raw_place_of_delivery,
         equipment_type=equipment_type,
         service_mode=metadata.get("Service Mode"),
@@ -173,3 +175,11 @@ def parse_transit_time(value: str | None) -> int | None:
         return None
     digits = "".join(ch for ch in text if ch.isdigit())
     return int(digits) if digits else None
+
+
+def infer_port_from_place(value: str | None) -> str | None:
+    text = normalize_text(value)
+    if not text:
+        return None
+    port = normalize_text(text.split(",", 1)[0])
+    return port or None
