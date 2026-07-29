@@ -105,10 +105,15 @@ function populateDemoFilters() {
 
 function populateConnectedFilters() {
   const rates = deskState.connectedRates;
-  const defaultRate = rates[0] || {};
-  const origins = unique(deskState.filters.origins || rates.map(rateOrigin));
+  const nonDoorRates = rates.filter((rate) => !isDoorRate(rate));
+  const defaultRate = (nonDoorRates[0] || rates[0] || {});
+  const origins = unique(
+    nonDoorRates
+      .map((rate) => firstPresent(rate.pol, ""))
+      .filter(Boolean)
+  );
   const destinations = unique(deskState.filters.destinations || rates.map(rateDestination));
-  const equipment = unique(deskState.filters.equipment_types || rates.map((rate) => rate.equipment_type));
+  const equipment = unique(deskState.filters.equipment_types || nonDoorRates.map((rate) => rate.equipment_type));
   const materials = unique(deskState.filters.materials || rates.flatMap((rate) => rate.materials || []));
   const pickups = Array.isArray(deskState.filters.door_pickups) ? deskState.filters.door_pickups : [];
   const doorCollections = unique(
@@ -118,7 +123,7 @@ function populateConnectedFilters() {
       .filter(Boolean)
   );
 
-  populateSelect(elements.originSelect, origins, "Any origin", rateOrigin(defaultRate) || origins[0] || "", true);
+  populateSelect(elements.originSelect, origins, "Any origin", firstPresent(defaultRate.pol, "") || origins[0] || "", true);
   populateSelect(elements.destinationSelect, destinations, "Any destination", rateDestination(defaultRate) || destinations[0] || "", true);
   populateEquipment(canonicalEquipment(defaultRate.equipment_type || equipment[0] || "40HC"));
   populateRoutingModes("all");
@@ -897,7 +902,10 @@ function filterConnectedRates({ includeExpired, kind }) {
       if (kind === "door") {
         if (collection && !matchesFilter(firstPresent(rate.place_of_receipt, rate.origin), collection)) return false;
         const explicitPort = rate.pol || "";
-        if (origin && explicitPort && !matchesFilter(explicitPort, origin)) return false;
+        if (origin) {
+          if (!explicitPort) return false;
+          if (!matchesFilter(explicitPort, origin)) return false;
+        }
         return true;
       }
       return matchesFilter(rateOrigin(rate), origin);
