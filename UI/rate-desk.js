@@ -387,7 +387,7 @@ function buildConnectedRows(quantity) {
     : [];
 
   const rows = [];
-  if (mode === "all" || mode === "port") rows.push(...portRates);
+  if (mode === "port" || (mode === "all" && !collection)) rows.push(...portRates);
   if (mode === "all" || mode === "door") rows.push(...doorRates);
   if (mode === "all" || mode === "haulage") rows.push(...haulageRates);
   return rows.sort(compareViewRows);
