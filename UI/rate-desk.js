@@ -902,10 +902,7 @@ function filterConnectedRates({ includeExpired, kind }) {
       if (kind === "door") {
         if (collection && !matchesFilter(firstPresent(rate.place_of_receipt, rate.origin), collection)) return false;
         const explicitPort = rate.pol || "";
-        if (origin) {
-          if (!explicitPort) return false;
-          if (!matchesFilter(explicitPort, origin)) return false;
-        }
+        if (origin && explicitPort && !matchesFilter(explicitPort, origin)) return false;
         return true;
       }
       return matchesFilter(rateOrigin(rate), origin);
