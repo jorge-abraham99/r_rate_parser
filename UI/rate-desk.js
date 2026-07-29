@@ -365,6 +365,7 @@ function buildConnectedRows(quantity) {
     .map((rate) => makeConnectedDoorRow(rate, quantity));
   const haulageRates = collection
     ? filterConnectedRates({ includeExpired: elements.showExpiredToggle.checked, kind: "port" })
+      .filter((rate) => canAttachMerchantHaulage(rate))
       .map((rate) => makeConnectedHaulierRow(rate, quantity, collection))
     : [];
 
@@ -417,7 +418,7 @@ function makeConnectedDoorRow(rate, quantity) {
 
 function makeConnectedHaulierRow(rate, quantity, collection) {
   const row = makeConnectedRow(rate, quantity);
-  const port = rateOrigin(rate);
+  const port = merchantHaulagePort(rate);
   const tariff = deskState.haulageTariffs?.[collection]?.[port];
   const poa = tariff == null;
   const inlandLines = [makeLineView({
@@ -722,6 +723,22 @@ function rateOrigin(rate) {
 
 function rateDestination(rate) {
   return firstPresent(rate.final_destination, rate.pod);
+}
+
+function merchantHaulagePort(rate) {
+  const pol = firstPresent(rate.pol, "");
+  return supportedHaulagePort(pol) ? pol : "";
+}
+
+function canAttachMerchantHaulage(rate) {
+  return Boolean(merchantHaulagePort(rate));
+}
+
+function supportedHaulagePort(value) {
+  if (!value) return false;
+  const target = normalized(value);
+  return Object.values(deskState.haulageTariffs || {}).some((portMap) =>
+    Object.keys(portMap || {}).some((port) => normalized(port) === target));
 }
 
 function canonicalEquipment(value) {
