@@ -299,6 +299,8 @@ function buildDemoRows(quantity) {
 function makeDemoVariant(rate, mode, quantity, origin, collection) {
   const quote = window.RATE_DESK_DEMO.quote;
   const fx = quote.fx;
+  const routeOrigin = firstPresent(origin, (rate.origins || [])[0]);
+  const routeDestination = firstPresent(elements.destinationSelect.value, (rate.destinations || [])[0]);
   const originLines = rate.origin.map((line) => makeDemoLine(line, quantity, fx));
   let freightLines = rate.freight.map((line) => makeDemoLine(line, quantity, fx));
   const destinationLines = rate.destination.map((line) => makeDemoLine(line, quantity, fx));
@@ -362,6 +364,11 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
   return {
     id: `${rate.id}-${mode}`,
     type: mode === "door" ? "DOOR" : (mode === "haulier" ? "HAULIER" : "CONTRACT"),
+    routeLane: formatRouteLane(
+      ...(mode === "door" || mode === "haulier" ? [collection] : []),
+      routeOrigin,
+      routeDestination,
+    ),
     routing,
     routingDetail,
     sources,
@@ -421,6 +428,7 @@ function makeConnectedRow(rate, quantity) {
   return {
     id: String(rate.offer_id || `${sourceFile}-${rate.raw_row_reference || "row"}`),
     type: isDoorRate(rate) ? "DOOR" : "CONTRACT",
+    routeLane: formatRouteLane(rateOrigin(rate), rateDestination(rate)),
     routing: formatRouting(rate),
     routingDetail: laneDetail(rate),
     sources: [{ tag, file: sourceFile }],
@@ -447,6 +455,11 @@ function makeConnectedDoorRow(rate, quantity) {
   return {
     ...makeConnectedRow(rate, quantity),
     type: "DOOR",
+    routeLane: formatRouteLane(
+      firstPresent(rate.place_of_receipt, rate.origin),
+      rate.pol,
+      rateDestination(rate),
+    ),
     routing: "Door → quay",
     routingDetail: laneDetail(rate),
   };
@@ -469,6 +482,7 @@ function makeConnectedHaulierRow(rate, quantity, collection) {
     ...row,
     id: `${row.id}-haulage-${slugify(collection)}`,
     type: "HAULIER",
+    routeLane: formatRouteLane(collection, port, rateDestination(rate)),
     routing: "CY/CY + haulier",
     routingDetail: poa
       ? `${collection} → ${port} → ${rateDestination(rate)} · no tariff rate for ${collection} → ${port}`
@@ -578,12 +592,19 @@ function orderGroups(groups) {
 
 function renderRate(row, index, isBest) {
   const expanded = deskState.expandedId === row.id;
+  const detailIncludesLane = row.routeLane && normalized(row.routingDetail).startsWith(normalized(row.routeLane));
+  const routingTitle = detailIncludesLane
+    ? row.routingDetail
+    : [row.routeLane, row.routingDetail].filter(Boolean).join(" · ");
   return `
     <article class="rate-record">
       <button class="quote-grid quote-row${row.poa ? " poa-row" : ""}${row.expired ? " expired-row" : ""}" type="button" data-rate-id="${escapeAttr(row.id)}" aria-expanded="${expanded}">
         <span><span class="type-chip">${escapeHtml(row.type)}</span></span>
         <span class="${isBest ? "rank best-rank" : "rank"}">${index + 1}</span>
-        <span class="routing-cell" title="${escapeAttr(row.routingDetail)}">${escapeHtml(row.routing)}</span>
+        <span class="routing-cell" title="${escapeAttr(routingTitle)}">
+          <strong class="routing-lane">${escapeHtml(row.routeLane || row.routing)}</strong>
+          <small class="routing-type">${escapeHtml(row.routing)}</small>
+        </span>
         <span class="source-tags">${row.sources.map((source) => `<span title="${escapeAttr(source.file)}">${escapeHtml(source.tag)}</span>`).join("")}</span>
         <span class="mono transit-value">${escapeHtml(row.transit || "—")}</span>
         <span class="number">${renderInland(row)}</span>
@@ -695,6 +716,16 @@ function laneDetail(rate) {
   const origin = firstPresent(rate.pol, rate.place_of_receipt, rate.origin);
   const destination = firstPresent(rate.final_destination, rate.pod);
   return [origin, destination].filter(Boolean).join(" → ") || formatRouting(rate);
+}
+
+function formatRouteLane(...parts) {
+  const routeParts = [];
+  parts.forEach((part) => {
+    const value = String(part || "").trim();
+    if (!value || sameValue(routeParts.at(-1), value)) return;
+    routeParts.push(value);
+  });
+  return routeParts.join(" → ");
 }
 
 function validityLabel(validFrom, validTo, expired = false) {

@@ -455,11 +455,29 @@ label:focus-within {
 }
 
 .routing-cell {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.routing-lane,
+.routing-type {
+  display: block;
   overflow: hidden;
-  font-size: 14px;
-  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.routing-lane {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.routing-type {
+  color: #5f7189;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .source-tags {
