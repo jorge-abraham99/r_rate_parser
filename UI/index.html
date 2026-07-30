@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/ui/styles.css?v=14">
+  <link rel="stylesheet" href="/ui/styles.css?v=15">
 </head>
 <body>
   <div class="app-shell">
@@ -76,18 +76,18 @@
       </div>
 
       <section class="quote-card" aria-label="Ranked rates">
-        <div class="quote-grid quote-grid-header" aria-hidden="true">
-          <span>Type</span>
-          <span>#</span>
-          <span>Routing</span>
-          <span>Source</span>
-          <span>Transit</span>
-          <span class="number">Inland<br><small>haulage</small></span>
-          <span class="number">Origin</span>
-          <span class="number">Freight</span>
-          <span class="number">Destination</span>
-          <span class="number">All-in USD<br><small>incl. inland</small></span>
-          <span class="number">Validity</span>
+        <div class="quote-grid quote-grid-header">
+          <span role="columnheader"><button class="quote-sort" type="button" data-sort-key="type" data-sort-label="Type"><span>Type</span><span class="sort-indicator" aria-hidden="true"></span></button></span>
+          <span role="columnheader"><button class="quote-sort" type="button" data-sort-key="rank" data-sort-label="Rank"><span>#</span><span class="sort-indicator" aria-hidden="true"></span></button></span>
+          <span role="columnheader"><button class="quote-sort" type="button" data-sort-key="routing" data-sort-label="Routing"><span>Routing</span><span class="sort-indicator" aria-hidden="true"></span></button></span>
+          <span role="columnheader"><button class="quote-sort" type="button" data-sort-key="source" data-sort-label="Source"><span>Source</span><span class="sort-indicator" aria-hidden="true"></span></button></span>
+          <span role="columnheader"><button class="quote-sort" type="button" data-sort-key="transit" data-sort-label="Transit"><span>Transit</span><span class="sort-indicator" aria-hidden="true"></span></button></span>
+          <span class="number" role="columnheader"><button class="quote-sort" type="button" data-sort-key="inlandUsd" data-sort-label="Inland haulage"><span>Inland<br><small>haulage</small></span><span class="sort-indicator" aria-hidden="true"></span></button></span>
+          <span class="number" role="columnheader"><button class="quote-sort" type="button" data-sort-key="originUsd" data-sort-label="Origin cost"><span>Origin</span><span class="sort-indicator" aria-hidden="true"></span></button></span>
+          <span class="number" role="columnheader"><button class="quote-sort" type="button" data-sort-key="freightUsd" data-sort-label="Freight cost"><span>Freight</span><span class="sort-indicator" aria-hidden="true"></span></button></span>
+          <span class="number" role="columnheader"><button class="quote-sort" type="button" data-sort-key="destinationUsd" data-sort-label="Destination cost"><span>Destination</span><span class="sort-indicator" aria-hidden="true"></span></button></span>
+          <span class="number" role="columnheader"><button class="quote-sort" type="button" data-sort-key="totalUsd" data-sort-label="All-in USD"><span>All-in USD<br><small>incl. inland</small></span><span class="sort-indicator" aria-hidden="true"></span></button></span>
+          <span class="number" role="columnheader"><button class="quote-sort" type="button" data-sort-key="validity" data-sort-label="Validity"><span>Validity</span><span class="sort-indicator" aria-hidden="true"></span></button></span>
         </div>
         <div id="rateRows">
           <div class="rate-empty">Loading approved rates…</div>
@@ -107,6 +107,6 @@
 
   <script src="/ui/config.js?v=3"></script>
   <script src="/ui/demo-data.js?v=1"></script>
-  <script src="/ui/rate-desk.js?v=15"></script>
+  <script src="/ui/rate-desk.js?v=16"></script>
 </body>
 </html>
