@@ -136,7 +136,7 @@ function populateConnectedFilters() {
   const equipment = unique(deskState.filters.equipment_types || nonDoorRates.map((rate) => rate.equipment_type));
   const materials = unique(deskState.filters.materials || rates.flatMap((rate) => rate.materials || []));
   const pickups = Array.isArray(deskState.filters.door_pickups) ? deskState.filters.door_pickups : [];
-  const doorCollections = unique(
+  const doorCollections = uniqueLocations(
     rates
       .filter((rate) => isDoorRate(rate))
       .map((rate) => firstPresent(rate.place_of_receipt, rate.origin))
@@ -159,8 +159,8 @@ function populateConnectedFilters() {
 function refreshCollectionOptions() {
   if (RATE_DESK_DEMO_MODE) return;
   const pickups = Array.isArray(deskState.filters.door_pickups) ? deskState.filters.door_pickups : [];
-  const haulagePickupNames = unique(pickups.map((pickup) => pickup.name || pickup.location).filter(Boolean));
-  const doorCollections = unique(
+  const haulagePickupNames = uniqueLocations(pickups.map((pickup) => pickup.name || pickup.location).filter(Boolean));
+  const doorCollections = uniqueLocations(
     deskState.connectedRates
       .filter((rate) => isDoorRate(rate))
       .map((rate) => firstPresent(rate.place_of_receipt, rate.origin))
@@ -172,7 +172,7 @@ function refreshCollectionOptions() {
     ? haulagePickupNames
     : mode === "door"
       ? doorCollections
-      : unique([...haulagePickupNames, ...doorCollections]);
+      : uniqueLocations([...haulagePickupNames, ...doorCollections]);
 
   if (pickupNames.length) {
     populateSelect(elements.collectionSelect, pickupNames, "None — not filtered", current, true);
@@ -487,7 +487,7 @@ function makeConnectedDoorRow(rate, quantity) {
 function makeConnectedHaulierRow(rate, quantity, collection) {
   const row = makeConnectedRow(rate, quantity);
   const port = merchantHaulagePort(rate);
-  const tariff = deskState.haulageTariffs?.[collection]?.[port];
+  const tariff = findHaulageTariff(collection, port);
   const poa = tariff == null;
   const inlandLines = [makeLineView({
     name: `Inland Haulage — ${collection} → ${port} (UK Inland Haulage)`,
@@ -921,9 +921,18 @@ function canAttachMerchantHaulage(rate) {
 
 function supportedHaulagePort(value) {
   if (!value) return false;
-  const target = normalized(value);
+  const target = locationKey(value);
   return Object.values(deskState.haulageTariffs || {}).some((portMap) =>
-    Object.keys(portMap || {}).some((port) => normalized(port) === target));
+    Object.keys(portMap || {}).some((port) => locationKey(port) === target));
+}
+
+function findHaulageTariff(collection, port) {
+  const collectionEntry = Object.entries(deskState.haulageTariffs || {})
+    .find(([name]) => locationsMatch(name, collection));
+  if (!collectionEntry) return null;
+  const portEntry = Object.entries(collectionEntry[1] || {})
+    .find(([name]) => locationsMatch(name, port));
+  return portEntry ? portEntry[1] : null;
 }
 
 function canonicalEquipment(value) {
@@ -1060,7 +1069,7 @@ function filterConnectedRates({ includeExpired, kind }) {
       if (equipment && canonicalEquipment(rate.equipment_type) !== equipment) return false;
       if (!(material === "All materials" || (rate.materials || []).some((item) => sameValue(item, material)))) return false;
       if (kind === "door") {
-        if (collection && !matchesFilter(firstPresent(rate.place_of_receipt, rate.origin), collection)) return false;
+        if (collection && !locationsMatch(firstPresent(rate.place_of_receipt, rate.origin), collection)) return false;
         const explicitPort = rate.pol || "";
         if (origin && explicitPort && !matchesFilter(explicitPort, origin)) return false;
         return true;
@@ -1075,6 +1084,27 @@ function firstPresent(...values) {
 
 function sameValue(left, right) {
   return normalized(left) === normalized(right);
+}
+
+function locationKey(value) {
+  return normalized(value)
+    .replace(/[,\s]+(?:gb|uk)$/i, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function locationsMatch(left, right) {
+  return Boolean(locationKey(left)) && locationKey(left) === locationKey(right);
+}
+
+function uniqueLocations(values) {
+  const seen = new Set();
+  return values.filter((value) => {
+    const key = locationKey(value);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function normalized(value) {

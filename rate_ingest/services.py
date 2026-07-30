@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -452,20 +453,17 @@ def get_rate_desk_data(settings: Settings, limit: int = 2000) -> dict[str, Any]:
     approved_at = [item.get("approved_at") for item in imports if item.get("approved_at")]
     last_refreshed = max(approved_at, key=parse_datetime_sort_key) if approved_at else None
 
-    origins = sorted(
-        {
-            first_present(rate.get("pol"), rate.get("place_of_receipt"), rate.get("origin"))
-            for rate in rates
-            if first_present(rate.get("pol"), rate.get("place_of_receipt"), rate.get("origin"))
-        }
-    )
-    destinations = sorted(
-        {
-            first_present(rate.get("final_destination"), rate.get("pod"))
-            for rate in rates
-            if first_present(rate.get("final_destination"), rate.get("pod"))
-        }
-    )
+    origin_map: dict[str, str] = {}
+    dest_map: dict[str, str] = {}
+    for rate in rates:
+        val = first_present(rate.get("pol"), rate.get("place_of_receipt"), rate.get("origin"))
+        if val:
+            origin_map.setdefault(normalize_location_key(val), val)
+        val = first_present(rate.get("final_destination"), rate.get("pod"))
+        if val:
+            dest_map.setdefault(normalize_location_key(val), val)
+    origins = sorted(origin_map.values())
+    destinations = sorted(dest_map.values())
     equipment_types = sorted({rate["equipment_type"] for rate in rates if rate.get("equipment_type")})
     carriers = sorted(
         {
@@ -647,6 +645,13 @@ def is_haulage_rate(rate: dict[str, Any]) -> bool:
     return "haulage" in text or "inland_export" in text or " haul " in f" {text} "
 
 
+def normalize_location_key(value: str) -> str:
+    text = (value or "").strip().lower()
+    text = re.sub(r"[,\s]+(?:gb|uk)$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def build_haulage_lookup(haulage_rates: list[dict[str, Any]]) -> tuple[dict[str, dict[str, float]], list[dict[str, Any]], str | None]:
     pickups: dict[str, dict[str, Any]] = {}
     tariffs: dict[str, dict[str, float]] = {}
@@ -660,10 +665,12 @@ def build_haulage_lookup(haulage_rates: list[dict[str, Any]]) -> tuple[dict[str,
             haulage_currency = currency
         if not collection:
             continue
+        key = normalize_location_key(collection)
+        display_name = pickups.get(key, {}).get("name", collection)
         pickups.setdefault(
-            collection,
+            key,
             {
-                "name": collection,
+                "name": display_name,
                 "valid_from": rate.get("valid_from"),
                 "valid_to": rate.get("valid_to"),
                 "source_file_name": rate.get("source_file_name"),
@@ -673,7 +680,7 @@ def build_haulage_lookup(haulage_rates: list[dict[str, Any]]) -> tuple[dict[str,
             continue
         if haulage_currency and currency and currency != haulage_currency:
             continue
-        tariffs.setdefault(collection, {})[port] = round(float(amount), 2)
+        tariffs.setdefault(key, {})[normalize_location_key(port)] = round(float(amount), 2)
     return tariffs, sorted(pickups.values(), key=lambda item: item["name"]), haulage_currency
 
 

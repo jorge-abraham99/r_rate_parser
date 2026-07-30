@@ -287,8 +287,8 @@ def test_haulage_matrix_import_autodetects_and_exposes_tariffs(tmp_path: Path, m
     assert desk["filters"]["door_pickups"]
     assert desk["haulage_currency"] == "USD"
     assert any(item["name"] == "ABBOTS BROMLEY" for item in desk["filters"]["door_pickups"])
-    assert desk["haulage_tariffs"]["ABBOTS BROMLEY"]["Felixstowe"] == 140.14
-    assert desk["haulage_tariffs"]["ABBOTS BROMLEY"]["Southampton"] == 105.21
+    assert desk["haulage_tariffs"]["abbots bromley"]["felixstowe"] == 140.14
+    assert desk["haulage_tariffs"]["abbots bromley"]["southampton"] == 105.21
 
 
 def test_cma_email_import_creates_canonical_rates(tmp_path: Path, monkeypatch):
