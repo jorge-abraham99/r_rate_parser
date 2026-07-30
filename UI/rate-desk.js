@@ -21,6 +21,10 @@ const deskState = {
   filters: {},
   haulageTariffs: {},
   haulageCurrency: "USD",
+  sort: {
+    key: "totalUsd",
+    direction: "asc",
+  },
 };
 
 const elements = {
@@ -42,6 +46,7 @@ const elements = {
   demoBadge: document.getElementById("demoBadge"),
   deskAlert: document.getElementById("deskAlert"),
   figuresNote: document.getElementById("figuresNote"),
+  sortButtons: [...document.querySelectorAll("[data-sort-key]")],
 };
 
 [elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.equipmentSelect, elements.materialSelect]
@@ -52,6 +57,17 @@ elements.routingModeSelect.addEventListener("change", () => {
 });
 elements.showExpiredToggle.addEventListener("change", resetAndRender);
 elements.showAllQuotesButton.addEventListener("click", showAllQuotes);
+elements.sortButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const key = button.dataset.sortKey;
+    deskState.sort = {
+      key,
+      direction: deskState.sort.key === key && deskState.sort.direction === "asc" ? "desc" : "asc",
+    };
+    deskState.expandedId = null;
+    renderDesk();
+  });
+});
 elements.qtyInput.addEventListener("change", () => {
   elements.qtyInput.value = clampQuantity(elements.qtyInput.value);
   resetAndRender();
@@ -213,6 +229,7 @@ function resetAndRender() {
 function renderDesk() {
   if (!deskState.loaded) return;
   hideAlert();
+  updateSortHeaders();
 
   const quantity = clampQuantity(elements.qtyInput.value);
   elements.qtyInput.value = quantity;
@@ -247,7 +264,7 @@ function renderDesk() {
     return;
   }
 
-  const best = rows.find((row) => !row.poa);
+  const best = rows.filter((row) => !row.poa).sort(compareAllInUsdRows)[0];
   const expiredCount = rows.filter((row) => row.expired).length;
   const hiddenExpiredCount = !elements.showExpiredToggle.checked ? countHiddenExpiredMatches() : 0;
   const scopeLabel = collection ? "routing option" : "contract rate";
@@ -293,7 +310,7 @@ function buildDemoRows(quantity) {
       rows.push(makeDemoVariant(rate, "haulier", quantity, origin, collection));
     }
   });
-  return rows.sort(compareViewRows);
+  return sortViewRows(rows);
 }
 
 function makeDemoVariant(rate, mode, quantity, origin, collection) {
@@ -374,6 +391,7 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
     sources,
     transit: extractTransit(rate.sailing),
     validity: rate.validity,
+    validTo: "",
     sailing: rate.sailing,
     freetime: rate.freetime,
     groups,
@@ -416,7 +434,7 @@ function buildConnectedRows(quantity) {
   if (mode === "port" || (mode === "all" && !collection)) rows.push(...portRates);
   if (mode === "all" || mode === "door") rows.push(...doorRates);
   if (mode === "all" || mode === "haulage") rows.push(...haulageRates);
-  return rows.sort(compareViewRows);
+  return sortViewRows(rows);
 }
 
 function makeConnectedRow(rate, quantity) {
@@ -434,6 +452,7 @@ function makeConnectedRow(rate, quantity) {
     sources: [{ tag, file: sourceFile }],
     transit: rate.transit_time_days ? `${rate.transit_time_days}d` : extractTransit(rate.routing_note || ""),
     validity: validityLabel(rate.valid_from, rate.valid_to, expired),
+    validTo: rate.valid_to || "",
     sailing: rate.routing_note || "",
     freetime: extractFreetime(rate),
     groups,
@@ -600,7 +619,7 @@ function renderRate(row, index, isBest) {
     <article class="rate-record">
       <button class="quote-grid quote-row${row.poa ? " poa-row" : ""}${row.expired ? " expired-row" : ""}" type="button" data-rate-id="${escapeAttr(row.id)}" aria-expanded="${expanded}">
         <span><span class="type-chip">${escapeHtml(row.type)}</span></span>
-        <span class="${isBest ? "rank best-rank" : "rank"}">${index + 1}</span>
+        <span class="${isBest ? "rank best-rank" : "rank"}">${row.defaultRank || index + 1}</span>
         <span class="routing-cell" title="${escapeAttr(routingTitle)}">
           <strong class="routing-lane">${escapeHtml(row.routeLane || row.routing)}</strong>
           <small class="routing-type">${escapeHtml(row.routing)}</small>
@@ -685,12 +704,103 @@ function renderLine(line) {
   `;
 }
 
-function compareViewRows(left, right) {
-  if (left.expired !== right.expired) return left.expired ? 1 : -1;
-  if (left.poa !== right.poa) return left.poa ? 1 : -1;
-  if (left.type !== right.type) return left.type.localeCompare(right.type);
-  if (left.totalUsd !== right.totalUsd) return left.totalUsd - right.totalUsd;
-  return left.routing.localeCompare(right.routing);
+function updateSortHeaders() {
+  elements.sortButtons.forEach((button) => {
+    const active = button.dataset.sortKey === deskState.sort.key;
+    const direction = active ? deskState.sort.direction : null;
+    const nextDirection = active && direction === "asc" ? "descending" : "ascending";
+    const label = button.dataset.sortLabel || button.textContent.trim();
+    button.classList.toggle("is-active", active);
+    button.querySelector(".sort-indicator").textContent = active
+      ? direction === "asc" ? "↑" : "↓"
+      : "";
+    button.parentElement.setAttribute("aria-sort", active
+      ? direction === "asc" ? "ascending" : "descending"
+      : "none");
+    button.setAttribute("aria-label", `${label}. ${active ? `Sorted ${direction === "asc" ? "ascending" : "descending"}. ` : ""}Activate to sort ${nextDirection}.`);
+  });
+}
+
+function sortViewRows(rows) {
+  const rankedRows = [...rows]
+    .sort(compareAllInUsdRows)
+    .map((row, index) => ({ ...row, defaultRank: index + 1 }));
+  return rankedRows.sort((left, right) => compareRowsByActiveSort(left, right));
+}
+
+function compareAllInUsdRows(left, right) {
+  return compareNumbers(left.totalUsd, right.totalUsd)
+    || compareText(left.routeLane, right.routeLane)
+    || compareText(sourceSortValue(left), sourceSortValue(right))
+    || compareText(left.id, right.id);
+}
+
+function compareRowsByActiveSort(left, right) {
+  const { key, direction } = deskState.sort;
+  const leftValue = rowSortValue(left, key);
+  const rightValue = rowSortValue(right, key);
+  const leftMissing = leftValue === null || leftValue === undefined || leftValue === "";
+  const rightMissing = rightValue === null || rightValue === undefined || rightValue === "";
+
+  if (leftMissing !== rightMissing) return leftMissing ? 1 : -1;
+
+  let result = 0;
+  if (!leftMissing) {
+    result = typeof leftValue === "number" && typeof rightValue === "number"
+      ? compareNumbers(leftValue, rightValue)
+      : compareText(leftValue, rightValue);
+  }
+  if (result) return direction === "desc" ? -result : result;
+  return compareNumbers(left.defaultRank, right.defaultRank);
+}
+
+function rowSortValue(row, key) {
+  if (key === "type") return row.type;
+  if (key === "rank") return row.defaultRank;
+  if (key === "routing") return [row.routeLane, row.routing].filter(Boolean).join(" ");
+  if (key === "source") return sourceSortValue(row);
+  if (key === "transit") return transitHours(row.transit);
+  if (key === "inlandUsd") return hasPricedInland(row) ? row.inlandUsd : null;
+  if (key === "originUsd") return row.originUsd;
+  if (key === "freightUsd") return row.freightUsd;
+  if (key === "destinationUsd") return row.destinationUsd;
+  if (key === "totalUsd") return row.totalUsd;
+  if (key === "validity") return validitySortValue(row);
+  return row.defaultRank;
+}
+
+function sourceSortValue(row) {
+  return (row.sources || [])
+    .map((source) => [source.tag, source.file].filter(Boolean).join(" "))
+    .join(" ");
+}
+
+function transitHours(value) {
+  const match = String(value || "").match(/(?:(\d+)\s*d)?\s*(?:(\d+)\s*h)?/i);
+  if (!match || (!match[1] && !match[2])) return null;
+  return (Number(match[1]) || 0) * 24 + (Number(match[2]) || 0);
+}
+
+function hasPricedInland(row) {
+  const inlandGroup = row.groups.find((group) => group.key === "inland");
+  return Boolean(inlandGroup && !row.poa && !inlandGroup.lines.some((line) => line.included));
+}
+
+function validitySortValue(row) {
+  const end = parseDate(row.validTo);
+  if (end) return end.getTime();
+  return normalized(row.validity);
+}
+
+function compareNumbers(left, right) {
+  return Number(left) - Number(right);
+}
+
+function compareText(left, right) {
+  return String(left || "").localeCompare(String(right || ""), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
 }
 
 function sumGroups(groups) {

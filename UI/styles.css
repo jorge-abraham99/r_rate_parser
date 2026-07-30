@@ -385,6 +385,45 @@ label:focus-within {
   text-transform: none;
 }
 
+.quote-sort {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.number .quote-sort {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.quote-sort:hover,
+.quote-sort.is-active {
+  color: var(--ink);
+}
+
+.quote-sort:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.sort-indicator {
+  min-width: 9px;
+  color: var(--blue);
+  font-size: 11px;
+  line-height: 1;
+}
+
 .number {
   text-align: right;
 }
