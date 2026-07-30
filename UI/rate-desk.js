@@ -363,7 +363,7 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
   }
   return {
     id: `${rate.id}-${mode}`,
-    type: mode === "door" ? "DOOR" : (mode === "haulier" ? "HAULIER" : "CONTRACT"),
+    type: "CONTRACT",
     routeLane: formatRouteLane(
       ...(mode === "door" || mode === "haulier" ? [collection] : []),
       routeOrigin,
@@ -427,7 +427,7 @@ function makeConnectedRow(rate, quantity) {
   const expired = isExpiredRate(rate);
   return {
     id: String(rate.offer_id || `${sourceFile}-${rate.raw_row_reference || "row"}`),
-    type: isDoorRate(rate) ? "DOOR" : "CONTRACT",
+    type: "CONTRACT",
     routeLane: formatRouteLane(rateOrigin(rate), rateDestination(rate)),
     routing: formatRouting(rate),
     routingDetail: laneDetail(rate),
@@ -454,7 +454,7 @@ function makeConnectedRow(rate, quantity) {
 function makeConnectedDoorRow(rate, quantity) {
   return {
     ...makeConnectedRow(rate, quantity),
-    type: "DOOR",
+    type: "CONTRACT",
     routeLane: formatRouteLane(
       firstPresent(rate.place_of_receipt, rate.origin),
       rate.pol,
@@ -481,7 +481,7 @@ function makeConnectedHaulierRow(rate, quantity, collection) {
   return {
     ...row,
     id: `${row.id}-haulage-${slugify(collection)}`,
-    type: "HAULIER",
+    type: "CONTRACT",
     routeLane: formatRouteLane(collection, port, rateDestination(rate)),
     routing: "CY/CY + haulier",
     routingDetail: poa
