@@ -99,6 +99,7 @@ def provider_from_name(file_name: str) -> str | None:
 
 
 def guess_parser_family(sheet_summaries: list[dict[str, Any]], source_type: str | None = None) -> str | None:
+    sheet_names = " ".join(summary.get("sheet_name", "") for summary in sheet_summaries).upper()
     flattened = " ".join(
         " ".join(" ".join(row) for row in summary.get("top_rows", [])) for summary in sheet_summaries
     ).upper()
@@ -106,6 +107,15 @@ def guess_parser_family(sheet_summaries: list[dict[str, Any]], source_type: str 
         return "email_table"
     if "CITY NAME" in flattened and ("GBFXT" in flattened or "GBSOU" in flattened or "GBLGP" in flattened):
         return "haulage_matrix"
+    if (
+        "HAULAGE ZONES" in sheet_names
+        and "REUDAN-SPECIAL" in sheet_names
+        and "REUDAN-TARRIFF" in sheet_names
+        and "CITY" in flattened
+        and "COUNTY" in flattened
+        and "ALL IN RATE" in flattened
+    ):
+        return "msc_zoned_inline"
     if "RECEIPT" in flattened and "DELIVERY" in flattened and "COMMODITY NAME" in flattened and "RATE BASIS" in flattened:
         return "site_to_site_rows"
     if "OFFER 1-1" in flattened or "SCHEDULED ROUTE" in flattened:

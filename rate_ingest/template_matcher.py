@@ -54,11 +54,17 @@ def find_best_template(settings: Settings, inspect_result: InspectResult) -> tup
     scored = []
     for template in load_templates(settings):
         score = score_template(template, inspect_result)
-        scored.append({"template_id": template.template_id, "template_name": template.template_name, "confidence": round(score, 2)})
-    scored.sort(key=lambda item: item["confidence"], reverse=True)
+        scored.append(
+            {
+                "template_id": template.template_id,
+                "template_name": template.template_name,
+                "confidence": round(score, 2),
+                "parser_family_match": inspect_result.parser_family_guess == template.parser_family,
+            }
+        )
+    scored.sort(key=lambda item: (item["confidence"], item["parser_family_match"]), reverse=True)
     best = scored[0] if scored else None
     if best and best["confidence"] >= 0.55:
         template = next(template for template in load_templates(settings) if template.template_id == best["template_id"])
         return template, scored
     return None, scored
-

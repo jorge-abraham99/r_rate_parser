@@ -1,5 +1,6 @@
 const IMPORT_DEMO_MODE = Boolean(window.RATE_DESK_CONFIG?.demoMode);
 const SOURCE_DEFINITIONS = [
+  { key: "msc-inline", name: "MSC Inline Haulage", cadence: "monthly" },
   { key: "maersk-contract", name: "Maersk Quay-to-quay", cadence: "monthly" },
   { key: "maersk-door", name: "Maersk Door-to-quay", cadence: "monthly" },
   { key: "haulage-q2", name: "UK Inland Haulage", cadence: "quarterly" },
@@ -25,6 +26,7 @@ const elements = {
   sourceRows: document.getElementById("sourceRows"),
   coverageRisk: document.getElementById("coverageRisk"),
   previewModal: document.getElementById("previewModal"),
+  parseModal: document.getElementById("parseModal"),
   previewTitle: document.getElementById("previewTitle"),
   previewFile: document.getElementById("previewFile"),
   sourceChoiceRow: document.getElementById("sourceChoiceRow"),
@@ -44,6 +46,8 @@ const elements = {
   diffPreviousLabel: document.getElementById("diffPreviousLabel"),
   diffRows: document.getElementById("diffRows"),
   diffSummary: document.getElementById("diffSummary"),
+  tierRateSection: document.getElementById("tierRateSection"),
+  tierRateTables: document.getElementById("tierRateTables"),
   firstSheetNote: document.getElementById("firstSheetNote"),
   publishButton: document.getElementById("publishButton"),
   cancelPreviewButton: document.getElementById("cancelPreviewButton"),
@@ -247,12 +251,13 @@ async function receiveFile(file) {
     const imported = await response.json();
     const detailResponse = await fetch(`/api/imports/${encodeURIComponent(imported.import_id)}`);
     if (!detailResponse.ok) throw new Error("The sheet parsed, but its preview could not be loaded.");
+    const detail = await detailResponse.json();
     openReview({
       fileName: file.name,
-      source: "",
+      source: suggestedSource(detail),
       contractType: "",
       newSourceName: "",
-      detail: await detailResponse.json(),
+      detail,
       importId: imported.import_id,
     });
   } catch (error) {
@@ -279,7 +284,7 @@ async function openSummary(sourceKey, fileId) {
   if (IMPORT_DEMO_MODE) {
     importState.preview = {
       fileName: file.file,
-      source: sourceKey === "haulage-q2" ? "haulage" : "maersk",
+      source: sourceChoiceForKey(sourceKey),
       contractType: sourceKey === "maersk-door" ? "d2k" : sourceKey === "maersk-contract" ? "k2k" : "",
       newSourceName: "",
       summary: demoSummary(sourceKey),
@@ -297,7 +302,7 @@ async function openSummary(sourceKey, fileId) {
     const detail = await response.json();
     importState.preview = {
       fileName: file.file,
-      source: sourceKey === "haulage-q2" ? "haulage" : "maersk",
+      source: sourceChoiceForKey(sourceKey),
       contractType: sourceKey === "maersk-door" ? "d2k" : sourceKey === "maersk-contract" ? "k2k" : "",
       newSourceName: "",
       summary: connectedSummary(detail, sourceKey),
@@ -362,6 +367,7 @@ function renderPreview() {
   } else {
     elements.diffSection.hidden = true;
   }
+  renderTierRateTables(preview.detail?.tier_rate_tables || {});
 
   const hasCurrent = sourceKey && importState.sources.find((source) => source.key === sourceKey)?.current;
   elements.archiveNote.textContent = !preview.readOnly && hasCurrent ? "current sheet will be archived" : "";
@@ -397,6 +403,52 @@ function renderDifferences(summary) {
     `;
   }).join("");
   elements.diffSummary.textContent = summary.remaining || "";
+}
+
+function renderTierRateTables(tables) {
+  const tiers = ["SPECIAL", "TARIFF"].filter((tier) => Array.isArray(tables?.[tier]) && tables[tier].length);
+  elements.tierRateSection.hidden = !tiers.length;
+  elements.parseModal.classList.toggle("has-tier-tables", Boolean(tiers.length));
+  if (!tiers.length) {
+    elements.tierRateTables.innerHTML = "";
+    return;
+  }
+  elements.tierRateTables.innerHTML = tiers.map((tier) => {
+    const rows = tables[tier];
+    return `
+      <details class="tier-rate-table" open>
+        <summary><span>${escapeHtml(tier)}</span><small>${rows.length} workbook rows</small></summary>
+        <div class="tier-table-scroll">
+          <table>
+            <thead><tr>
+              <th>Zone</th><th>POL</th><th>POD</th><th>Final destination</th><th>Size</th>
+              <th class="number">All-in</th><th>Docs</th><th>Freetime</th><th>Validity</th>
+            </tr></thead>
+            <tbody>${rows.map((row) => `
+              <tr>
+                <td>${escapeHtml(row.zone || "—")}</td>
+                <td>${escapeHtml(row.pol || "—")}</td>
+                <td>${escapeHtml(row.pod || "—")}</td>
+                <td>${escapeHtml(row.final_destination || "—")}</td>
+                <td>${escapeHtml(row.equipment_type || "—")}</td>
+                <td class="number mono">${escapeHtml(`${row.currency || ""} ${formatNumber(row.amount)}`.trim())}</td>
+                <td>${escapeHtml(row.documentation || "—")}</td>
+                <td>${escapeHtml(row.freetime || "—")}</td>
+                <td class="mono">${escapeHtml(compactValidity(row.valid_from, row.valid_to))}</td>
+              </tr>`).join("")}</tbody>
+          </table>
+        </div>
+      </details>`;
+  }).join("");
+}
+
+function compactValidity(validFrom, validTo) {
+  const start = parseDate(validFrom);
+  const end = parseDate(validTo);
+  if (start && end) return `${shortDate(start)} – ${shortDate(end)}`;
+  if (start) return `from ${shortDate(start)}`;
+  if (end) return `to ${shortDate(end)}`;
+  return "—";
 }
 
 function demoSummary(sourceKey) {
@@ -436,13 +488,13 @@ function connectedSummary(detail, sourceKey) {
   const validTo = detail?.card?.valid_to;
   return {
     validity: formatValidity(validFrom, validTo),
-    lanes: uniqueLaneCount(rates),
+    lanes: sourceKey === "msc-inline" ? Number(detail?.summary?.rate_offers || 0) : uniqueLaneCount(rates),
     skipped: validation.errors ? `${validation.errors} validation error${validation.errors === 1 ? "" : "s"}` : "no blocking validation errors",
     mappedCount,
     unmatchedCount,
     buckets,
     note: unmatchedCount ? "Unmatched charges need review before this source is fully trustworthy." : "",
-    differences: connectedDifferences(rates, sourceKey),
+    differences: sourceKey === "msc-inline" ? [] : connectedDifferences(rates, sourceKey),
     previousLabel: "previous",
     deltaLabel: sourceKey === "haulage-q2" ? "Haulage rate vs. previous sheet" : "All-in vs. previous sheet",
     remaining: "",
@@ -548,6 +600,15 @@ function sourcePayload(preview, sourceKey) {
       contract_tag: "HAUL",
     };
   }
+  if (sourceKey === "msc-inline") {
+    return {
+      approved_by: "Rate Desk operator",
+      carrier_name: "MSC",
+      carrier_key: sourceKey,
+      carrier_label: "MSC · Inline haulage",
+      contract_tag: null,
+    };
+  }
   const door = sourceKey === "maersk-door";
   return {
     approved_by: "Rate Desk operator",
@@ -607,6 +668,7 @@ async function deleteFile(sourceKey, fileId) {
 }
 
 function selectedSourceKey(preview) {
+  if (preview.source === "msc") return "msc-inline";
   if (preview.source === "maersk") {
     if (preview.contractType === "k2k") return "maersk-contract";
     if (preview.contractType === "d2k") return "maersk-door";
@@ -622,14 +684,26 @@ function inferSourceKey(item) {
     const key = normalized(item.carrier_key);
     if (key.includes("door")) return "maersk-door";
     if (key.includes("haulage")) return "haulage-q2";
+    if (key.includes("msc")) return "msc-inline";
     if (key.includes("maersk")) return "maersk-contract";
     return item.carrier_key;
   }
   const text = normalized(`${item.carrier_label || ""} ${item.carrier_name || ""} ${item.file_name || ""} ${item.contract_tag || ""}`);
   if (text.includes("door")) return "maersk-door";
   if (text.includes("haulage")) return "haulage-q2";
+  if (text.includes("msc")) return "msc-inline";
   if (text.includes("maersk") || text.includes("key-to-key")) return "maersk-contract";
   return item.carrier_name ? `custom-${slugify(item.carrier_name)}` : "";
+}
+
+function suggestedSource(detail) {
+  return detail?.rate_import?.parser_family === "msc_zoned_inline" ? "msc" : "";
+}
+
+function sourceChoiceForKey(sourceKey) {
+  if (sourceKey === "msc-inline") return "msc";
+  if (sourceKey === "haulage-q2") return "haulage";
+  return "maersk";
 }
 
 function isSpotImport(item) {

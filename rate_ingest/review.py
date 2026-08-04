@@ -50,12 +50,13 @@ def generate_review_markdown(
     lines.extend([
         "",
         "## Rate Offer Preview",
-        "| POL | POD | Destination | Equipment | Base Amount | Currency | Valid From | Valid To | Source |",
-        "|---|---|---|---|---:|---|---|---|---|",
+        "| Tier/Offer | Collection | POL | POD | Destination | Equipment | Base Amount | Currency | Valid From | Valid To | Source |",
+        "|---|---|---|---|---|---|---:|---|---|---|---|",
     ])
     for offer in offers[:30]:
         lines.append(
-            f"| {offer.pol or '-'} | {offer.pod or '-'} | {offer.final_destination or '-'} | {offer.equipment_type} | "
+            f"| {offer.offer_reference or '-'} | {offer.place_of_receipt or offer.origin or '-'} | {offer.pol or '-'} | "
+            f"{offer.pod or '-'} | {offer.final_destination or '-'} | {offer.equipment_type} | "
             f"{offer.base_amount if offer.base_amount is not None else '-'} | {offer.base_currency or '-'} | "
             f"{offer.valid_from or card.valid_from or '-'} | {offer.valid_to or card.valid_to or '-'} | {offer.raw_row_reference or '-'} |"
         )
@@ -88,4 +89,3 @@ def generate_review_markdown(
     ])
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
-

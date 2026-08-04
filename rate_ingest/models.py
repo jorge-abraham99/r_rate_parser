@@ -153,6 +153,7 @@ class ParserTemplate(BaseModel):
     offer_block_rules: dict[str, Any] = Field(default_factory=dict)
     email_table_rules: dict[str, Any] = Field(default_factory=dict)
     site_to_site_rules: dict[str, Any] = Field(default_factory=dict)
+    inline_haulage_rules: dict[str, Any] = Field(default_factory=dict)
     defaults: dict[str, Any] = Field(default_factory=dict)
 
 

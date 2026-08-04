@@ -986,6 +986,10 @@ label:focus-within {
   box-shadow: 0 12px 40px rgba(10, 25, 45, 0.35);
 }
 
+.parse-modal.has-tier-tables {
+  width: min(1120px, 96vw);
+}
+
 .parse-modal-header {
   display: flex;
   align-items: center;
@@ -1127,6 +1131,73 @@ label:focus-within {
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
+}
+
+.tier-rate-note {
+  margin: -2px 0 12px;
+}
+
+.tier-rate-table {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.tier-rate-table summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: #f5f7fa;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.tier-rate-table summary small {
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.tier-table-scroll {
+  max-height: 430px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+}
+
+.tier-table-scroll table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tier-table-scroll th,
+.tier-table-scroll td {
+  padding: 6px 8px;
+  border-right: 1px solid var(--row-line);
+  border-bottom: 1px solid var(--row-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.tier-table-scroll th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  background: #eef2f7;
+  color: var(--muted);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tier-table-scroll .number {
+  text-align: right;
 }
 
 .diff-grid {

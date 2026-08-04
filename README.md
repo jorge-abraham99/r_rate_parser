@@ -19,6 +19,8 @@ The repo now has two operator surfaces over the same parser logic:
 - CLI
 - local web UI backed by FastAPI
 
+For a concise architecture and maintenance guide, see [CONTEXT.md](CONTEXT.md).
+
 ## Canonical Output
 
 The business-facing output is intentionally small:
@@ -48,6 +50,9 @@ Implemented parser families:
 - `tabular_lane` for known MSC-style Excel workbooks
 - `matrix` for known COSCO-style matrix workbooks
 - `offer_block` for known MAERSK quote workbooks
+- `site_to_site_rows` for known MAERSK AFLS site-to-site workbooks
+- `haulage_matrix` for known UK inland-haulage Excel/CSV matrices
+- `msc_zoned_inline` for MSC workbooks where a city/POL zone selects an inline haulage-and-ocean price from Special and Tariff tabs
 - `email_table` for known CMA-style `.eml` emails with a top-body HTML rate table
 
 Not implemented yet:
@@ -119,8 +124,10 @@ The UI is now connected to the parser workflow through a local API. It can:
 - upload and import a file
 - list recent imports
 - open import detail and review markdown
-- approve or reject imports
-- search approved rates
+- approve, reject, or delete imports; replacement approvals archive the previous source version
+- search and compare approved rates in the Rate Desk
+- combine ocean rates with approved UK haulage tariffs
+- inspect origin, freight, destination, and unmatched charge groups
 
 Run it with:
 
@@ -151,7 +158,7 @@ The volume is required because this app stores imports, review packs, and approv
 
 The Railway deployment guide is here:
 
-- [DEPLOY_RAILWAY.md](/Users/abraham/Documents/reudan/parser/DEPLOY_RAILWAY.md)
+- [DEPLOY_RAILWAY.md](DEPLOY_RAILWAY.md)
 
 ## Debug Command
 
@@ -171,13 +178,20 @@ Important files:
 
 - `data/runs/<import_id>/source_snapshot.json`
 - `data/runs/<import_id>/detected_structure.json`
+- `data/runs/<import_id>/parsed_rate_cards.csv`
 - `data/runs/<import_id>/parsed_rate_offers.csv`
+- `data/runs/<import_id>/parsed_rate_charge_lines.csv`
+- `data/runs/<import_id>/parsed_rate_notes.csv`
 - `data/runs/<import_id>/validation_report.json`
 - `data/runs/<import_id>/review.md`
 - `data/runs/<import_id>/canonical_rates.json`
 
 After approval:
 
+- `data/warehouse/approved_rate_cards.csv`
+- `data/warehouse/approved_rate_offers.csv`
+- `data/warehouse/approved_rate_charge_lines.csv`
+- `data/warehouse/approved_rate_notes.csv`
 - `data/warehouse/approved_rates.csv`
 
 Templates live here:
@@ -185,6 +199,9 @@ Templates live here:
 - `data/templates/msc_far_east_v1.yaml`
 - `data/templates/cosco_matrix_v1.yaml`
 - `data/templates/maersk_offer_block_v1.yaml`
+- `data/templates/maersk_afls_site_to_site_v1.yaml`
+- `data/templates/uk_haulage_matrix_v1.yaml`
+- `data/templates/msc_zoned_inline_v1.yaml`
 - `data/templates/cma_email_table_v1.yaml`
 
 API/backend entrypoint:
@@ -194,6 +211,27 @@ API/backend entrypoint:
 Connected UI entrypoint:
 
 - `UI/index.html`
+
+## Current Operational Boundaries
+
+- Storage is local CSV/JSON under `data/`; production deployment therefore requires a persistent volume.
+- The API is currently intended for a trusted internal environment. It has no authentication and uses permissive CORS.
+- Rate Desk currency comparison uses static demonstration FX rates from `rate_ingest/services.py`, not a live FX feed.
+- Template recognition is heuristic and requires a score of at least `0.55`; unknown formats fail explicitly.
+- Approval is the publication boundary. When an approved import has a `carrier_key`, approving a newer import with the same key archives the previous one and removes its published warehouse rows.
+
+## MSC Zoned Inline Rates
+
+The `msc_zoned_inline` parser treats `ZONE` as a join key between the workbook's `Haulage Zones` sheet and both customer rate tabs:
+
+```text
+City + POL -> Zone
+Zone + POL + destination + tier -> inline haulage-and-ocean rate
+```
+
+Both `SPECIAL` and `TARIFF` offers are published together. The rate is already inclusive of city-to-POL haulage, so the Rate Desk classifies it as a door-to-quay route and does not attach the separate merchant-haulage tariff. Documentation remains an additional per-bill-of-lading charge.
+
+The import summary preserves and displays the complete 252-row workbook table for each tier before the rates are expanded into city-level quote options.
 
 ## Email Parser Boundaries
 

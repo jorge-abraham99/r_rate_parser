@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/ui/styles.css?v=13">
+  <link rel="stylesheet" href="/ui/styles.css?v=15">
 </head>
 <body>
   <div class="app-shell">
@@ -65,7 +65,7 @@
   </div>
 
   <div id="previewModal" class="modal-overlay" hidden>
-    <section class="parse-modal" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+    <section id="parseModal" class="parse-modal" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
       <header class="parse-modal-header">
         <h2 id="previewTitle">Review parsed sheet</h2>
         <button id="closePreviewButton" class="modal-close" type="button" aria-label="Close">×</button>
@@ -81,6 +81,7 @@
           <div class="source-choice">
             <select id="sourceSelect">
               <option value="">Select…</option>
+              <option value="msc">MSC inline haulage</option>
               <option value="maersk">Maersk</option>
               <option value="haulage">UK Inland Haulage</option>
               <option value="__new">Another source…</option>
@@ -126,6 +127,12 @@
         <div id="diffSummary" class="modal-note"></div>
       </div>
 
+      <div id="tierRateSection" class="modal-section tier-rate-section" hidden>
+        <div class="section-title">Workbook rate tables</div>
+        <p class="modal-note tier-rate-note">Both customer tiers publish together. These tables preserve the rate rows before city and POL zones are expanded into quoteable door routes.</p>
+        <div id="tierRateTables"></div>
+      </div>
+
       <div id="firstSheetNote" class="first-sheet-note" hidden></div>
 
       <footer class="parse-modal-footer">
@@ -139,6 +146,6 @@
   <div id="toast" class="toast" role="status" hidden></div>
   <script src="/ui/config.js?v=3"></script>
   <script src="/ui/demo-data.js?v=1"></script>
-  <script src="/ui/app.js?v=4"></script>
+  <script src="/ui/app.js?v=5"></script>
 </body>
 </html>

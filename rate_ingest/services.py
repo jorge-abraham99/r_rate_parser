@@ -17,6 +17,8 @@ from rate_ingest.models import RateCard, RateChargeLine, RateImport, RateNote, R
 from rate_ingest.parsers.email_table import parse_email as parse_email_table
 from rate_ingest.parsers.haulage_matrix import parse_workbook as parse_haulage_matrix_workbook
 from rate_ingest.parsers.matrix import parse_workbook as parse_matrix_workbook
+from rate_ingest.parsers.msc_zoned_inline import extract_tier_rate_tables
+from rate_ingest.parsers.msc_zoned_inline import parse_workbook as parse_msc_zoned_inline_workbook
 from rate_ingest.parsers.offer_block import parse_workbook as parse_offer_block_workbook
 from rate_ingest.parsers.site_to_site_rows import parse_workbook as parse_site_to_site_workbook
 from rate_ingest.parsers.tabular_lane import parse_workbook as parse_tabular_workbook
@@ -75,6 +77,7 @@ def load_run_payload(run_dir: Path) -> dict[str, Any]:
         "rate_notes": read_csv_rows(run_dir / "parsed_rate_notes.csv"),
         "canonical_rates": read_json(run_dir / "canonical_rates.json"),
         "validation_report": read_json(run_dir / "validation_report.json"),
+        "tier_rate_tables": read_json_if_exists(run_dir / "tier_rate_tables.json") or {},
         "review_markdown": read_review_markdown(run_dir),
         "approval": read_json_if_exists(run_dir / "approval.json"),
     }
@@ -136,6 +139,8 @@ def import_source_file(
     rate_import.validation_summary_json = validation.model_dump(mode="json")["summary"]
 
     canonical_rates = build_canonical_rates(card, offers)
+    if matched_template.parser_family == "msc_zoned_inline":
+        write_json(run_dir / "tier_rate_tables.json", extract_tier_rate_tables(Path(source.source_path), matched_template))
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
     write_csv_rows(run_dir / "parsed_rate_cards.csv", [card.model_dump(mode="json")])
     write_csv_rows(run_dir / "parsed_rate_offers.csv", [offer.model_dump(mode="json") for offer in offers])
@@ -205,7 +210,8 @@ def get_import_detail(settings: Settings, import_id: str) -> dict[str, Any]:
         "approval": payload["approval"],
         "review_markdown": payload["review_markdown"],
         "card": card.model_dump(mode="json") if card else None,
-        "charge_bucket_summary": charge_bucket_summary,
+        "charge_bucket_summary": summarize_charge_analysis(charge_bucket_summary),
+        "tier_rate_tables": payload["tier_rate_tables"],
         "offers_preview": [offer.model_dump(mode="json") for offer in offers[:50]],
         "charges_preview": [charge.model_dump(mode="json") for charge in charges[:50]],
         "notes_preview": [note.model_dump(mode="json") for note in notes[:30]],
@@ -374,7 +380,7 @@ def search_approved_offers(
             offer_charges,
             base_currency=offer.base_currency or card.currency_default,
             base_amount=offer.base_amount,
-            base_label="All-in as quoted" if offer.all_in_flag is True and not offer_charges else "Basic Ocean Freight",
+            base_label=base_charge_label(offer),
         )
         additive_charges = [
             charge for charge in offer_charges
@@ -577,6 +583,16 @@ def analyze_charge_collection(
     }
 
 
+def summarize_charge_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **{key: value for key, value in analysis.items() if key not in {"groups", "unmatched_lines"}},
+        "groups": [
+            {key: value for key, value in group.items() if key != "lines"}
+            for group in analysis.get("groups", [])
+        ],
+    }
+
+
 def parse_source_by_family(
     source_path: Path,
     parser_family: str,
@@ -589,6 +605,8 @@ def parse_source_by_family(
         return parse_matrix_workbook(source_path, matched_template, rate_import)
     if parser_family == "haulage_matrix":
         return parse_haulage_matrix_workbook(source_path, matched_template, rate_import)
+    if parser_family == "msc_zoned_inline":
+        return parse_msc_zoned_inline_workbook(source_path, matched_template, rate_import)
     if parser_family == "offer_block":
         return parse_offer_block_workbook(source_path, matched_template, rate_import)
     if parser_family == "site_to_site_rows":
@@ -733,6 +751,15 @@ def first_present(*values: str | None) -> str | None:
         if value:
             return value
     return None
+
+
+def base_charge_label(offer: RateOffer) -> str:
+    service_mode = (offer.service_mode or "").strip().lower().replace("-", "/")
+    if service_mode in {"sd / cy", "sd/cy"} or service_mode.startswith("sd "):
+        return "Inline haulage and ocean rate"
+    if offer.all_in_flag is True:
+        return "All-in as quoted"
+    return "Basic Ocean Freight"
 
 
 def classify_charge_bucket(charge: RateChargeLine) -> tuple[str, str]:

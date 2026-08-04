@@ -313,6 +313,84 @@ def test_cma_email_import_creates_canonical_rates(tmp_path: Path, monkeypatch):
     assert "MYPKG" in first["to_raw"]
 
 
+def test_msc_zoned_inline_import_joins_birmingham_to_both_pols_and_tiers(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    raw_dir = tmp_path / "incoming"
+    raw_dir.mkdir()
+    source = raw_dir / "MSC - FAR EAST AUGUST.xlsx"
+    source.write_bytes(Path("rate_sheet_files/MSC - FAR EAST  AUGUST.xlsx").read_bytes())
+    seed_templates(tmp_path)
+
+    result = runner.invoke(app, ["import", str(source)])
+    assert result.exit_code == 0
+    assert "Template used: msc_zoned_inline_v1" in result.stdout
+    import_id = next(line.split(": ", 1)[1] for line in result.stdout.splitlines() if line.startswith("Import created:"))
+    run_dir = tmp_path / "data" / "runs" / import_id
+
+    matches = {}
+    for offer in detail_rows(run_dir / "parsed_rate_offers.csv"):
+        if offer["place_of_receipt"] != "Birmingham" or offer["pod"] != "SURABAYA":
+            continue
+        matches[(offer["offer_reference"], offer["pol"])] = offer
+
+    assert {
+        key: float(offer["base_amount"])
+        for key, offer in matches.items()
+    } == {
+        ("SPECIAL", "FELIXSTOWE"): 650.0,
+        ("SPECIAL", "LONDON GATEWAY"): 450.0,
+        ("TARIFF", "FELIXSTOWE"): 665.0,
+        ("TARIFF", "LONDON GATEWAY"): 465.0,
+    }
+    assert matches[("SPECIAL", "FELIXSTOWE")]["zone"] == "ZONE 3"
+    assert matches[("SPECIAL", "LONDON GATEWAY")]["zone"] == "ZONE 2"
+    assert all(offer["service_mode"] == "SD / CY" for offer in matches.values())
+
+    tier_tables = json.loads(run_dir.joinpath("tier_rate_tables.json").read_text(encoding="utf-8"))
+    assert len(tier_tables["SPECIAL"]) == 252
+    assert len(tier_tables["TARIFF"]) == 252
+    special_surabaya = next(
+        row
+        for row in tier_tables["SPECIAL"]
+        if row["pol"] == "FELIXSTOWE" and row["zone"] == "ZONE 3" and "SURABAYA" in row["pod"]
+    )
+    assert special_surabaya["amount"] == 650.0
+    assert special_surabaya["documentation"] == "GBP 30 per B/L"
+
+    validation = json.loads(run_dir.joinpath("validation_report.json").read_text(encoding="utf-8"))
+    assert validation["summary"]["errors"] == 0
+
+    detail_response = api_client.get(f"/api/imports/{import_id}")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["card"]["valid_from"] == "2026-08-01"
+    assert detail["card"]["valid_to"] == "2026-08-31"
+    assert len(detail["tier_rate_tables"]["SPECIAL"]) == 252
+    assert len(detail["tier_rate_tables"]["TARIFF"]) == 252
+
+    approve_response = api_client.post(
+        f"/api/imports/{import_id}/approve",
+        json={
+            "approved_by": "jorge",
+            "carrier_name": "MSC",
+            "carrier_key": "msc-inline",
+            "carrier_label": "MSC · Inline haulage",
+        },
+    )
+    assert approve_response.status_code == 200
+    search_response = api_client.get("/api/search", params={"pod": "SURABAYA", "limit": 5000})
+    assert search_response.status_code == 200
+    birmingham = {
+        (rate["offer_reference"], rate["pol"]): rate
+        for rate in search_response.json()
+        if rate["place_of_receipt"] == "Birmingham"
+    }
+    assert birmingham[("SPECIAL", "FELIXSTOWE")]["all_in_amount"] == 680.0
+    assert birmingham[("SPECIAL", "LONDON GATEWAY")]["all_in_amount"] == 480.0
+    assert birmingham[("TARIFF", "FELIXSTOWE")]["all_in_amount"] == 695.0
+    assert birmingham[("TARIFF", "LONDON GATEWAY")]["all_in_amount"] == 495.0
+
+
 def test_api_import_approve_and_search_flow(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
     seed_templates(tmp_path)
