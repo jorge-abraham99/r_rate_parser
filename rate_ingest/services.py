@@ -651,16 +651,12 @@ def infer_materials(
 
 
 def is_haulage_rate(rate: dict[str, Any]) -> bool:
-    values = [
-        rate.get("carrier_key"),
-        rate.get("carrier_label"),
-        rate.get("carrier_name"),
-        rate.get("contract_tag"),
-        rate.get("document_type"),
-        rate.get("source_file_name"),
-    ]
-    text = " ".join(str(value) for value in values if value).lower()
-    return "haulage" in text or "inland_export" in text or " haul " in f" {text} "
+    # Use the import's type/key rather than descriptive labels. An ocean rate can
+    # legitimately include inline haulage (for example, MSC's SD / CY sheets).
+    document_type = str(rate.get("document_type") or "").lower()
+    carrier_key = str(rate.get("carrier_key") or "").lower()
+    contract_tag = str(rate.get("contract_tag") or "").upper()
+    return document_type == "inland_export" or carrier_key == "haulage-q2" or contract_tag == "HAUL"
 
 
 def normalize_location_key(value: str) -> str:

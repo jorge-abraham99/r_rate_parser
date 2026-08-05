@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from rate_ingest.api import app as api_app
 from rate_ingest.cli import app
+from rate_ingest.config import Settings
 
 
 runner = CliRunner()
@@ -25,6 +26,25 @@ def seed_templates(tmp_path: Path) -> None:
             template_path.read_text(encoding="utf-8"),
             encoding="utf-8",
         )
+
+
+def test_settings_seed_missing_bundled_templates_without_overwriting_existing(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("RATE_INGEST_ROOT", raising=False)
+    template_dir = tmp_path / "data" / "templates"
+    template_dir.mkdir(parents=True)
+    existing = template_dir / "msc_far_east_v1.yaml"
+    existing.write_text("operator-managed template", encoding="utf-8")
+
+    settings = Settings.load(cwd=tmp_path)
+    settings.ensure()
+
+    assert existing.read_text(encoding="utf-8") == "operator-managed template"
+    assert settings.templates_dir.joinpath("msc_zoned_inline_v1.yaml").exists()
+    assert {
+        path.name for path in settings.templates_dir.glob("*.yaml")
+    } == {
+        path.name for path in Path("data/templates").glob("*.yaml")
+    }
 
 
 def test_inspect_and_import_and_approve_flow(tmp_path: Path, monkeypatch):
@@ -389,6 +409,12 @@ def test_msc_zoned_inline_import_joins_birmingham_to_both_pols_and_tiers(tmp_pat
     assert birmingham[("SPECIAL", "LONDON GATEWAY")]["all_in_amount"] == 480.0
     assert birmingham[("TARIFF", "FELIXSTOWE")]["all_in_amount"] == 695.0
     assert birmingham[("TARIFF", "LONDON GATEWAY")]["all_in_amount"] == 495.0
+
+    desk_response = api_client.get("/api/rate-desk", params={"limit": 5000})
+    assert desk_response.status_code == 200
+    desk = desk_response.json()
+    assert {"FELIXSTOWE", "LONDON GATEWAY"}.issubset(desk["filters"]["origins"])
+    assert {"SURABAYA", "SEMARANG"}.issubset(desk["filters"]["destinations"])
 
 
 def test_api_import_approve_and_search_flow(tmp_path: Path, monkeypatch):

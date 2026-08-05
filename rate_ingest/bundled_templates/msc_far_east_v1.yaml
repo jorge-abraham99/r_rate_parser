@@ -1,0 +1,93 @@
+template_id: msc_far_east_v1
+template_name: MSC Far East Structured Lane Sheet v1
+provider_name: MSC
+parser_family: tabular_lane
+document_type: ocean_export
+file_type: xlsx
+active: true
+
+match_rules:
+  filename_contains:
+    - "MSC"
+    - "FAR EAST"
+  sheet_name_contains_any:
+    - "REUDAN"
+  required_header_labels:
+    - "POL"
+    - "POD"
+    - "FINAL DESTINATION"
+
+sheet_rules:
+  include_sheet_name_contains:
+    - "REUDAN"
+  exclude_sheet_name_contains:
+    - "T&C"
+    - "COVER"
+
+header_detection:
+  mode: fixed_or_search
+  fixed_header_row: 1
+  search_rows: 10
+  multi_row_header: true
+
+field_map:
+  zone: "ZONE"
+  pol: "POL"
+  pod: "POD"
+  final_destination: "FINAL DESTINATION"
+  equipment_type: "CONTAINER SIZE"
+  base_amount: "ALL IN RATE"
+  base_currency: "CURRENCY"
+  valid_from: "VALID FROM"
+  valid_to: "VALID TO"
+
+breakdown_columns:
+  - source_label: "OCEAN FREIGHT"
+    charge_name: "Ocean Freight"
+    charge_type: "base"
+  - source_label: "THC"
+    charge_name: "THC"
+    charge_type: "surcharge"
+  - source_label: "GFS"
+    charge_name: "GFS"
+    charge_type: "surcharge"
+  - source_label: "HAUL"
+    charge_name: "Haulage"
+    charge_type: "haulage"
+  - source_label: "FES"
+    charge_name: "FES"
+    charge_type: "fee"
+
+normalizers:
+  equipment_type:
+    forty_default: "40HC"
+    feu_default: "40HC"
+  currency:
+    default: "GBP"
+
+row_filters:
+  skip_if_first_cell_empty: true
+  skip_rows_containing:
+    - "subject to"
+    - "notes"
+    - "validity"
+
+note_extraction:
+  scan_sheets:
+    - "T&C"
+    - "TERMS"
+  scan_top_rows: 40
+  keywords:
+    - "subject to"
+    - "valid"
+    - "excluding"
+    - "including"
+    - "free time"
+
+validation:
+  required_fields:
+    - pod
+    - equipment_type
+    - base_amount
+  amount_min: 1
+  amount_max: 10000

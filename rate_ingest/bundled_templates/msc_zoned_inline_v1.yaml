@@ -1,0 +1,50 @@
+template_id: msc_zoned_inline_v1
+template_name: MSC Zoned Inline Haulage v1
+provider_name: MSC
+parser_family: msc_zoned_inline
+document_type: ocean_export
+file_type: xlsx
+active: true
+
+match_rules:
+  filename_contains:
+    - "MSC"
+    - "FAR EAST"
+    - "AUGUST"
+  required_header_labels:
+    - "CITY"
+    - "COUNTY"
+    - "ZONE"
+    - "ALL IN RATE"
+  sheet_name_contains_any:
+    - "HAULAGE ZONES"
+    - "REUDAN-SPECIAL"
+    - "REUDAN-TARRIFF"
+
+inline_haulage_rules:
+  haulage_sheet: "Haulage Zones"
+  rate_sheets:
+    REUDAN-SPECIAL: SPECIAL
+    REUDAN-TARRIFF: TARIFF
+  pol_aliases:
+    Bristol: PORTBURY
+  forty_default: 40HC
+
+defaults:
+  carrier_name: MSC
+  currency_default: GBP
+  commodity: WASTE PAPER
+
+note_extraction:
+  scan_sheets:
+    - "T&C"
+  scan_top_rows: 60
+  keywords:
+    - "subject to"
+    - "quotation"
+    - "charge"
+    - "container"
+
+validation:
+  amount_min: 1
+  amount_max: 10000

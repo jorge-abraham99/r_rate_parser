@@ -127,8 +127,10 @@ function populateConnectedFilters() {
   const rates = deskState.connectedRates;
   const nonDoorRates = rates.filter((rate) => !isDoorRate(rate));
   const defaultRate = (nonDoorRates[0] || rates[0] || {});
+  // Door-to-quay sheets still have a POL. Include it here so inline MSC
+  // rates are presented as Collection → POL → POD rather than collection-only.
   const origins = unique(
-    nonDoorRates
+    rates
       .map((rate) => firstPresent(rate.pol, ""))
       .filter(Boolean)
   );
@@ -897,9 +899,11 @@ function isDoorServiceMode(value) {
 }
 
 function isHaulageRate(rate) {
-  return [rate.contract_tag, rate.carrier_key, rate.carrier_label, rate.carrier_name, rate.document_type]
-    .filter(Boolean)
-    .some((value) => normalized(value).includes("haulage") || normalized(value).includes("inland_export"));
+  // Inline ocean rates can include haulage in their display label. Only exclude
+  // a sheet that is explicitly an inland tariff from quote results.
+  return normalized(rate.document_type) === "inland_export"
+    || normalized(rate.carrier_key) === "haulage-q2"
+    || normalized(rate.contract_tag) === "haul";
 }
 
 function rateOrigin(rate) {

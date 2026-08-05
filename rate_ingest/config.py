@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,4 +40,18 @@ class Settings:
             self.warehouse_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
+        self.seed_missing_templates()
 
+    def seed_missing_templates(self) -> None:
+        """Install bundled templates that are absent from a persistent data volume.
+
+        Existing files are deliberately left alone: templates in the data directory are
+        operator-managed and may contain local adjustments.
+        """
+        bundled_templates_dir = Path(__file__).resolve().parent / "bundled_templates"
+        if not bundled_templates_dir.exists():
+            return
+        for template_path in bundled_templates_dir.glob("*.yaml"):
+            target_path = self.templates_dir / template_path.name
+            if not target_path.exists():
+                shutil.copyfile(template_path, target_path)
