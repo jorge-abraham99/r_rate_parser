@@ -1,6 +1,7 @@
 const IMPORT_DEMO_MODE = Boolean(window.RATE_DESK_CONFIG?.demoMode);
 const SOURCE_DEFINITIONS = [
-  { key: "msc-inline", name: "MSC Inline Haulage", cadence: "monthly" },
+  { key: "msc-inline", name: "MSC Door-to-quay", cadence: "monthly" },
+  { key: "hapag-door", name: "Hapag-Lloyd Door-to-quay", cadence: "monthly" },
   { key: "maersk-contract", name: "Maersk Quay-to-quay", cadence: "monthly" },
   { key: "maersk-door", name: "Maersk Door-to-quay", cadence: "monthly" },
   { key: "haulage-q2", name: "UK Inland Haulage", cadence: "quarterly" },
@@ -605,7 +606,16 @@ function sourcePayload(preview, sourceKey) {
       approved_by: "Rate Desk operator",
       carrier_name: "MSC",
       carrier_key: sourceKey,
-      carrier_label: "MSC · Inline haulage",
+      carrier_label: "MSC · Door-to-quay",
+      contract_tag: null,
+    };
+  }
+  if (sourceKey === "hapag-door") {
+    return {
+      approved_by: "Rate Desk operator",
+      carrier_name: "Hapag-Lloyd",
+      carrier_key: sourceKey,
+      carrier_label: "Hapag-Lloyd · Door-to-quay",
       contract_tag: null,
     };
   }
@@ -669,6 +679,7 @@ async function deleteFile(sourceKey, fileId) {
 
 function selectedSourceKey(preview) {
   if (preview.source === "msc") return "msc-inline";
+  if (preview.source === "hapag") return "hapag-door";
   if (preview.source === "maersk") {
     if (preview.contractType === "k2k") return "maersk-contract";
     if (preview.contractType === "d2k") return "maersk-door";
@@ -682,6 +693,7 @@ function selectedSourceKey(preview) {
 function inferSourceKey(item) {
   if (item.carrier_key) {
     const key = normalized(item.carrier_key);
+    if (key.includes("hapag")) return "hapag-door";
     if (key.includes("door")) return "maersk-door";
     if (key.includes("haulage")) return "haulage-q2";
     if (key.includes("msc")) return "msc-inline";
@@ -689,6 +701,7 @@ function inferSourceKey(item) {
     return item.carrier_key;
   }
   const text = normalized(`${item.carrier_label || ""} ${item.carrier_name || ""} ${item.file_name || ""} ${item.contract_tag || ""}`);
+  if (text.includes("hapag")) return "hapag-door";
   if (text.includes("door")) return "maersk-door";
   if (text.includes("haulage")) return "haulage-q2";
   if (text.includes("msc")) return "msc-inline";
@@ -697,11 +710,14 @@ function inferSourceKey(item) {
 }
 
 function suggestedSource(detail) {
-  return detail?.rate_import?.parser_family === "msc_zoned_inline" ? "msc" : "";
+  if (detail?.rate_import?.parser_family === "msc_zoned_inline") return "msc";
+  if (detail?.rate_import?.parser_family === "hapag_door_matrix") return "hapag";
+  return "";
 }
 
 function sourceChoiceForKey(sourceKey) {
   if (sourceKey === "msc-inline") return "msc";
+  if (sourceKey === "hapag-door") return "hapag";
   if (sourceKey === "haulage-q2") return "haulage";
   return "maersk";
 }

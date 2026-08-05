@@ -1,5 +1,5 @@
 template_id: msc_zoned_inline_v1
-template_name: MSC Zoned Inline Haulage v1
+template_name: MSC Zoned Door-to-quay v1
 provider_name: MSC
 parser_family: msc_zoned_inline
 document_type: ocean_export

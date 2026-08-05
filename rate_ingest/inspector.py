@@ -88,6 +88,8 @@ def inspect_source(source_document: SourceDocument) -> InspectResult:
 
 def provider_from_name(file_name: str) -> str | None:
     upper = file_name.upper()
+    if "HAPAG" in upper:
+        return "HAPAG-LLOYD"
     if "CMA" in upper:
         return "CMA CGM"
     if "QT-MAEU" in upper or "MAEU" in upper:
@@ -116,6 +118,13 @@ def guess_parser_family(sheet_summaries: list[dict[str, Any]], source_type: str 
         and "ALL IN RATE" in flattened
     ):
         return "msc_zoned_inline"
+    if (
+        "GEO FROM STD LOCATION" in flattened
+        and "PREFERRED POL" in flattened
+        and "APPLICABLE ROUTING" in flattened
+        and "ALL IN RATE" in flattened
+    ):
+        return "hapag_door_matrix"
     if "RECEIPT" in flattened and "DELIVERY" in flattened and "COMMODITY NAME" in flattened and "RATE BASIS" in flattened:
         return "site_to_site_rows"
     if "OFFER 1-1" in flattened or "SCHEDULED ROUTE" in flattened:

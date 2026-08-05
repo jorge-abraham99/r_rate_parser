@@ -1,0 +1,44 @@
+template_id: hapag_door_matrix_v1
+template_name: Hapag-Lloyd Door-to-quay Matrix v1
+provider_name: HAPAG-LLOYD
+parser_family: hapag_door_matrix
+document_type: ocean_export
+file_type: xlsx
+active: true
+
+match_rules:
+  filename_contains:
+    - "HAPAG"
+    - "FAR EAST"
+  required_header_labels:
+    - "GEO FROM STD LOCATION"
+    - "PREFERRED POL"
+    - "APPLICABLE ROUTING"
+    - "ALL IN RATE"
+
+hapag_matrix_rules:
+  sheet_name: "Sheet1"
+  destination_row: 1
+  routing_row: 2
+  data_start_row: 4
+  collection_column: 3
+  pol_column: 2
+  destination_start_column: 4
+  destination_end_column: 10
+  terms_column: 11
+  live_position_amount: 15
+  emergency_fuel_amount: 20
+  emergency_fuel_destinations:
+    - "Binh Duong Terminal"
+    - "Lat Krabang"
+
+defaults:
+  carrier_name: Hapag-Lloyd
+  currency_default: USD
+  commodity: WASTE PAPER
+  equipment_type: 40HC
+  all_in_flag: false
+
+validation:
+  amount_min: 1
+  amount_max: 10000

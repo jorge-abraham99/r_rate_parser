@@ -41,7 +41,8 @@ The intended trust boundary is human approval. Parsing may create run artifacts 
 | `offer_block` | `maersk_offer_block_v1` | Repeated Maersk offer and surcharge blocks |
 | `site_to_site_rows` | `maersk_afls_site_to_site_v1` | Maersk AFLS site-to-site quote rows |
 | `haulage_matrix` | `uk_haulage_matrix_v1` | UK collection-to-port haulage matrices |
-| `msc_zoned_inline` | `msc_zoned_inline_v1` | MSC city/POL zones joined to Special and Tariff inline rates |
+| `msc_zoned_inline` | `msc_zoned_inline_v1` | MSC city/POL zones joined to Special and Tariff door-to-quay rates |
+| `hapag_door_matrix` | `hapag_door_matrix_v1` | Hapag-Lloyd collection/POD door-to-quay matrix with conditional surcharges |
 | `email_table` | `cma_email_table_v1` | Constrained CMA HTML tables in `.eml` files |
 
 Adding a parser family normally requires a parser module, a dispatch branch in `parse_source_by_family()`, a YAML template, inspector recognition if the existing signals are insufficient, and a real-sample end-to-end test.
@@ -66,7 +67,9 @@ The USD comparison is currently indicative: `services.py` contains static demons
 
 UK haulage imports are separated from ocean results and converted into a collection-place-to-port tariff lookup. The frontend combines these tariffs with compatible ocean rates for merchant-haulage comparisons. Maersk site-to-site service modes are preserved so door and port routings can be filtered separately.
 
-MSC zoned inline workbooks follow a different rule: their rate already combines city-to-POL haulage with the ocean leg. The parser joins each `Haulage Zones` city/POL entry to `REUDAN-SPECIAL` and `REUDAN-TARRIFF` on normalized POL and zone, then publishes both tiers as `SD / CY` door offers. It also stores the two original 252-row rate tables in the run artifacts for display in the import summary. `Bristol` in the haulage lookup is explicitly aliased to the rate-tab POL `PORTBURY`.
+MSC zoned workbooks are carrier door-to-quay products, not standalone haulage tariffs. The parser uses each city/POL entry from the workbook's `Haulage Zones` tab to select the correct `REUDAN-SPECIAL` and `REUDAN-TARRIFF` price by normalized POL and zone, then publishes both tiers as `SD / CY` door offers. These offers remain in quote results and never enter the merchant-haulage tariff lookup. The parser also stores the two original 252-row rate tables in the run artifacts for display in the import summary. `Bristol` in the zone lookup is explicitly aliased to the rate-tab POL `PORTBURY`.
+
+Hapag-Lloyd door-to-quay workbooks map collection locations in column C to POD headers in columns D–J, retaining the preferred POL from column B and applicable routing from row 2. Every parsed offer receives a separate USD 15 live-position charge per container; Binh Duong Terminal and Lat Krabang also receive a USD 20 emergency-fuel destination charge. The current template defaults equipment to `40HC` because the source workbook does not provide an equipment field.
 
 ## Current Constraints
 

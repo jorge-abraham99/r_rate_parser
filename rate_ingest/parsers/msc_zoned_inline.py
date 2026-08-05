@@ -29,7 +29,7 @@ def parse_workbook(
         valid_from=card_valid_from,
         valid_to=card_valid_to,
         all_in_flag=False,
-        notes_summary="Inline city-to-POL haulage and ocean rate; documentation is additional.",
+        notes_summary="MSC door-to-quay rate selected by city, POL, and zone; documentation is additional.",
     )
 
     haulage_rows = load_haulage_rows(workbook, rules)

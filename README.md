@@ -52,7 +52,8 @@ Implemented parser families:
 - `offer_block` for known MAERSK quote workbooks
 - `site_to_site_rows` for known MAERSK AFLS site-to-site workbooks
 - `haulage_matrix` for known UK inland-haulage Excel/CSV matrices
-- `msc_zoned_inline` for MSC workbooks where a city/POL zone selects an inline haulage-and-ocean price from Special and Tariff tabs
+- `msc_zoned_inline` for MSC workbooks where a city/POL zone selects a door-to-quay price from Special and Tariff tabs
+- `hapag_door_matrix` for Hapag-Lloyd collection-to-POD door-to-quay matrices with conditional charges
 - `email_table` for known CMA-style `.eml` emails with a top-body HTML rate table
 
 Not implemented yet:
@@ -202,6 +203,7 @@ Templates live here:
 - `data/templates/maersk_afls_site_to_site_v1.yaml`
 - `data/templates/uk_haulage_matrix_v1.yaml`
 - `data/templates/msc_zoned_inline_v1.yaml`
+- `data/templates/hapag_door_matrix_v1.yaml`
 - `data/templates/cma_email_table_v1.yaml`
 
 API/backend entrypoint:
@@ -220,18 +222,24 @@ Connected UI entrypoint:
 - Template recognition is heuristic and requires a score of at least `0.55`; unknown formats fail explicitly.
 - Approval is the publication boundary. When an approved import has a `carrier_key`, approving a newer import with the same key archives the previous one and removes its published warehouse rows.
 
-## MSC Zoned Inline Rates
+## MSC Zoned Door-to-quay Rates
 
 The `msc_zoned_inline` parser treats `ZONE` as a join key between the workbook's `Haulage Zones` sheet and both customer rate tabs:
 
 ```text
 City + POL -> Zone
-Zone + POL + destination + tier -> inline haulage-and-ocean rate
+Zone + POL + destination + tier -> door-to-quay rate
 ```
 
-Both `SPECIAL` and `TARIFF` offers are published together. The rate is already inclusive of city-to-POL haulage, so the Rate Desk classifies it as a door-to-quay route and does not attach the separate merchant-haulage tariff. Documentation remains an additional per-bill-of-lading charge.
+Both `SPECIAL` and `TARIFF` offers are published together. This is an MSC door-to-quay product, not a standalone haulage tariff. The Rate Desk keeps it in carrier quote results and never adds it to—or combines it with—the separate merchant-haulage tariff. Documentation remains an additional per-bill-of-lading charge.
 
 The import summary preserves and displays the complete 252-row workbook table for each tier before the rates are expanded into city-level quote options.
+
+## Hapag-Lloyd Door-to-quay Rates
+
+The `hapag_door_matrix` parser expands the collection locations in column C against the destination headers in columns D–J. The preferred POL from column B and applicable routing from row 2 are retained on every resulting `SD / CY` offer.
+
+The matrix amount is supplemented with a USD 15 live-position charge per container. A separate USD 20 emergency-fuel destination charge is added only for Binh Duong Terminal and Lat Krabang. These component lines remain visible in the quote breakdown; the source validity and commercial terms in column K are also preserved.
 
 ## Email Parser Boundaries
 

@@ -15,6 +15,7 @@ from rate_ingest.config import Settings
 from rate_ingest.inspector import inspect_source
 from rate_ingest.models import RateCard, RateChargeLine, RateImport, RateNote, RateOffer, ValidationReport, new_id
 from rate_ingest.parsers.email_table import parse_email as parse_email_table
+from rate_ingest.parsers.hapag_door_matrix import parse_workbook as parse_hapag_door_matrix_workbook
 from rate_ingest.parsers.haulage_matrix import parse_workbook as parse_haulage_matrix_workbook
 from rate_ingest.parsers.matrix import parse_workbook as parse_matrix_workbook
 from rate_ingest.parsers.msc_zoned_inline import extract_tier_rate_tables
@@ -617,6 +618,8 @@ def parse_source_by_family(
         return parse_haulage_matrix_workbook(source_path, matched_template, rate_import)
     if parser_family == "msc_zoned_inline":
         return parse_msc_zoned_inline_workbook(source_path, matched_template, rate_import)
+    if parser_family == "hapag_door_matrix":
+        return parse_hapag_door_matrix_workbook(source_path, matched_template, rate_import)
     if parser_family == "offer_block":
         return parse_offer_block_workbook(source_path, matched_template, rate_import)
     if parser_family == "site_to_site_rows":
@@ -661,8 +664,8 @@ def infer_materials(
 
 
 def is_haulage_rate(rate: dict[str, Any]) -> bool:
-    # Use the import's type/key rather than descriptive labels. An ocean rate can
-    # legitimately include inline haulage (for example, MSC's SD / CY sheets).
+    # Only standalone inland tariffs belong in the merchant-haulage lookup.
+    # Carrier door-to-quay products, including MSC SD / CY, remain quote rates.
     document_type = str(rate.get("document_type") or "").lower()
     carrier_key = str(rate.get("carrier_key") or "").lower()
     contract_tag = str(rate.get("contract_tag") or "").upper()
@@ -762,7 +765,7 @@ def first_present(*values: str | None) -> str | None:
 def base_charge_label(offer: RateOffer) -> str:
     service_mode = (offer.service_mode or "").strip().lower().replace("-", "/")
     if service_mode in {"sd / cy", "sd/cy"} or service_mode.startswith("sd "):
-        return "Inline haulage and ocean rate"
+        return "Door-to-quay rate as quoted"
     if offer.all_in_flag is True:
         return "All-in as quoted"
     return "Basic Ocean Freight"

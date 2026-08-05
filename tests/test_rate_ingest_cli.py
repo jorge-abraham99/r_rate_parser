@@ -394,7 +394,7 @@ def test_msc_zoned_inline_import_joins_birmingham_to_both_pols_and_tiers(tmp_pat
             "approved_by": "jorge",
             "carrier_name": "MSC",
             "carrier_key": "msc-inline",
-            "carrier_label": "MSC · Inline haulage",
+            "carrier_label": "MSC · Door-to-quay",
         },
     )
     assert approve_response.status_code == 200
@@ -416,6 +416,12 @@ def test_msc_zoned_inline_import_joins_birmingham_to_both_pols_and_tiers(tmp_pat
     assert {"FELIXSTOWE", "LONDON GATEWAY"}.issubset(desk["filters"]["origins"])
     assert {"SURABAYA", "SEMARANG"}.issubset(desk["filters"]["destinations"])
     assert "Birmingham" in desk["filters"]["collection_places"]
+    assert desk["haulage_tariffs"] == {}
+    assert desk["filters"]["door_pickups"] == []
+    assert any(
+        rate["carrier_label"] == "MSC · Door-to-quay" and rate["service_mode"] == "SD / CY"
+        for rate in desk["rates"]
+    )
 
     birmingham_response = api_client.get(
         "/api/search",
@@ -424,6 +430,81 @@ def test_msc_zoned_inline_import_joins_birmingham_to_both_pols_and_tiers(tmp_pat
     assert birmingham_response.status_code == 200
     assert birmingham_response.json()
     assert all(rate["place_of_receipt"] == "Birmingham" for rate in birmingham_response.json())
+
+
+def test_hapag_door_matrix_import_adds_conditional_container_charges(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    raw_dir = tmp_path / "incoming"
+    raw_dir.mkdir()
+    source = raw_dir / "HAPAG - FAR EAST RATES.xlsx"
+    source.write_bytes(Path("rate_sheet_files/HAPAG - FAR EAST RATES.xlsx").read_bytes())
+    seed_templates(tmp_path)
+
+    result = runner.invoke(app, ["import", str(source)])
+    assert result.exit_code == 0
+    assert "Template used: hapag_door_matrix_v1" in result.stdout
+    import_id = next(line.split(": ", 1)[1] for line in result.stdout.splitlines() if line.startswith("Import created:"))
+    run_dir = tmp_path / "data" / "runs" / import_id
+
+    offers = detail_rows(run_dir / "parsed_rate_offers.csv")
+    charges = detail_rows(run_dir / "parsed_rate_charge_lines.csv")
+    assert len(offers) == 546
+    assert len(charges) == 702
+    assert {offer["service_mode"] for offer in offers} == {"SD / CY"}
+    assert {offer["equipment_type"] for offer in offers} == {"40HC"}
+    assert {offer["valid_from"] for offer in offers} == {"2026-08-01"}
+    assert {offer["valid_to"] for offer in offers} == {"2026-08-31"}
+
+    dartford = {
+        offer["pod"]: offer
+        for offer in offers
+        if offer["place_of_receipt"] == "Dartford"
+    }
+    assert float(dartford["Cat Lei Terminal"]["base_amount"]) == 435.0
+    assert float(dartford["Binh Duong Terminal"]["base_amount"]) == 415.0
+    assert dartford["Binh Duong Terminal"]["pol"] == "London Gateway"
+    assert dartford["Binh Duong Terminal"]["routing_note"] == "SGSIN-VNVUT-VNSGN"
+
+    charges_by_offer = {}
+    for charge in charges:
+        charges_by_offer.setdefault(charge["rate_offer_id"], []).append(charge)
+    cat_lei_charges = charges_by_offer[dartford["Cat Lei Terminal"]["id"]]
+    binh_duong_charges = charges_by_offer[dartford["Binh Duong Terminal"]["id"]]
+    lat_krabang_charges = charges_by_offer[dartford["Lat Krabang"]["id"]]
+    assert [(charge["charge_name"], float(charge["amount"])) for charge in cat_lei_charges] == [
+        ("Live Position", 15.0),
+    ]
+    assert [(charge["charge_name"], float(charge["amount"])) for charge in binh_duong_charges] == [
+        ("Live Position", 15.0),
+        ("Emergency Fuel Destination", 20.0),
+    ]
+    assert [(charge["charge_name"], float(charge["amount"])) for charge in lat_krabang_charges] == [
+        ("Live Position", 15.0),
+        ("Emergency Fuel Destination", 20.0),
+    ]
+
+    approve_response = api_client.post(
+        f"/api/imports/{import_id}/approve",
+        json={
+            "approved_by": "jorge",
+            "carrier_name": "Hapag-Lloyd",
+            "carrier_key": "hapag-door",
+            "carrier_label": "Hapag-Lloyd · Door-to-quay",
+        },
+    )
+    assert approve_response.status_code == 200
+    search = api_client.get(
+        "/api/search",
+        params={"collection": "Dartford", "pod": "Binh Duong", "limit": 20},
+    ).json()
+    assert len(search) == 1
+    assert search[0]["all_in_amount"] == 450.0
+    assert search[0]["carrier_label"] == "Hapag-Lloyd · Door-to-quay"
+
+    desk = api_client.get("/api/rate-desk", params={"limit": 1000}).json()
+    assert desk["haulage_tariffs"] == {}
+    assert desk["filters"]["door_pickups"] == []
+    assert "Dartford" in desk["filters"]["collection_places"]
 
 
 def test_api_import_approve_and_search_flow(tmp_path: Path, monkeypatch):
