@@ -136,6 +136,7 @@ def api_delete_import(import_id: str) -> dict:
 def api_search(
     provider_name: str | None = None,
     carrier_name: str | None = None,
+    collection: str | None = None,
     pol: str | None = None,
     pod: str | None = None,
     equipment_type: str | None = None,
@@ -146,6 +147,7 @@ def api_search(
         settings(),
         provider_name=provider_name,
         carrier_name=carrier_name,
+        collection=collection,
         pol=pol,
         pod=pod,
         equipment_type=equipment_type,

@@ -327,6 +327,7 @@ def search_approved_offers(
     settings: Settings,
     provider_name: str | None = None,
     carrier_name: str | None = None,
+    collection: str | None = None,
     pol: str | None = None,
     pod: str | None = None,
     equipment_type: str | None = None,
@@ -364,6 +365,8 @@ def search_approved_offers(
         if provider_name and not contains_text(card.provider_name, provider_name):
             continue
         if carrier_name and not contains_text(card.carrier_name, carrier_name):
+            continue
+        if collection and not contains_text(first_present(offer.place_of_receipt, offer.origin), collection):
             continue
         if pol and not contains_text(offer.pol, pol):
             continue
@@ -454,14 +457,19 @@ def search_approved_offers(
 def get_rate_desk_data(settings: Settings, limit: int = 2000) -> dict[str, Any]:
     all_rates = search_approved_offers(settings, limit=max(limit * 20, 50000))
     haulage_rates = [rate for rate in all_rates if is_haulage_rate(rate)]
-    rates = [rate for rate in all_rates if not is_haulage_rate(rate)][:limit]
+    quote_rates = [rate for rate in all_rates if not is_haulage_rate(rate)]
+    rates = quote_rates[:limit]
     imports = list_imports(settings, limit=500)
     approved_at = [item.get("approved_at") for item in imports if item.get("approved_at")]
     last_refreshed = max(approved_at, key=parse_datetime_sort_key) if approved_at else None
 
     origin_map: dict[str, str] = {}
     dest_map: dict[str, str] = {}
-    for rate in rates:
+    collection_map: dict[str, str] = {}
+    for rate in quote_rates:
+        val = first_present(rate.get("place_of_receipt"), rate.get("origin"))
+        if val:
+            collection_map.setdefault(normalize_location_key(val), val)
         val = first_present(rate.get("pol"), rate.get("place_of_receipt"), rate.get("origin"))
         if val:
             origin_map.setdefault(normalize_location_key(val), val)
@@ -470,15 +478,16 @@ def get_rate_desk_data(settings: Settings, limit: int = 2000) -> dict[str, Any]:
             dest_map.setdefault(normalize_location_key(val), val)
     origins = sorted(origin_map.values())
     destinations = sorted(dest_map.values())
-    equipment_types = sorted({rate["equipment_type"] for rate in rates if rate.get("equipment_type")})
+    collections = sorted(collection_map.values())
+    equipment_types = sorted({rate["equipment_type"] for rate in quote_rates if rate.get("equipment_type")})
     carriers = sorted(
         {
             first_present(rate.get("carrier_name"), rate.get("provider_name"))
-            for rate in rates
+            for rate in quote_rates
             if first_present(rate.get("carrier_name"), rate.get("provider_name"))
         }
     )
-    materials = sorted({material for rate in rates for material in rate.get("materials", [])})
+    materials = sorted({material for rate in quote_rates for material in rate.get("materials", [])})
     haulage_tariffs, door_pickups, haulage_currency = build_haulage_lookup(haulage_rates)
     return {
         "last_refreshed": last_refreshed,
@@ -488,6 +497,7 @@ def get_rate_desk_data(settings: Settings, limit: int = 2000) -> dict[str, Any]:
         "filters": {
             "origins": origins,
             "destinations": destinations,
+            "collection_places": collections,
             "equipment_types": equipment_types,
             "carriers": carriers,
             "materials": materials,

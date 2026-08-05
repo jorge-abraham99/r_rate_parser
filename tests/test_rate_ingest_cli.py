@@ -415,6 +415,15 @@ def test_msc_zoned_inline_import_joins_birmingham_to_both_pols_and_tiers(tmp_pat
     desk = desk_response.json()
     assert {"FELIXSTOWE", "LONDON GATEWAY"}.issubset(desk["filters"]["origins"])
     assert {"SURABAYA", "SEMARANG"}.issubset(desk["filters"]["destinations"])
+    assert "Birmingham" in desk["filters"]["collection_places"]
+
+    birmingham_response = api_client.get(
+        "/api/search",
+        params={"collection": "Birmingham", "pod": "SURABAYA", "limit": 5000},
+    )
+    assert birmingham_response.status_code == 200
+    assert birmingham_response.json()
+    assert all(rate["place_of_receipt"] == "Birmingham" for rate in birmingham_response.json())
 
 
 def test_api_import_approve_and_search_flow(tmp_path: Path, monkeypatch):

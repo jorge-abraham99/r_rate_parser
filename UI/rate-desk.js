@@ -18,6 +18,7 @@ const deskState = {
   loaded: false,
   expandedId: null,
   connectedRates: [],
+  initialConnectedRates: [],
   filters: {},
   haulageTariffs: {},
   haulageCurrency: "USD",
@@ -93,6 +94,7 @@ async function bootRateDesk() {
     if (!response.ok) throw new Error("The approved-rate service did not respond.");
     const payload = await response.json();
     deskState.connectedRates = (Array.isArray(payload.rates) ? payload.rates : []).filter((rate) => !isSpotRate(rate));
+    deskState.initialConnectedRates = deskState.connectedRates;
     deskState.filters = payload.filters || {};
     deskState.haulageTariffs = payload.haulage_tariffs || {};
     deskState.haulageCurrency = payload.haulage_currency || "USD";
@@ -162,12 +164,7 @@ function refreshCollectionOptions() {
   if (RATE_DESK_DEMO_MODE) return;
   const pickups = Array.isArray(deskState.filters.door_pickups) ? deskState.filters.door_pickups : [];
   const haulagePickupNames = uniqueLocations(pickups.map((pickup) => pickup.name || pickup.location).filter(Boolean));
-  const doorCollections = uniqueLocations(
-    deskState.connectedRates
-      .filter((rate) => isDoorRate(rate))
-      .map((rate) => firstPresent(rate.place_of_receipt, rate.origin))
-      .filter(Boolean)
-  );
+  const doorCollections = uniqueLocations(deskState.filters.collection_places || []);
   const current = elements.collectionSelect.value || "";
   const mode = elements.routingModeSelect.value || "all";
   const pickupNames = mode === "haulage"
@@ -225,7 +222,34 @@ function setCollectionVisibility(visible) {
 
 function resetAndRender() {
   deskState.expandedId = null;
-  renderDesk();
+  if (RATE_DESK_DEMO_MODE) {
+    renderDesk();
+    return;
+  }
+  refreshConnectedRates();
+}
+
+async function refreshConnectedRates() {
+  const collection = elements.collectionSelect.value;
+  const origin = elements.originSelect.value;
+  const destination = elements.destinationSelect.value;
+  const equipment = elements.equipmentSelect.value;
+  const params = new URLSearchParams({ limit: "5000" });
+  if (collection) params.set("collection", collection);
+  if (origin) params.set("pol", origin);
+  if (destination) params.set("pod", destination);
+  if (equipment) params.set("equipment_type", equipment);
+
+  try {
+    const response = await fetch(`/api/search?${params.toString()}`);
+    if (!response.ok) throw new Error("The approved-rate service did not respond.");
+    deskState.connectedRates = await response.json();
+    renderDesk();
+  } catch (error) {
+    showAlert(`Could not update quotes: ${error.message}`);
+    deskState.connectedRates = deskState.initialConnectedRates;
+    renderDesk();
+  }
 }
 
 function renderDesk() {
