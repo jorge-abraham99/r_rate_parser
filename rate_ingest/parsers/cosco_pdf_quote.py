@@ -19,8 +19,12 @@ def parse_pdf(
     pages = extract_pages(path)
     full_text = "\n".join(page["text"] for page in pages)
     rules = template.cosco_pdf_rules
-    freight = extract_freight(full_text)
-    efs_amounts = extract_charge_amounts(full_text, r"Emergency Fuel\s+Surcharge \(EFS\)")
+    equipment_columns = extract_equipment_columns(pages)
+    freight = extract_freight_from_words(pages, equipment_columns) or extract_freight(full_text)
+    efs_amounts = extract_efs_from_words(pages, equipment_columns) or extract_charge_amounts(
+        full_text,
+        r"Emergency Fuel\s+Surcharge \(EFS\)",
+    )
     haulage_rows = extract_haulage_rows(pages)
     valid_from, valid_to = extract_validity(full_text)
     document_reference = extract_document_reference(full_text)
@@ -132,9 +136,79 @@ def extract_pages(path: Path) -> list[dict[str, Any]]:
                     "page_number": page_number,
                     "text": text,
                     "lines": [normalize_text(line) for line in text.splitlines() if normalize_text(line)],
+                    "words": page.get_text("words", sort=True),
                 }
             )
     return pages
+
+
+def extract_equipment_columns(pages: list[dict[str, Any]]) -> tuple[float, float]:
+    for page in pages:
+        forty_headers = [word for word in page["words"] if word_text(word) == "40'"]
+        for header in forty_headers:
+            same_row = [
+                word for word in forty_headers
+                if abs(word_y(word) - word_y(header)) < 2
+            ]
+            if len(same_row) >= 2:
+                centers = sorted(word_x(word) for word in same_row)
+                return centers[0], centers[1]
+    raise ValueError("COSCO PDF parser could not locate the 40GP and 40HC columns.")
+
+
+def extract_freight_from_words(
+    pages: list[dict[str, Any]],
+    equipment_columns: tuple[float, float],
+) -> dict[str, Any] | None:
+    for page in pages:
+        words = page["words"]
+        for index, word in enumerate(words):
+            if word_text(word).lower() != "freight":
+                continue
+            rate_word = next(
+                (
+                    candidate for candidate in words[index + 1 : index + 5]
+                    if word_text(candidate).lower() == "rate"
+                    and abs(word_y(candidate) - word_y(word)) < 2
+                ),
+                None,
+            )
+            if not rate_word:
+                continue
+            currency_word = find_currency_word(words, word_y(word), tolerance=18)
+            if not currency_word:
+                continue
+            lane = find_lane(words, word_y(word), word[2])
+            amounts = amounts_at_columns(words, word_y(currency_word), equipment_columns)
+            if lane and all(amount is not None for amount in amounts):
+                return {
+                    "pol": lane[0],
+                    "pod": lane[1],
+                    "currency": word_text(currency_word).upper(),
+                    "amounts": amounts,
+                }
+    return None
+
+
+def extract_efs_from_words(
+    pages: list[dict[str, Any]],
+    equipment_columns: tuple[float, float],
+) -> dict[str, Any] | None:
+    for page in pages:
+        words = page["words"]
+        for word in words:
+            if word_text(word).upper() != "(EFS)":
+                continue
+            currency_word = find_currency_word(words, word_y(word), tolerance=18)
+            if not currency_word:
+                continue
+            amounts = amounts_at_columns(words, word_y(currency_word), equipment_columns)
+            if all(amount is not None for amount in amounts):
+                return {
+                    "currency": word_text(currency_word).upper(),
+                    "amounts": amounts,
+                }
+    return None
 
 
 def extract_freight(text: str) -> dict[str, Any] | None:
@@ -169,36 +243,117 @@ def extract_charge_amounts(text: str, label_pattern: str) -> dict[str, Any] | No
 
 def extract_haulage_rows(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    heading = re.compile(r"^(.+?) \(Door\).*?via (.+?) \(CY\)", re.IGNORECASE)
     for page in pages:
-        lines = page["lines"]
-        for index, line in enumerate(lines):
-            match = heading.match(line)
-            if not match:
-                continue
-            block_end = next(
-                (candidate for candidate in range(index + 1, len(lines)) if heading.match(lines[candidate])),
-                min(index + 20, len(lines)),
+        words = page["words"]
+        door_words = [word for word in words if word_text(word).lower() == "(door)"]
+        for door_index, door_word in enumerate(door_words):
+            line_words = sorted(
+                [word for word in words if abs(word_y(word) - word_y(door_word)) < 2],
+                key=lambda word: word[0],
             )
-            block = lines[index + 1 : block_end]
             try:
-                currency_index = next(i for i, value in enumerate(block) if re.fullmatch(r"[A-Z]{3}", value))
-            except StopIteration:
+                door_position = line_words.index(door_word)
+                via_position = next(
+                    index for index, word in enumerate(line_words)
+                    if word_text(word).lower() == "via"
+                )
+                cy_position = next(
+                    index for index, word in enumerate(line_words[via_position + 1 :], start=via_position + 1)
+                    if word_text(word).lower() == "(cy)"
+                )
+            except (ValueError, StopIteration):
                 continue
-            amounts = [parse_money(value) for value in block[currency_index + 1 :] if value != "-"]
-            numeric_amounts = [value for value in amounts if value is not None]
-            if len(numeric_amounts) < 2:
+            collection = normalize_text(" ".join(word_text(word) for word in line_words[:door_position]))
+            via_pol = normalize_text(" ".join(word_text(word) for word in line_words[via_position + 1 : cy_position]))
+            next_door_y = (
+                word_y(door_words[door_index + 1])
+                if door_index + 1 < len(door_words)
+                else word_y(door_word) + 45
+            )
+            block_words = [
+                word for word in words
+                if word_y(door_word) < word_y(word) < next_door_y
+            ]
+            if not any(word_text(word).upper() == "(IHL)" for word in block_words):
+                continue
+            currency_word = find_currency_word(block_words, word_y(door_word) + 18, tolerance=18)
+            if not currency_word:
+                continue
+            amounts = amounts_at_columns(words, word_y(currency_word), extract_equipment_columns([page]))
+            if any(amount is None for amount in amounts):
                 continue
             rows.append(
                 {
-                    "collection": normalize_text(match.group(1)),
-                    "via_pol": normalize_text(match.group(2)),
-                    "currency": block[currency_index],
-                    "amounts": numeric_amounts[:2],
+                    "collection": collection,
+                    "via_pol": via_pol,
+                    "currency": word_text(currency_word).upper(),
+                    "amounts": amounts,
                     "page_number": page["page_number"],
                 }
             )
     return rows
+
+
+def find_currency_word(words: list[tuple], anchor_y: float, tolerance: float) -> tuple | None:
+    currencies = [
+        word for word in words
+        if re.fullmatch(r"[A-Z]{3}", word_text(word))
+        and abs(word_y(word) - anchor_y) <= tolerance
+    ]
+    return min(currencies, key=lambda word: abs(word_y(word) - anchor_y)) if currencies else None
+
+
+def find_lane(words: list[tuple], anchor_y: float, right_edge: float) -> tuple[str, str] | None:
+    candidates = [
+        word for word in words
+        if word_text(word).lower() == "to"
+        and anchor_y <= word_y(word) <= anchor_y + 25
+        and word[0] < right_edge + 70
+    ]
+    if not candidates:
+        return None
+    to_word = min(candidates, key=lambda word: word_y(word))
+    lane_words = sorted(
+        [word for word in words if abs(word_y(word) - word_y(to_word)) < 2 and word[0] < 145],
+        key=lambda word: word[0],
+    )
+    try:
+        to_position = lane_words.index(to_word)
+    except ValueError:
+        return None
+    pol = normalize_text(" ".join(word_text(word) for word in lane_words[:to_position]))
+    pod = normalize_text(" ".join(word_text(word) for word in lane_words[to_position + 1 :]))
+    return (pol, pod) if pol and pod else None
+
+
+def amounts_at_columns(
+    words: list[tuple],
+    row_y: float,
+    equipment_columns: tuple[float, float],
+) -> list[float | None]:
+    amounts: list[float | None] = []
+    for column_x in equipment_columns:
+        candidates = [
+            word for word in words
+            if abs(word_y(word) - row_y) < 4
+            and abs(word_x(word) - column_x) < 16
+            and parse_money(word_text(word)) is not None
+        ]
+        candidate = min(candidates, key=lambda word: abs(word_x(word) - column_x)) if candidates else None
+        amounts.append(parse_money(word_text(candidate)) if candidate else None)
+    return amounts
+
+
+def word_text(word: tuple) -> str:
+    return normalize_text(word[4])
+
+
+def word_x(word: tuple) -> float:
+    return (float(word[0]) + float(word[2])) / 2
+
+
+def word_y(word: tuple) -> float:
+    return (float(word[1]) + float(word[3])) / 2
 
 
 def extract_validity(text: str):
