@@ -54,7 +54,7 @@ def inspect_source(source_document: SourceDocument) -> InspectResult:
 
     if source_type == "pdf":
         try:
-            import fitz
+            import pymupdf as fitz
         except ImportError as exc:
             raise ValueError("PDF inspection requires the pymupdf package.") from exc
         sheet_summaries = []

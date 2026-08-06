@@ -119,7 +119,7 @@ def parse_pdf(
 
 def extract_pages(path: Path) -> list[dict[str, Any]]:
     try:
-        import fitz
+        import pymupdf as fitz
     except ImportError as exc:
         raise ValueError("COSCO PDF parsing requires the pymupdf package.") from exc
 
