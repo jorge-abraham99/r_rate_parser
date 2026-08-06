@@ -104,7 +104,18 @@ def import_source_file(
         matched_template, scored = find_best_template(settings, inspected)
 
     if not matched_template:
-        raise ValueError("No matching parser template found. Use inspect output to add a template.")
+        best = scored[0] if scored else None
+        best_detail = (
+            f" Best candidate: {best['template_id']} ({best['confidence']:.2f})."
+            if best
+            else " No active templates were found."
+        )
+        raise ValueError(
+            "No matching parser template found."
+            f" Detected type={inspected.workbook_type}, provider={inspected.provider_guess or 'unknown'},"
+            f" parser={inspected.parser_family_guess or 'unknown'}."
+            f"{best_detail}"
+        )
 
     rate_import = RateImport(
         id=new_id("import"),

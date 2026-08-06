@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rate_ingest.api import app as api_app
 from rate_ingest.cli import app
 from rate_ingest.config import Settings
+from rate_ingest.models import InspectResult, SourceDocument
+from rate_ingest.template_matcher import load_templates, score_template
 
 
 runner = CliRunner()
@@ -45,6 +47,30 @@ def test_settings_seed_missing_bundled_templates_without_overwriting_existing(tm
     } == {
         path.name for path in Path("data/templates").glob("*.yaml")
     }
+
+
+def test_cosco_pdf_template_loads_from_bundle_and_strongly_matches_tuticorin(tmp_path: Path):
+    settings = Settings.load(cwd=tmp_path)
+    settings.templates_dir.mkdir(parents=True)
+    template = next(
+        item for item in load_templates(settings)
+        if item.template_id == "cosco_pdf_quote_v1"
+    )
+    source = SourceDocument(
+        source_type="pdf",
+        file_name="Tuticorin.pdf",
+        source_path=str(tmp_path / "Tuticorin.pdf"),
+        checksum="test",
+    )
+    inspected = InspectResult(
+        source_document=source,
+        workbook_type="pdf",
+        provider_guess=None,
+        parser_family_guess="unknown",
+        sheet_summaries=[],
+    )
+
+    assert score_template(template, inspected) >= 0.55
 
 
 def test_inspect_and_import_and_approve_flow(tmp_path: Path, monkeypatch):
