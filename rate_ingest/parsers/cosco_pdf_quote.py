@@ -4,8 +4,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-import fitz
-
 from rate_ingest.models import ParserTemplate, RateCard, RateChargeLine, RateImport, RateNote, RateOffer
 from rate_ingest.normalize import normalize_text, parse_amount, parse_date_value
 
@@ -120,6 +118,11 @@ def parse_pdf(
 
 
 def extract_pages(path: Path) -> list[dict[str, Any]]:
+    try:
+        import fitz
+    except ImportError as exc:
+        raise ValueError("COSCO PDF parsing requires the pymupdf package.") from exc
+
     pages: list[dict[str, Any]] = []
     with fitz.open(path) as document:
         for page_number, page in enumerate(document, start=1):
