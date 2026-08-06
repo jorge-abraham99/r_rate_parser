@@ -49,6 +49,7 @@ Implemented parser families:
 
 - `tabular_lane` for known MSC-style Excel workbooks
 - `matrix` for known COSCO-style matrix workbooks
+- `cosco_pdf_quote` for COSCO India/Far East door-to-quay PDF quotations
 - `offer_block` for known MAERSK quote workbooks
 - `site_to_site_rows` for known MAERSK AFLS site-to-site workbooks
 - `haulage_matrix` for known UK inland-haulage Excel/CSV matrices
@@ -60,7 +61,7 @@ Not implemented yet:
 
 - random unknown workbooks
 - AI template drafting
-- PDF parsing
+- unknown or scanned PDF parsing
 - deep email thread parsing
 - attachment extraction from emails
 
@@ -199,6 +200,7 @@ Templates live here:
 
 - `data/templates/msc_far_east_v1.yaml`
 - `data/templates/cosco_matrix_v1.yaml`
+- `data/templates/cosco_pdf_quote_v1.yaml`
 - `data/templates/maersk_offer_block_v1.yaml`
 - `data/templates/maersk_afls_site_to_site_v1.yaml`
 - `data/templates/uk_haulage_matrix_v1.yaml`
@@ -240,6 +242,12 @@ The import summary preserves and displays the complete 252-row workbook table fo
 The `hapag_door_matrix` parser expands the collection locations in column C against the destination headers in columns D–J. The preferred POL from column B and applicable routing from row 2 are retained on every resulting `SD / CY` offer.
 
 The matrix amount is supplemented with a USD 15 live-position charge per container. A separate USD 20 emergency-fuel destination charge is added only for Binh Duong Terminal and Lat Krabang. These component lines remain visible in the quote breakdown; the source validity and commercial terms in column K are also preserved.
+
+## COSCO India/Far East PDF Quotes
+
+The `cosco_pdf_quote` parser reads text-based COSCO quotations with repeated ocean and origin-charge tables. It creates an `SD / CY` offer for each collection and quoted 40GP/40HC equipment column, retaining the PDF's POL, POD, validity, and document reference.
+
+Only three components affect the quoted total: Freight Rate, Emergency Fuel Surcharge (EFS), and collection-specific Inland Haulage at Load (IHL). Documentation, destination handling, and other tariff charges in the PDF are intentionally excluded. For example, Birmingham to Tuticorin is USD 360 freight + USD 150 EFS + USD 264 haulage = USD 774.
 
 ## Email Parser Boundaries
 

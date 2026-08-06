@@ -110,6 +110,87 @@ def test_cosco_matrix_import_creates_canonical_rates(tmp_path: Path, monkeypatch
     assert first["to_raw"]
 
 
+def test_cosco_pdf_quote_prices_only_freight_efs_and_haulage(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    raw_dir = tmp_path / "incoming"
+    raw_dir.mkdir()
+    source = raw_dir / "Tuticorin.pdf"
+    source.write_bytes(Path("rate_sheet_files/Tuticorin.pdf").read_bytes())
+    seed_templates(tmp_path)
+
+    result = runner.invoke(app, ["import", str(source)])
+    assert result.exit_code == 0
+    assert "Template used: cosco_pdf_quote_v1" in result.stdout
+    import_id = next(line.split(": ", 1)[1] for line in result.stdout.splitlines() if line.startswith("Import created:"))
+    run_dir = tmp_path / "data" / "runs" / import_id
+
+    offers = detail_rows(run_dir / "parsed_rate_offers.csv")
+    charges = detail_rows(run_dir / "parsed_rate_charge_lines.csv")
+    assert len(offers) == 76
+    assert len(charges) == 152
+    assert {offer["equipment_type"] for offer in offers} == {"40GP", "40HC"}
+    assert {offer["service_mode"] for offer in offers} == {"SD / CY"}
+    assert {offer["valid_from"] for offer in offers} == {"2026-05-01"}
+    assert {offer["valid_to"] for offer in offers} == {"2026-05-31"}
+    assert {charge["charge_name"] for charge in charges} == {
+        "Emergency Fuel Surcharge",
+        "Inland Haulage at Load",
+    }
+    assert not any(
+        token in charge["charge_name"].lower()
+        for charge in charges
+        for token in ("documentation", "terminal handling")
+    )
+
+    birmingham = next(
+        offer
+        for offer in offers
+        if offer["place_of_receipt"] == "Birmingham" and offer["equipment_type"] == "40HC"
+    )
+    assert birmingham["pol"] == "Felixstowe"
+    assert birmingham["pod"] == "Tuticorin"
+    assert float(birmingham["base_amount"]) == 360.0
+    birmingham_charges = {
+        charge["charge_name"]: float(charge["amount"])
+        for charge in charges
+        if charge["rate_offer_id"] == birmingham["id"]
+    }
+    assert birmingham_charges == {
+        "Emergency Fuel Surcharge": 150.0,
+        "Inland Haulage at Load": 264.0,
+    }
+
+    approve_response = api_client.post(
+        f"/api/imports/{import_id}/approve",
+        json={
+            "approved_by": "jorge",
+            "carrier_name": "COSCO",
+            "carrier_key": "cosco-door",
+            "carrier_label": "COSCO · India/Far East Door-to-quay",
+        },
+    )
+    assert approve_response.status_code == 200
+    search = api_client.get(
+        "/api/search",
+        params={
+            "collection": "Birmingham",
+            "pod": "Tuticorin",
+            "equipment_type": "40HC",
+            "limit": 20,
+        },
+    ).json()
+    assert len(search) == 1
+    assert search[0]["base_amount"] == 360.0
+    assert search[0]["charge_total"] == 414.0
+    assert search[0]["all_in_amount"] == 774.0
+    assert search[0]["carrier_label"] == "COSCO · India/Far East Door-to-quay"
+
+    desk = api_client.get("/api/rate-desk", params={"limit": 1000}).json()
+    assert desk["haulage_tariffs"] == {}
+    assert desk["filters"]["door_pickups"] == []
+    assert "Birmingham" in desk["filters"]["collection_places"]
+
+
 def test_maersk_offer_block_import_creates_charge_lines(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
     raw_dir = tmp_path / "incoming"

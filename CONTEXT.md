@@ -38,6 +38,7 @@ The intended trust boundary is human approval. Parsing may create run artifacts 
 | --- | --- | --- |
 | `tabular_lane` | `msc_far_east_v1` | MSC structured lane sheets |
 | `matrix` | `cosco_matrix_v1` | COSCO origin/destination matrices |
+| `cosco_pdf_quote` | `cosco_pdf_quote_v1` | Text-based COSCO India/Far East door-to-quay PDF quotes |
 | `offer_block` | `maersk_offer_block_v1` | Repeated Maersk offer and surcharge blocks |
 | `site_to_site_rows` | `maersk_afls_site_to_site_v1` | Maersk AFLS site-to-site quote rows |
 | `haulage_matrix` | `uk_haulage_matrix_v1` | UK collection-to-port haulage matrices |
@@ -70,6 +71,8 @@ UK haulage imports are separated from ocean results and converted into a collect
 MSC zoned workbooks are carrier door-to-quay products, not standalone haulage tariffs. The parser uses each city/POL entry from the workbook's `Haulage Zones` tab to select the correct `REUDAN-SPECIAL` and `REUDAN-TARRIFF` price by normalized POL and zone, then publishes both tiers as `SD / CY` door offers. These offers remain in quote results and never enter the merchant-haulage tariff lookup. The parser also stores the two original 252-row rate tables in the run artifacts for display in the import summary. `Bristol` in the zone lookup is explicitly aliased to the rate-tab POL `PORTBURY`.
 
 Hapag-Lloyd door-to-quay workbooks map collection locations in column C to POD headers in columns D–J, retaining the preferred POL from column B and applicable routing from row 2. Every parsed offer receives a separate USD 15 live-position charge per container; Binh Duong Terminal and Lat Krabang also receive a USD 20 emergency-fuel destination charge. The current template defaults equipment to `40HC` because the source workbook does not provide an equipment field.
+
+COSCO India/Far East PDFs use a text-based `cosco_pdf_quote` parser. Each origin IHL row is combined with the document's Freight Rate and Emergency Fuel Surcharge for both quoted 40GP and 40HC columns. Those are the only three priced components; documentation, destination handling, and other tariff lines are excluded. The result remains an `SD / CY` carrier quote and never enters the standalone merchant-haulage lookup.
 
 ## Current Constraints
 

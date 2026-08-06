@@ -52,6 +52,34 @@ def inspect_source(source_document: SourceDocument) -> InspectResult:
             sheet_summaries=[{"sheet_name": "csv_1", "dimensions": "csv", "top_rows": rows}],
         )
 
+    if source_type == "pdf":
+        try:
+            import fitz
+        except ImportError as exc:
+            raise ValueError("PDF inspection requires the pymupdf package.") from exc
+        sheet_summaries = []
+        document_text: list[str] = []
+        with fitz.open(source_path) as document:
+            for page_number, page in enumerate(document, start=1):
+                page_text = page.get_text("text", sort=True)
+                document_text.append(page_text)
+                lines = [normalize_cell(line) for line in page_text.splitlines() if normalize_cell(line)]
+                sheet_summaries.append(
+                    {
+                        "sheet_name": f"page_{page_number}",
+                        "dimensions": f"{round(page.rect.width)} x {round(page.rect.height)} points",
+                        "top_rows": [[line] for line in lines],
+                    }
+                )
+        combined_text = " ".join(document_text)
+        return InspectResult(
+            source_document=source_document,
+            workbook_type=source_type,
+            provider_guess=provider_from_name(f"{source_document.file_name} {combined_text}"),
+            parser_family_guess=guess_parser_family(sheet_summaries, source_type=source_type),
+            sheet_summaries=sheet_summaries,
+        )
+
     if source_type not in {"xlsx", "xlsm", "xls"}:
         return InspectResult(
             source_document=source_document,
@@ -105,6 +133,14 @@ def guess_parser_family(sheet_summaries: list[dict[str, Any]], source_type: str 
     flattened = " ".join(
         " ".join(" ".join(row) for row in summary.get("top_rows", [])) for summary in sheet_summaries
     ).upper()
+    if (
+        source_type == "pdf"
+        and "COSCO" in flattened
+        and "FREIGHT RATE" in flattened
+        and "EMERGENCY FUEL SURCHARGE" in flattened
+        and "INLAND HAULAGE AT" in flattened
+    ):
+        return "cosco_pdf_quote"
     if source_type == "eml" and "POO" in flattened and "POL/POD" in flattened and "OFFER GIGO" in flattened:
         return "email_table"
     if "CITY NAME" in flattened and ("GBFXT" in flattened or "GBSOU" in flattened or "GBLGP" in flattened):

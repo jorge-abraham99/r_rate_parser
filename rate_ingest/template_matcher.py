@@ -19,6 +19,14 @@ def load_templates(settings: Settings) -> list[ParserTemplate]:
 
 
 def score_template(template: ParserTemplate, inspect_result: InspectResult) -> float:
+    source_type = inspect_result.source_document.source_type.lower()
+    template_type = template.file_type.lower()
+    compatible_types = {template_type}
+    if template_type == "xlsx":
+        compatible_types.add("xlsm")
+    if source_type not in compatible_types:
+        return 0.0
+
     score = 0.0
     name_upper = inspect_result.source_document.file_name.upper()
     rules = template.match_rules

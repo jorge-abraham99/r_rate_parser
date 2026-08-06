@@ -15,6 +15,7 @@ from rate_ingest.config import Settings
 from rate_ingest.inspector import inspect_source
 from rate_ingest.models import RateCard, RateChargeLine, RateImport, RateNote, RateOffer, ValidationReport, new_id
 from rate_ingest.parsers.email_table import parse_email as parse_email_table
+from rate_ingest.parsers.cosco_pdf_quote import parse_pdf as parse_cosco_pdf_quote
 from rate_ingest.parsers.hapag_door_matrix import parse_workbook as parse_hapag_door_matrix_workbook
 from rate_ingest.parsers.haulage_matrix import parse_workbook as parse_haulage_matrix_workbook
 from rate_ingest.parsers.matrix import parse_workbook as parse_matrix_workbook
@@ -620,6 +621,8 @@ def parse_source_by_family(
         return parse_msc_zoned_inline_workbook(source_path, matched_template, rate_import)
     if parser_family == "hapag_door_matrix":
         return parse_hapag_door_matrix_workbook(source_path, matched_template, rate_import)
+    if parser_family == "cosco_pdf_quote":
+        return parse_cosco_pdf_quote(source_path, matched_template, rate_import)
     if parser_family == "offer_block":
         return parse_offer_block_workbook(source_path, matched_template, rate_import)
     if parser_family == "site_to_site_rows":
