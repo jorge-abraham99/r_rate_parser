@@ -21,6 +21,12 @@ The repo now has two operator surfaces over the same parser logic:
 
 For a concise architecture and maintenance guide, see [CONTEXT.md](CONTEXT.md).
 
+## Supabase migration status
+
+Stage 0 of the auth and rate-database migration is captured in `supabase/`. The hosted `carrier-quotes` project already has eight RLS-protected tables and two applied migrations; their authoritative SQL is now versioned locally. The running application still uses filesystem CSV/JSON storage and has no authentication, so this baseline does not change current runtime behavior.
+
+See [supabase/README.md](supabase/README.md) for the project reference, applied migration versions, security baseline, credential handling, and the required future `application_id` reconciliation.
+
 ## Canonical Output
 
 The business-facing output is intentionally small:

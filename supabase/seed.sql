@@ -1,0 +1,1 @@
+-- Intentionally empty. Stage 0 captures the existing schema only.
