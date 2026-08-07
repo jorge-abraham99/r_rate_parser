@@ -7,13 +7,6 @@ const EQUIPMENT_OPTIONS = [
   { value: "40HC", label: "40′ HC" },
 ];
 const MATERIAL_OPTIONS = ["All materials", "Paper", "Metal", "Tyres"];
-const ROUTING_MODE_OPTIONS = [
-  { value: "all", label: "All routings" },
-  { value: "port", label: "Port drop-off" },
-  { value: "door", label: "Carrier door-to-quay" },
-  { value: "haulage", label: "Merchant haulage" },
-];
-
 const deskState = {
   loaded: false,
   expandedId: null,
@@ -22,10 +15,7 @@ const deskState = {
   filters: {},
   haulageTariffs: {},
   haulageCurrency: "USD",
-  sort: {
-    key: "totalUsd",
-    direction: "asc",
-  },
+  sort: null,
 };
 
 const elements = {
@@ -35,7 +25,6 @@ const elements = {
   originSelect: document.getElementById("originSelect"),
   destinationSelect: document.getElementById("destinationSelect"),
   equipmentSelect: document.getElementById("equipmentSelect"),
-  routingModeSelect: document.getElementById("routingModeSelect"),
   qtyInput: document.getElementById("qtyInput"),
   materialSelect: document.getElementById("materialSelect"),
   showExpiredToggle: document.getElementById("showExpiredToggle"),
@@ -52,19 +41,17 @@ const elements = {
 
 [elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.equipmentSelect, elements.materialSelect]
   .forEach((element) => element.addEventListener("change", resetAndRender));
-elements.routingModeSelect.addEventListener("change", () => {
-  refreshCollectionOptions();
-  resetAndRender();
-});
 elements.showExpiredToggle.addEventListener("change", resetAndRender);
 elements.showAllQuotesButton.addEventListener("click", showAllQuotes);
 elements.sortButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const key = button.dataset.sortKey;
-    deskState.sort = {
-      key,
-      direction: deskState.sort.key === key && deskState.sort.direction === "asc" ? "desc" : "asc",
-    };
+    const activeSort = deskState.sort?.key === key ? deskState.sort : null;
+    deskState.sort = !activeSort
+      ? { key, direction: "asc" }
+      : activeSort.direction === "asc"
+        ? { key, direction: "desc" }
+        : null;
     deskState.expandedId = null;
     renderDesk();
   });
@@ -120,7 +107,6 @@ function populateDemoFilters() {
   populateSelect(elements.originSelect, origins, "Any origin", "Felixstowe", true);
   populateSelect(elements.destinationSelect, destinations, "Any destination", "Laem Chabang", true);
   populateEquipment("40HC");
-  populateRoutingModes("all");
   populateSelect(elements.materialSelect, MATERIAL_OPTIONS, "No materials", "All materials");
   setCollectionVisibility(true);
 }
@@ -150,7 +136,6 @@ function populateConnectedFilters() {
   populateSelect(elements.originSelect, origins, "Any origin", firstPresent(defaultRate.pol, "") || origins[0] || "", true);
   populateSelect(elements.destinationSelect, destinations, "Any destination", rateDestination(defaultRate) || destinations[0] || "", true);
   populateEquipment(canonicalEquipment(defaultRate.equipment_type || equipment[0] || "40HC"));
-  populateRoutingModes("all");
   populateSelect(
     elements.materialSelect,
     ["All materials", ...(materials.length ? materials : MATERIAL_OPTIONS.slice(1))],
@@ -166,12 +151,7 @@ function refreshCollectionOptions() {
   const haulagePickupNames = uniqueLocations(pickups.map((pickup) => pickup.name || pickup.location).filter(Boolean));
   const doorCollections = uniqueLocations(deskState.filters.collection_places || []);
   const current = elements.collectionSelect.value || "";
-  const mode = elements.routingModeSelect.value || "all";
-  const pickupNames = mode === "haulage"
-    ? haulagePickupNames
-    : mode === "door"
-      ? doorCollections
-      : uniqueLocations([...haulagePickupNames, ...doorCollections]);
+  const pickupNames = uniqueLocations([...haulagePickupNames, ...doorCollections]);
 
   if (pickupNames.length) {
     populateSelect(elements.collectionSelect, pickupNames, "None — not filtered", current, true);
@@ -190,14 +170,6 @@ function populateEquipment(preferred) {
     .join("");
   elements.equipmentSelect.value = EQUIPMENT_OPTIONS.some((item) => item.value === preferred) ? preferred : "40HC";
   elements.equipmentSelect.disabled = false;
-}
-
-function populateRoutingModes(preferred) {
-  elements.routingModeSelect.innerHTML = ROUTING_MODE_OPTIONS
-    .map((item) => `<option value="${item.value}">${item.label}</option>`)
-    .join("");
-  elements.routingModeSelect.value = ROUTING_MODE_OPTIONS.some((item) => item.value === preferred) ? preferred : "all";
-  elements.routingModeSelect.disabled = false;
 }
 
 function populateSelect(select, values, emptyLabel, preferred = "", includeBlank = false) {
@@ -276,14 +248,11 @@ function renderDesk() {
 
   if (!rows.length) {
     const hasExpiredHidden = !elements.showExpiredToggle.checked && hasExpiredMatches();
-    const needsCollection = elements.routingModeSelect.value === "haulage" && !elements.collectionSelect.value;
     elements.laneSummary.textContent = isAllQuotesView()
       ? "no approved quotes match the current filters"
       : "no parsed rates on this lane";
     elements.rateRows.innerHTML = `<div class="rate-empty">${
-      needsCollection
-        ? "Select a collection place to see merchant-haulage options."
-        : hasExpiredHidden
+      hasExpiredHidden
         ? "No current rates match these filters. Turn on Show expired to inspect expired quotes."
         : "No parsed rates match the current filters."
     }</div>`;
@@ -317,7 +286,6 @@ function buildDemoRows(quantity) {
   const equipment = elements.equipmentSelect.value;
   const material = elements.materialSelect.value;
   const collection = elements.collectionSelect.value;
-  const mode = elements.routingModeSelect.value || "all";
   const baseRates = quote.rates.filter((rate) =>
     matchesFilter(rate.origins, origin)
     && matchesFilter(rate.destinations, destination)
@@ -326,15 +294,14 @@ function buildDemoRows(quantity) {
 
   const rows = [];
   baseRates.forEach((rate) => {
-    if (!collection && mode !== "door") {
-      rows.push(makeDemoVariant(rate, "key", quantity, origin, ""));
+    if (!collection) {
+      rows.push(makeDemoVariant(rate, "quay", quantity, origin, ""));
       return;
     }
-    if (mode === "all" || mode === "port") rows.push(makeDemoVariant(rate, "key", quantity, origin, ""));
-    if (mode === "all" || mode === "door") rows.push(makeDemoVariant(rate, "door", quantity, origin, collection));
-    if (collection && (mode === "all" || mode === "haulage")) {
-      rows.push(makeDemoVariant(rate, "haulier", quantity, origin, collection));
+    if (rate.carrier === "Maersk") {
+      rows.push(makeDemoVariant(rate, "door", quantity, origin, collection));
     }
+    rows.push(makeDemoVariant(rate, "haulier", quantity, origin, collection));
   });
   return sortViewRows(rows);
 }
@@ -349,10 +316,10 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
   const destinationLines = rate.destination.map((line) => makeDemoLine(line, quantity, fx));
   let inlandLines = [];
   let poa = false;
-  let routing = "CY/CY";
-  let routingDetail = "CY/CY · port drop-off";
+  let routing = "Quay to quay";
+  let routingDetail = "Quay to quay · container delivered to the origin quay by you";
   let sourceFile = rate.sourceFile;
-  let sourceTag = rate.sourceTag;
+  let service = rate.service || "Quay-to-quay";
   let fineprint = "";
 
   if (mode === "door") {
@@ -367,10 +334,10 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
       unit: 0,
       included: true,
     }, quantity, fx)];
-    routing = "Door → quay";
-    routingDetail = "Door-to-quay · carrier haulage included in freight, not itemised";
+    routing = "Door to quay";
+    routingDetail = "Door to quay · carrier haulage included in freight, not itemised";
     sourceFile = "MAERSK_DOOR_299077037_JUL.xlsx";
-    sourceTag = "DOOR";
+    service = "Door-to-quay";
     fineprint = `Inland haulage from ${collection} is included in the freight price — Maersk door rates do not itemise it.`;
   }
 
@@ -384,10 +351,10 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
       unit: tariff || 0,
       poa,
     }, quantity, fx)];
-    routing = "CY/CY + haulier";
+    routing = "Quay to quay + your haulier";
     routingDetail = poa
-      ? "CY/CY + merchant haulage · no tariff rate on this corridor"
-      : `CY/CY + merchant haulage · £${formatNumber(tariff)}/ctn · separate haulier booking`;
+      ? "Quay to quay + your haulier · no tariff rate on this corridor"
+      : `Quay to quay + your haulier · £${formatNumber(tariff)}/ctn · separate haulier booking`;
     if (poa) {
       fineprint = `UK Inland Haulage has no ${collection} → ${origin} rate — request a haulage quote to price this routing.`;
     }
@@ -400,9 +367,9 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
     makeGroup("destination", "Destination", destinationLines),
   ];
   const totalUsd = sumGroups(groups);
-  const sources = [{ tag: sourceTag, file: sourceFile }];
-  if (mode === "haulier" && !poa) {
-    sources.push({ tag: "HAUL·Q2", file: "UK Haulage — Export Haulage all UK POLs, Q2 2026 validity.xlsx" });
+  const services = [{ label: service, file: sourceFile }];
+  if (mode === "haulier") {
+    services.push({ label: "+ UK Inland Haulage", file: "UK Haulage — Export Haulage all UK POLs, Q2 2026 validity.xlsx" });
   }
   return {
     id: `${rate.id}-${mode}`,
@@ -414,7 +381,8 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
     ),
     routing,
     routingDetail,
-    sources,
+    carrier: rate.carrier || "Maersk",
+    services,
     transit: extractTransit(rate.sailing),
     validity: rate.validity,
     validTo: "",
@@ -445,7 +413,6 @@ function makeDemoLine(tuple, quantity, fx) {
 
 function buildConnectedRows(quantity) {
   const collection = elements.collectionSelect.value;
-  const mode = elements.routingModeSelect.value || "all";
   const portRates = filterConnectedRates({ includeExpired: elements.showExpiredToggle.checked, kind: "port" })
     .map((rate) => makeConnectedRow(rate, quantity));
   const doorRates = filterConnectedRates({ includeExpired: elements.showExpiredToggle.checked, kind: "door" })
@@ -456,26 +423,25 @@ function buildConnectedRows(quantity) {
       .map((rate) => makeConnectedHaulierRow(rate, quantity, collection))
     : [];
 
-  const rows = [];
-  if (mode === "port" || (mode === "all" && !collection)) rows.push(...portRates);
-  if (mode === "all" || mode === "door") rows.push(...doorRates);
-  if (mode === "all" || mode === "haulage") rows.push(...haulageRates);
-  return sortViewRows(rows);
+  return sortViewRows(collection
+    ? [...doorRates, ...haulageRates]
+    : portRates);
 }
 
 function makeConnectedRow(rate, quantity) {
   const groups = connectedGroups(rate, quantity);
   const totalUsd = sumGroups(groups);
   const sourceFile = rate.source_file_name || rate.raw_sheet_name || "Approved rate";
-  const tag = rate.contract_tag || rate.offer_reference || "KEY";
   const expired = isExpiredRate(rate);
+  const carrier = carrierLabel(rate);
   return {
     id: String(rate.offer_id || `${sourceFile}-${rate.raw_row_reference || "row"}`),
     type: "CONTRACT",
     routeLane: formatRouteLane(rateOrigin(rate), rateDestination(rate)),
     routing: formatRouting(rate),
     routingDetail: laneDetail(rate),
-    sources: [{ tag, file: sourceFile }],
+    carrier,
+    services: [{ label: serviceLabel(rate), file: sourceFile }],
     transit: rate.transit_time_days ? `${rate.transit_time_days}d` : extractTransit(rate.routing_note || ""),
     validity: validityLabel(rate.valid_from, rate.valid_to, expired),
     validTo: rate.valid_to || "",
@@ -505,8 +471,9 @@ function makeConnectedDoorRow(rate, quantity) {
       rate.pol,
       rateDestination(rate),
     ),
-    routing: "Door → quay",
+    routing: "Door to quay",
     routingDetail: laneDetail(rate),
+    services: [{ label: "Door-to-quay", file: rate.source_file_name || rate.raw_sheet_name || "Approved rate" }],
   };
 }
 
@@ -528,11 +495,11 @@ function makeConnectedHaulierRow(rate, quantity, collection) {
     id: `${row.id}-haulage-${slugify(collection)}`,
     type: "CONTRACT",
     routeLane: formatRouteLane(collection, port, rateDestination(rate)),
-    routing: "CY/CY + haulier",
+    routing: "Quay to quay + your haulier",
     routingDetail: poa
       ? `${collection} → ${port} → ${rateDestination(rate)} · no tariff rate for ${collection} → ${port}`
       : `${collection} → ${port} → ${rateDestination(rate)} · ${formatMoney(tariff, deskState.haulageCurrency)}/ctn · separate haulier booking`,
-    sources: [...row.sources, { tag: "HAUL", file: "UK Inland Haulage" }],
+    services: [...row.services, { label: "+ UK Inland Haulage", file: "UK Inland Haulage" }],
     groups,
     inlandUsd: groupTotal(groups, "inland"),
     totalUsd: sumGroups(groups),
@@ -650,7 +617,8 @@ function renderRate(row, index, isBest) {
           <strong class="routing-lane">${escapeHtml(row.routeLane || row.routing)}</strong>
           <small class="routing-type">${escapeHtml(row.routing)}</small>
         </span>
-        <span class="source-tags">${row.sources.map((source) => `<span title="${escapeAttr(source.file)}">${escapeHtml(source.tag)}</span>`).join("")}</span>
+        <span class="carrier-name">${escapeHtml(row.carrier || "—")}</span>
+        <span class="service-tags">${row.services.map((serviceItem) => `<span title="${escapeAttr(`${row.carrier} · ${serviceItem.file}`)}">${escapeHtml(serviceItem.label)}</span>`).join("")}</span>
         <span class="mono transit-value">${escapeHtml(row.transit || "—")}</span>
         <span class="number">${renderInland(row)}</span>
         <span class="number component-value">${escapeHtml(formatUsd(row.originUsd))}</span>
@@ -732,9 +700,13 @@ function renderLine(line) {
 
 function updateSortHeaders() {
   elements.sortButtons.forEach((button) => {
-    const active = button.dataset.sortKey === deskState.sort.key;
-    const direction = active ? deskState.sort.direction : null;
-    const nextDirection = active && direction === "asc" ? "descending" : "ascending";
+    const active = button.dataset.sortKey === deskState.sort?.key;
+    const direction = active ? deskState.sort?.direction : null;
+    const nextAction = !active
+      ? "sort ascending"
+      : direction === "asc"
+        ? "sort descending"
+        : "return to price order";
     const label = button.dataset.sortLabel || button.textContent.trim();
     button.classList.toggle("is-active", active);
     button.querySelector(".sort-indicator").textContent = active
@@ -743,7 +715,7 @@ function updateSortHeaders() {
     button.parentElement.setAttribute("aria-sort", active
       ? direction === "asc" ? "ascending" : "descending"
       : "none");
-    button.setAttribute("aria-label", `${label}. ${active ? `Sorted ${direction === "asc" ? "ascending" : "descending"}. ` : ""}Activate to sort ${nextDirection}.`);
+    button.setAttribute("aria-label", `${label}. ${active ? `Sorted ${direction === "asc" ? "ascending" : "descending"}. ` : ""}Activate to ${nextAction}.`);
   });
 }
 
@@ -751,17 +723,21 @@ function sortViewRows(rows) {
   const rankedRows = [...rows]
     .sort(compareAllInUsdRows)
     .map((row, index) => ({ ...row, defaultRank: index + 1 }));
+  if (!deskState.sort) return rankedRows;
   return rankedRows.sort((left, right) => compareRowsByActiveSort(left, right));
 }
 
 function compareAllInUsdRows(left, right) {
-  return compareNumbers(left.totalUsd, right.totalUsd)
+  return comparePoaRows(left, right)
+    || compareNumbers(left.totalUsd, right.totalUsd)
     || compareText(left.routeLane, right.routeLane)
-    || compareText(sourceSortValue(left), sourceSortValue(right))
+    || compareText(serviceSortValue(left), serviceSortValue(right))
     || compareText(left.id, right.id);
 }
 
 function compareRowsByActiveSort(left, right) {
+  const poaOrder = comparePoaRows(left, right);
+  if (poaOrder) return poaOrder;
   const { key, direction } = deskState.sort;
   const leftValue = rowSortValue(left, key);
   const rightValue = rowSortValue(right, key);
@@ -780,11 +756,17 @@ function compareRowsByActiveSort(left, right) {
   return compareNumbers(left.defaultRank, right.defaultRank);
 }
 
+function comparePoaRows(left, right) {
+  if (Boolean(left.poa) === Boolean(right.poa)) return 0;
+  return left.poa ? 1 : -1;
+}
+
 function rowSortValue(row, key) {
   if (key === "type") return row.type;
   if (key === "rank") return row.defaultRank;
   if (key === "routing") return [row.routeLane, row.routing].filter(Boolean).join(" ");
-  if (key === "source") return sourceSortValue(row);
+  if (key === "carrier") return row.carrier;
+  if (key === "service") return serviceSortValue(row);
   if (key === "transit") return transitHours(row.transit);
   if (key === "inlandUsd") return hasPricedInland(row) ? row.inlandUsd : null;
   if (key === "originUsd") return row.originUsd;
@@ -795,9 +777,9 @@ function rowSortValue(row, key) {
   return row.defaultRank;
 }
 
-function sourceSortValue(row) {
-  return (row.sources || [])
-    .map((source) => [source.tag, source.file].filter(Boolean).join(" "))
+function serviceSortValue(row) {
+  return (row.services || [])
+    .map((serviceItem) => [serviceItem.label, serviceItem.file].filter(Boolean).join(" "))
     .join(" ");
 }
 
@@ -839,8 +821,19 @@ function groupTotal(groups, key) {
 
 function formatRouting(rate) {
   const mode = normalized(rate.service_mode);
-  if (isDoorServiceMode(mode)) return "Door → quay";
-  return "CY/CY";
+  if (isDoorServiceMode(mode)) return "Door to quay";
+  return "Quay to quay";
+}
+
+function carrierLabel(rate) {
+  const explicit = firstPresent(rate.carrier_name, rate.provider_name);
+  if (explicit) return explicit;
+  const combined = String(rate.carrier_label || "");
+  return combined.split(/[·—]/)[0].trim() || "Carrier";
+}
+
+function serviceLabel(rate) {
+  return isDoorRate(rate) ? "Door-to-quay" : "Quay-to-quay";
 }
 
 function laneDetail(rate) {
@@ -1046,7 +1039,6 @@ function showAllQuotes() {
   elements.originSelect.value = "";
   elements.destinationSelect.value = "";
   elements.equipmentSelect.value = "";
-  elements.routingModeSelect.value = "all";
   elements.materialSelect.value = "All materials";
   elements.showExpiredToggle.checked = true;
   resetAndRender();
@@ -1061,12 +1053,7 @@ function isAllQuotesView() {
 }
 
 function allQuotesTitle() {
-  return {
-    all: "All approved quotes",
-    port: "All port drop-off quotes",
-    door: "All carrier door quotes",
-    haulage: "All merchant-haulage quotes",
-  }[elements.routingModeSelect.value || "all"] || "All approved quotes";
+  return "All approved quotes";
 }
 
 function countHiddenExpiredMatches() {
