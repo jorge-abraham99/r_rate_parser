@@ -23,9 +23,13 @@ For a concise architecture and maintenance guide, see [CONTEXT.md](CONTEXT.md).
 
 ## Supabase migration status
 
-Stage 0 of the auth and rate-database migration is captured in `supabase/`. The hosted `carrier-quotes` project already has eight RLS-protected tables and two applied migrations; their authoritative SQL is now versioned locally. The running application still uses filesystem CSV/JSON storage and has no authentication, so this baseline does not change current runtime behavior.
+Stage 0 of the auth and rate-database migration is captured in `supabase/`. The hosted `carrier-quotes` project already has eight RLS-protected tables and two applied migrations; their authoritative SQL is now versioned locally. The running application still uses filesystem CSV/JSON storage.
 
 See [supabase/README.md](supabase/README.md) for the project reference, applied migration versions, security baseline, credential handling, and the required future `application_id` reconciliation.
+
+Stage 1 adds server-side Supabase JWT validation and `GET /api/me`. It uses the project's public asymmetric JWKS and validates the signature, issuer, `authenticated` audience, expiry, UUID subject, and role. It does not use the JWT secret or a service-role key.
+
+`/api/me` is the only protected route in Stage 1. Existing import, approval, search, and Rate Desk routes stay public until the Stage 2 login cutover. Set `SUPABASE_URL` to use `/api/me`; keep `AUTH_REQUIRED=false` during this stage.
 
 ## Canonical Output
 
@@ -225,7 +229,7 @@ Connected UI entrypoint:
 ## Current Operational Boundaries
 
 - Storage is local CSV/JSON under `data/`; production deployment therefore requires a persistent volume.
-- The API is currently intended for a trusted internal environment. It has no authentication and uses permissive CORS.
+- The API is currently intended for a trusted internal environment. `/api/me` checks Supabase user tokens, but business routes do not require login yet and CORS is still permissive.
 - Rate Desk currency comparison uses static demonstration FX rates from `rate_ingest/services.py`, not a live FX feed.
 - Template recognition is heuristic and requires a score of at least `0.55`; unknown formats fail explicitly.
 - Approval is the publication boundary. When an approved import has a `carrier_key`, approving a newer import with the same key archives the previous one and removes its published warehouse rows.

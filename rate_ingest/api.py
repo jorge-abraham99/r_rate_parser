@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from rate_ingest.auth import AuthenticatedUser, require_authenticated_user
 from rate_ingest.config import Settings
 from rate_ingest.services import (
     approve_import_by_id,
@@ -58,6 +60,17 @@ def root() -> RedirectResponse:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/me")
+def api_me(
+    user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)],
+) -> dict:
+    return {
+        "user_id": str(user.user_id),
+        "email": user.email,
+        "organizations": [],
+    }
 
 
 @app.get("/api/imports")

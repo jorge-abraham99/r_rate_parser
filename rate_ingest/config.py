@@ -6,6 +6,23 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _optional_env(name: str) -> str | None:
+    value = os.getenv(name, "").strip()
+    return value or None
+
+
+def _boolean_env(name: str, *, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be true or false")
+
+
 @dataclass(frozen=True)
 class Settings:
     root_dir: Path
@@ -15,6 +32,10 @@ class Settings:
     templates_dir: Path
     runs_dir: Path
     warehouse_dir: Path
+    supabase_url: str | None = None
+    supabase_publishable_key: str | None = None
+    supabase_db_url: str | None = None
+    auth_required: bool = False
 
     @classmethod
     def load(cls, cwd: Path | None = None) -> "Settings":
@@ -28,6 +49,10 @@ class Settings:
             templates_dir=data_dir / "templates",
             runs_dir=data_dir / "runs",
             warehouse_dir=data_dir / "warehouse",
+            supabase_url=_optional_env("SUPABASE_URL"),
+            supabase_publishable_key=_optional_env("SUPABASE_PUBLISHABLE_KEY"),
+            supabase_db_url=_optional_env("SUPABASE_DB_URL"),
+            auth_required=_boolean_env("AUTH_REQUIRED", default=False),
         )
 
     def ensure(self) -> None:

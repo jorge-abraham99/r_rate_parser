@@ -60,6 +60,14 @@ The running application exposes string IDs such as `import_...`, `card_...`, and
 
 Use organization-scoped uniqueness where appropriate. Database foreign keys remain UUID-based; repository adapters translate between UUID primary keys and application-facing string IDs. This must be an additive migration after the current model and relationship mapping is verified, not a broad rewrite of API IDs.
 
+## Stage 1 authentication status
+
+The FastAPI backend can validate Supabase user access tokens through the project's public ES256 JWKS. `GET /api/me` is protected and returns the verified user UUID and email. Organization membership lookup is deferred until a database repository is available, so the Stage 1 `organizations` list is empty.
+
+The verifier checks the signature, exact issuer, `authenticated` audience, expiry, UUID subject, and authenticated role. It does not use the JWT signing secret or a service-role key. JWKS data is cached for no more than 10 minutes.
+
+Stage 1 does not enforce login on import, approval, search, or Rate Desk routes. `AUTH_REQUIRED` stays `false`. Stage 2 will add the login UI, membership checks, route protection, and restrictive CORS.
+
 ## Credentials
 
 Copy `.env.example` to `.env` for local work. `.env` is ignored by Git.

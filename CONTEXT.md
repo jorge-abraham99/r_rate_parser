@@ -51,6 +51,7 @@ The application is currently a single Python web process with local filesystem p
 ### Backend
 
 - `rate_ingest/api.py`: FastAPI routes, upload handling, health check, CORS, and static UI mount.
+- `rate_ingest/auth.py`: mockable Supabase bearer-token validation through the project's public asymmetric JWKS.
 - `rate_ingest/services.py`: central orchestration for imports, review detail, approval/rejection, archive/delete, search, Rate Desk shaping, charge grouping, and static FX conversion.
 - `rate_ingest/models.py`: Pydantic models for source documents, imports, cards, offers, charge lines, notes, validation, templates, and canonical rates.
 - `rate_ingest/config.py`: resolves the data root and creates/seeds required directories.
@@ -215,7 +216,11 @@ Stage 0 of `SUPABASE_AUTH_AND_RATE_DB_MIGRATION_PLAN.md` has captured, but not a
 
 The remote migration ledger already contains `20260807222346_initial_rate_library_schema` and `20260807222404_add_missing_fk_indexes`. The local SQL files match the ledger's stored statements by normalized MD5. They must not be replayed against the existing project.
 
-Supabase is not yet in the runtime path: imports, approvals, searches, and authentication still use the existing filesystem/API behavior. The first future additive schema change must add organization-scoped `application_id` text identifiers to `source_documents`, `rate_imports`, `rate_cards`, `rate_offers`, `rate_charge_lines`, and `rate_notes`. UUIDs remain internal database keys while current string IDs remain authoritative in API payloads and artifacts.
+Supabase rate persistence is not yet in the runtime path: imports, approvals, and searches still use the existing filesystem behavior. The first future additive schema change must add organization-scoped `application_id` text identifiers to `source_documents`, `rate_imports`, `rate_cards`, `rate_offers`, `rate_charge_lines`, and `rate_notes`. UUIDs remain internal database keys while current string IDs remain authoritative in API payloads and artifacts.
+
+Stage 1 adds one authentication diagnostic path without changing the business-route trust boundary. `GET /api/me` reads an `Authorization: Bearer <token>` header and validates the Supabase ES256 token against the public JWKS. Validation checks the signature, exact project issuer, `authenticated` audience, expiry, UUID subject, and authenticated role. It does not use a JWT secret, database password, or service-role key. The response contains the user ID and email; `organizations` remains empty until the database repository can read memberships.
+
+`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_DB_URL`, and `AUTH_REQUIRED` are available through `Settings`. `AUTH_REQUIRED` defaults to `false` and is not used to protect existing routes in Stage 1. The publishable key is public configuration. The database URL is server-only.
 
 ## API Surface
 
@@ -223,6 +228,7 @@ Supabase is not yet in the runtime path: imports, approvals, searches, and authe
 | --- | --- | --- |
 | `GET` | `/` | Redirect to `/ui/` |
 | `GET` | `/api/health` | Railway/process health check |
+| `GET` | `/api/me` | Validate a Supabase bearer token and return the current user diagnostic record |
 | `GET` | `/api/imports?limit=` | Import/source list for the Import UI |
 | `POST` | `/api/imports` | Multipart upload and synchronous parse |
 | `GET` | `/api/imports/{id}` | Review detail, previews, validation, charge summary, and tier tables |
@@ -232,7 +238,7 @@ Supabase is not yet in the runtime path: imports, approvals, searches, and authe
 | `GET` | `/api/search` | Filter approved offers by provider, carrier, collection, POL, POD, equipment, and date |
 | `GET` | `/api/rate-desk?limit=` | Quote rows, filters, and standalone haulage lookup; limit is capped at 5,000 |
 
-The API has no authentication. CORS currently allows every origin, method, and header.
+Only `/api/me` requires authentication in Stage 1. Import, approval, search, and Rate Desk routes remain public until Stage 2. CORS currently allows every origin, method, and header.
 
 ## Rate Desk Semantics
 
@@ -272,7 +278,7 @@ The hidden `inspect` command creates diagnostic inspection artifacts. CLI search
 
 ## Testing
 
-The suite currently contains 15 end-to-end tests using real carrier samples. It covers template seeding/loading, inspect/import/review artifacts, approval/archive/deletion, canonical export, charge analysis, service modes, standalone haulage separation, MSC zone joins, Hapag conditional charges, and COSCO PDF extraction.
+The suite contains 15 end-to-end parser tests that use real carrier samples and 14 Stage 1 auth/configuration test cases. It covers template seeding/loading, inspect/import/review artifacts, approval/archive/deletion, canonical export, charge analysis, service modes, standalone haulage separation, MSC zone joins, Hapag conditional charges, COSCO PDF extraction, JWT claim checks, and `/api/me` behavior.
 
 Run:
 
@@ -299,7 +305,7 @@ PyMuPDF is listed in both dependency manifests and is imported lazily by PDF-spe
 
 - Runtime storage is filesystem CSV/JSON; the captured Supabase schema is not connected yet.
 - The filesystem runtime has no transaction boundaries, multi-process locks, or concurrent-writer protection. Database migrations now exist only as a captured baseline.
-- No authentication, authorization, tenant boundary, or restrictive CORS policy.
+- Supabase token validation exists only for `/api/me`; business routes still have no enforced authentication, authorization, tenant boundary, or restrictive CORS policy.
 - Parsing and large response construction happen synchronously in the API process.
 - No generic unknown-document parser or AI-assisted template drafting.
 - PDF support is limited to the known text-based COSCO layout; there is no OCR/scanned-PDF path.
