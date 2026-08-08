@@ -15,6 +15,7 @@ const importState = {
   preview: null,
   menuId: null,
   busy: false,
+  canMutate: false,
   toastTimer: null,
 };
 
@@ -59,20 +60,21 @@ const elements = {
 };
 
 elements.sourceFile.addEventListener("change", () => {
+  if (!importState.canMutate) return;
   const file = elements.sourceFile.files?.[0];
   if (file) receiveFile(file);
   elements.sourceFile.value = "";
 });
 elements.dropZone.addEventListener("dragover", (event) => {
   event.preventDefault();
-  if (!importState.busy) elements.dropZone.classList.add("drag-active");
+  if (importState.canMutate && !importState.busy) elements.dropZone.classList.add("drag-active");
 });
 elements.dropZone.addEventListener("dragleave", () => elements.dropZone.classList.remove("drag-active"));
 elements.dropZone.addEventListener("drop", (event) => {
   event.preventDefault();
   elements.dropZone.classList.remove("drag-active");
   const file = event.dataTransfer?.files?.[0];
-  if (file && !importState.busy) receiveFile(file);
+  if (file && importState.canMutate && !importState.busy) receiveFile(file);
 });
 elements.sourceSelect.addEventListener("change", () => {
   if (!importState.preview) return;
@@ -109,6 +111,20 @@ document.addEventListener("keydown", (event) => {
 bootImport();
 
 async function bootImport() {
+  try {
+    const session = await window.RATE_DESK_AUTH.requireSession();
+    if (!session) return;
+    const profileResponse = await window.RATE_DESK_AUTH.apiFetch("/api/me");
+    if (!profileResponse.ok) throw new Error("Your access details could not be loaded.");
+    const profile = await profileResponse.json();
+    importState.canMutate = ["operator", "admin"].includes(
+      profile.organizations?.[0]?.role,
+    );
+    elements.dropZone.hidden = !importState.canMutate;
+  } catch (error) {
+    showAlert(error.message);
+    return;
+  }
   elements.demoBadge.hidden = !IMPORT_DEMO_MODE;
   renderPeriod();
   if (IMPORT_DEMO_MODE) {
@@ -122,8 +138,8 @@ async function bootImport() {
 async function refreshConnectedWorkspace() {
   try {
     const [importsResponse, deskResponse] = await Promise.all([
-      fetch("/api/imports?limit=500"),
-      fetch("/api/rate-desk?limit=5000"),
+      window.RATE_DESK_AUTH.apiFetch("/api/imports?limit=500"),
+      window.RATE_DESK_AUTH.apiFetch("/api/rate-desk?limit=5000"),
     ]);
     if (!importsResponse.ok || !deskResponse.ok) throw new Error("Could not load the import workspace.");
     importState.imports = (await importsResponse.json()).filter((item) => !isSpotImport(item));
@@ -214,6 +230,7 @@ function renderSourceRow(source, file, archived) {
   const status = archived ? "archived" : file?.status || "expected";
   const validity = file ? formatValidity(file.validFrom, file.validTo, status === "overdue") : "—";
   const menuOpen = importState.menuId === rowId;
+  const hasActions = file && (!archived || importState.canMutate);
   return `
     <div class="sources-grid source-row${archived ? " archived-row" : ""}">
       <span class="source-name">${archived ? "↳ previous" : escapeHtml(source.name)}</span>
@@ -224,12 +241,12 @@ function renderSourceRow(source, file, archived) {
       <span class="number mono">${file ? escapeHtml(String(file.lanes ?? "—")) : "—"}</span>
       <span><span class="source-status ${escapeAttr(status)}">${escapeHtml(statusLabel(status))}</span></span>
       <span class="row-menu">
-        ${file ? `
+        ${hasActions ? `
           <button class="menu-trigger" type="button" data-menu-id="${escapeAttr(rowId)}" aria-label="Actions for ${escapeAttr(file.file)}" aria-expanded="${menuOpen}">⋯</button>
           ${menuOpen ? `
             <span class="menu-popover">
               ${archived ? "" : `<button type="button" data-action="summary" data-source-key="${escapeAttr(source.key)}" data-file-id="${escapeAttr(file.id)}">View parse summary</button>`}
-              <button class="danger" type="button" data-action="delete" data-source-key="${escapeAttr(source.key)}" data-file-id="${escapeAttr(file.id)}">Delete upload</button>
+              ${importState.canMutate ? `<button class="danger" type="button" data-action="delete" data-source-key="${escapeAttr(source.key)}" data-file-id="${escapeAttr(file.id)}">Delete upload</button>` : ""}
             </span>` : ""}` : ""}
       </span>
     </div>
@@ -237,6 +254,7 @@ function renderSourceRow(source, file, archived) {
 }
 
 async function receiveFile(file) {
+  if (!importState.canMutate) return;
   hideAlert();
   if (IMPORT_DEMO_MODE) {
     openReview({ fileName: file.name, source: "", contractType: "", newSourceName: "", detail: null, importId: null });
@@ -248,10 +266,10 @@ async function receiveFile(file) {
     const form = new FormData();
     form.append("file", file);
     form.append("uploaded_by", "Rate Desk operator");
-    const response = await fetch("/api/imports", { method: "POST", body: form });
+    const response = await window.RATE_DESK_AUTH.apiFetch("/api/imports", { method: "POST", body: form });
     if (!response.ok) throw new Error((await safeJson(response)).detail || "The parser could not import this file.");
     const imported = await response.json();
-    const detailResponse = await fetch(`/api/imports/${encodeURIComponent(imported.import_id)}`);
+    const detailResponse = await window.RATE_DESK_AUTH.apiFetch(`/api/imports/${encodeURIComponent(imported.import_id)}`);
     if (!detailResponse.ok) throw new Error("The sheet parsed, but its preview could not be loaded.");
     const detail = await detailResponse.json();
     openReview({
@@ -299,7 +317,7 @@ async function openSummary(sourceKey, fileId) {
 
   setBusy(true);
   try {
-    const response = await fetch(`/api/imports/${encodeURIComponent(fileId)}`);
+    const response = await window.RATE_DESK_AUTH.apiFetch(`/api/imports/${encodeURIComponent(fileId)}`);
     if (!response.ok) throw new Error("The parse summary could not be loaded.");
     const detail = await response.json();
     importState.preview = {
@@ -379,7 +397,7 @@ function renderPreview() {
     : "First sheet from this source — nothing to compare against yet.";
 
   elements.publishButton.hidden = preview.readOnly;
-  elements.publishButton.disabled = preview.readOnly || !ready || importState.busy;
+  elements.publishButton.disabled = preview.readOnly || !importState.canMutate || !ready || importState.busy;
   elements.cancelPreviewButton.textContent = preview.readOnly ? "Close" : "Cancel";
 }
 
@@ -534,7 +552,7 @@ async function publishPreview() {
   const payload = sourcePayload(preview, sourceKey);
   setBusy(true);
   try {
-    const response = await fetch(`/api/imports/${encodeURIComponent(preview.importId)}/approve`, {
+    const response = await window.RATE_DESK_AUTH.apiFetch(`/api/imports/${encodeURIComponent(preview.importId)}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -649,7 +667,7 @@ async function cancelPreview() {
   const importId = preview.importId;
   closePreviewImmediately();
   try {
-    await fetch(`/api/imports/${encodeURIComponent(importId)}`, { method: "DELETE" });
+    await window.RATE_DESK_AUTH.apiFetch(`/api/imports/${encodeURIComponent(importId)}`, { method: "DELETE" });
   } finally {
     await refreshConnectedWorkspace();
   }
@@ -665,6 +683,7 @@ function closePreviewImmediately() {
 }
 
 async function deleteFile(sourceKey, fileId) {
+  if (!importState.canMutate) return;
   const source = importState.sources.find((item) => item.key === sourceKey);
   if (!source || !window.confirm("Delete this upload?")) return;
   importState.menuId = null;
@@ -678,7 +697,7 @@ async function deleteFile(sourceKey, fileId) {
   }
 
   try {
-    const response = await fetch(`/api/imports/${encodeURIComponent(fileId)}`, { method: "DELETE" });
+    const response = await window.RATE_DESK_AUTH.apiFetch(`/api/imports/${encodeURIComponent(fileId)}`, { method: "DELETE" });
     if (!response.ok) throw new Error((await safeJson(response)).detail || "The upload could not be deleted.");
     showToast("Upload deleted");
     await refreshConnectedWorkspace();

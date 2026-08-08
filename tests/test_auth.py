@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+import httpx
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -15,13 +16,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import rate_ingest.auth as auth_module
 from rate_ingest.api import app
-from rate_ingest.auth import AuthenticationError, SupabaseTokenVerifier
+from rate_ingest.auth import (
+    AuthenticationError,
+    OrganizationMembership,
+    RequestContext,
+    SupabaseMembershipResolver,
+    SupabaseTokenVerifier,
+    require_operator,
+)
 from rate_ingest.config import Settings
 
 
 SUPABASE_URL = "https://test-project.supabase.co"
 ISSUER = f"{SUPABASE_URL}/auth/v1"
 USER_ID = UUID("123e4567-e89b-12d3-a456-426614174000")
+ORGANIZATION_ID = UUID("123e4567-e89b-12d3-a456-426614174001")
 
 
 class FixedJWKClient:
@@ -30,6 +39,14 @@ class FixedJWKClient:
 
     def get_signing_key_from_jwt(self, token: str) -> jwt.PyJWK:
         return self.signing_key
+
+
+class FixedMembershipResolver:
+    def __init__(self, memberships: tuple[OrganizationMembership, ...]) -> None:
+        self.memberships = memberships
+
+    def resolve(self, _user):
+        return self.memberships
 
 
 @pytest.fixture
@@ -67,27 +84,55 @@ def token_tools():
     return verifier, make_token
 
 
+def membership(role: str = "operator") -> OrganizationMembership:
+    return OrganizationMembership(
+        organization_id=ORGANIZATION_ID,
+        organization_name="Reudan",
+        organization_slug="reudan",
+        role=role,
+    )
+
+
+def use_auth(
+    monkeypatch,
+    verifier: SupabaseTokenVerifier,
+    memberships: tuple[OrganizationMembership, ...],
+) -> None:
+    monkeypatch.setattr(auth_module, "get_token_verifier", lambda: verifier)
+    monkeypatch.setattr(
+        auth_module,
+        "get_membership_resolver",
+        lambda: FixedMembershipResolver(memberships),
+    )
+
+
+def bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_settings_loads_supabase_values_and_auth_flag(tmp_path, monkeypatch):
     monkeypatch.setenv("SUPABASE_URL", SUPABASE_URL)
     monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "test-publishable-key")
     monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://server-only")
-    monkeypatch.setenv("AUTH_REQUIRED", "false")
+    monkeypatch.setenv("AUTH_REQUIRED", "true")
 
     settings = Settings.load(cwd=tmp_path)
 
     assert settings.supabase_url == SUPABASE_URL
     assert settings.supabase_publishable_key == "test-publishable-key"
     assert settings.supabase_db_url == "postgresql://server-only"
-    assert settings.auth_required is False
+    assert settings.auth_required is True
 
 
 def test_verifier_accepts_valid_token(token_tools):
     verifier, make_token = token_tools
+    token = make_token()
 
-    user = verifier.verify(make_token())
+    user = verifier.verify(token)
 
     assert user.user_id == USER_ID
     assert user.email == "operator@example.com"
+    assert user.access_token == token
     assert user.claims["role"] == "authenticated"
 
 
@@ -121,72 +166,211 @@ def test_verifier_rejects_invalid_token(token_tools):
         verifier.verify("not-a-jwt")
 
 
-def test_api_me_requires_authorization_header():
-    response = TestClient(app).get("/api/me")
+def test_membership_resolver_uses_user_token_and_rls(token_tools):
+    verifier, make_token = token_tools
+    token = make_token()
+    user = verifier.verify(token)
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.headers["authorization"] == f"Bearer {token}"
+        assert request.headers["apikey"] == "test-publishable-key"
+        assert request.url.params["user_id"] == f"eq.{USER_ID}"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "organization_id": str(ORGANIZATION_ID),
+                    "role": "operator",
+                    "created_at": "2026-08-08T00:00:00Z",
+                    "organizations": {
+                        "id": str(ORGANIZATION_ID),
+                        "name": "Reudan",
+                        "slug": "reudan",
+                    },
+                }
+            ],
+        )
+
+    resolver = SupabaseMembershipResolver(
+        SUPABASE_URL,
+        "test-publishable-key",
+        http_client=httpx.Client(transport=httpx.MockTransport(respond)),
+    )
+
+    assert resolver.resolve(user) == (membership(),)
+
+
+def test_public_endpoints_do_not_require_auth(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", SUPABASE_URL)
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "test-publishable-key")
+    client = TestClient(app)
+
+    assert client.get("/api/health").status_code == 200
+    config_response = client.get("/api/public-config")
+    assert config_response.status_code == 200
+    assert config_response.json() == {
+        "supabase_url": SUPABASE_URL,
+        "supabase_publishable_key": "test-publishable-key",
+        "auth_required": True,
+    }
+    assert "SUPABASE_DB_URL" not in config_response.text
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "kwargs"),
+    [
+        ("get", "/api/me", {}),
+        ("get", "/api/imports", {}),
+        ("post", "/api/imports", {"files": {"file": ("rates.csv", b"x")}}),
+        ("get", "/api/imports/missing", {}),
+        ("post", "/api/imports/missing/approve", {"json": {"approved_by": "test"}}),
+        ("post", "/api/imports/missing/reject", {"json": {"reason": "test"}}),
+        ("delete", "/api/imports/missing", {}),
+        ("get", "/api/search", {}),
+        ("get", "/api/rate-desk", {}),
+    ],
+)
+def test_every_sensitive_api_requires_a_token(method, path, kwargs):
+    response = getattr(TestClient(app), method)(path, **kwargs)
 
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
 
 
-@pytest.mark.parametrize(
-    "authorization",
-    ["Basic abc", "Bearer", "Bearer abc extra"],
-)
-def test_api_me_rejects_malformed_authorization_header(authorization):
+@pytest.mark.parametrize("authorization", ["Basic abc", "Bearer", "Bearer abc extra"])
+def test_api_rejects_malformed_authorization_header(authorization):
     response = TestClient(app).get(
-        "/api/me",
+        "/api/rate-desk",
         headers={"Authorization": authorization},
     )
 
     assert response.status_code == 401
 
 
-def test_api_me_rejects_invalid_and_expired_jwts(token_tools, monkeypatch):
+def test_api_rejects_invalid_and_expired_jwts(token_tools, monkeypatch):
     verifier, make_token = token_tools
-    monkeypatch.setattr(auth_module, "get_token_verifier", lambda: verifier)
+    use_auth(monkeypatch, verifier, (membership(),))
     client = TestClient(app)
 
     invalid_response = client.get(
-        "/api/me",
+        "/api/rate-desk",
         headers={"Authorization": "Bearer not-a-jwt"},
     )
     expired_response = client.get(
-        "/api/me",
-        headers={
-            "Authorization": (
-                "Bearer "
-                + make_token(
-                    exp=datetime.now(timezone.utc) - timedelta(minutes=1)
-                )
-            )
-        },
+        "/api/rate-desk",
+        headers=bearer(
+            make_token(exp=datetime.now(timezone.utc) - timedelta(minutes=1))
+        ),
     )
 
     assert invalid_response.status_code == 401
     assert expired_response.status_code == 401
 
 
-def test_api_me_returns_valid_user(token_tools, monkeypatch):
+def test_valid_user_without_membership_is_forbidden(token_tools, monkeypatch):
     verifier, make_token = token_tools
-    monkeypatch.setattr(auth_module, "get_token_verifier", lambda: verifier)
+    use_auth(monkeypatch, verifier, ())
 
     response = TestClient(app).get(
-        "/api/me",
-        headers={"Authorization": f"Bearer {make_token()}"},
+        "/api/rate-desk",
+        headers=bearer(make_token()),
     )
+
+    assert response.status_code == 403
+
+
+def test_api_me_returns_membership_context(token_tools, monkeypatch):
+    verifier, make_token = token_tools
+    use_auth(monkeypatch, verifier, (membership(),))
+
+    response = TestClient(app).get("/api/me", headers=bearer(make_token()))
 
     assert response.status_code == 200
     assert response.json() == {
         "user_id": str(USER_ID),
         "email": "operator@example.com",
-        "organizations": [],
+        "organizations": [
+            {
+                "id": str(ORGANIZATION_ID),
+                "name": "Reudan",
+                "slug": "reudan",
+                "role": "operator",
+            }
+        ],
     }
 
 
-def test_stage_one_keeps_existing_routes_public(tmp_path, monkeypatch):
+@pytest.mark.parametrize("role", ["viewer", "operator", "admin"])
+def test_all_membership_roles_can_read(role, token_tools, monkeypatch, tmp_path):
     monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
-    monkeypatch.setenv("AUTH_REQUIRED", "false")
+    verifier, make_token = token_tools
+    use_auth(monkeypatch, verifier, (membership(role),))
     client = TestClient(app)
 
-    assert client.get("/api/health").status_code == 200
-    assert client.get("/api/imports").status_code == 200
+    assert client.get("/api/imports", headers=bearer(make_token())).status_code == 200
+    assert client.get("/api/search", headers=bearer(make_token())).status_code == 200
+    assert client.get("/api/rate-desk", headers=bearer(make_token())).status_code == 200
+
+
+def test_viewer_cannot_mutate(token_tools, monkeypatch):
+    verifier, make_token = token_tools
+    use_auth(monkeypatch, verifier, (membership("viewer"),))
+    headers = bearer(make_token())
+    client = TestClient(app)
+
+    assert client.post(
+        "/api/imports",
+        headers=headers,
+        files={"file": ("rates.csv", b"x")},
+    ).status_code == 403
+    assert client.post(
+        "/api/imports/missing/approve",
+        headers=headers,
+        json={"approved_by": "test"},
+    ).status_code == 403
+    assert client.post(
+        "/api/imports/missing/reject",
+        headers=headers,
+        json={"reason": "test"},
+    ).status_code == 403
+    assert client.delete("/api/imports/missing", headers=headers).status_code == 403
+
+
+@pytest.mark.parametrize("role", ["operator", "admin"])
+def test_operator_and_admin_pass_mutation_gate(role, token_tools, monkeypatch):
+    verifier, make_token = token_tools
+    use_auth(monkeypatch, verifier, (membership(role),))
+    context = RequestContext(
+        user=verifier.verify(make_token()),
+        memberships=(membership(role),),
+    )
+
+    assert require_operator(context) is context
+
+
+def test_same_origin_app_has_no_wildcard_cors():
+    response = TestClient(app).get(
+        "/api/health",
+        headers={"Origin": "https://untrusted.example"},
+    )
+
+    assert response.status_code == 200
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
+    login_html = Path("UI/login.html").read_text(encoding="utf-8")
+    auth_js = Path("UI/auth.js").read_text(encoding="utf-8")
+    app_js = Path("UI/app.js").read_text(encoding="utf-8")
+    rate_desk_js = Path("UI/rate-desk.js").read_text(encoding="utf-8")
+
+    assert "@supabase/supabase-js@2.112.2" in login_html
+    assert "Create Account" not in login_html
+    assert "signInWithPassword" in auth_js
+    assert "getSession" in auth_js
+    assert "signOut" in auth_js
+    assert 'headers.set("Authorization", `Bearer ${session.access_token}`)' in auth_js
+    assert "fetch(" not in app_js
+    assert "fetch(" not in rate_desk_js
+    assert "RATE_DESK_AUTH.apiFetch" in app_js
+    assert "RATE_DESK_AUTH.apiFetch" in rate_desk_js

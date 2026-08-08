@@ -1,11 +1,18 @@
 # Reudan Rate Desk v4 frontend
 
-The operator frontend has two screens:
+The authenticated frontend has three screens:
 
-1. **Import** (`/ui/import.html`) — source tracking, upload review, publish, supersede/archive, and parse summaries.
-2. **Quote** (`/ui/`) — contract-rate filtering, ranked routing comparisons, inland-haulage/POA presentation, and charge breakdowns.
+1. **Login** (`/ui/login.html`) — invite-only Supabase email/password login.
+2. **Import** (`/ui/import.html`) — source tracking, upload review, publish, supersede/archive, and parse summaries.
+3. **Quote** (`/ui/`) — contract-rate filtering, ranked routing comparisons, inland-haulage/POA presentation, and charge breakdowns.
 
 The v4 UI is a vanilla HTML/CSS/JavaScript application served by the existing FastAPI static-file mount. It does not require a build step.
+
+## Authentication
+
+`auth.js` loads browser-safe values from `/api/public-config`, restores the Supabase session, and adds its access token to every rate API call. A `401` clears the local session and returns the user to login. A `403` shows that the signed-in user does not have the required membership or role.
+
+The browser library is pinned to `@supabase/supabase-js` `2.112.2` and protected by a SHA-384 integrity value. The login page has no sign-up action. `app.js` and `rate-desk.js` must use `RATE_DESK_AUTH.apiFetch`; do not add direct `fetch` calls for rate APIs.
 
 ## Demo mode
 
@@ -45,6 +52,8 @@ The historical Query API specification remains elsewhere in the repository, but 
 
 - `index.html`, `rate-desk.js` — Quote
 - `import.html`, `app.js` — Import
+- `login.html`, `login.js` — invite-only login
+- `auth.js` — session handling and shared authenticated API calls
 - `styles.css` — shared v4 design system
 - `config.js` — demo/connected mode switch
 - `demo-data.js` — isolated handoff fixtures

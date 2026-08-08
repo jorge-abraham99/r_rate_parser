@@ -175,6 +175,143 @@ label:focus-within {
   white-space: nowrap;
 }
 
+.auth-email {
+  max-width: 220px;
+  overflow: hidden;
+  color: #c6d6e9;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logout-button {
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 5px;
+  padding: 4px 9px;
+  background: transparent;
+  color: #eaf1fa;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.logout-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: linear-gradient(145deg, #0f3466 0%, #16273b 48%, #d7e2ef 48%);
+}
+
+.login-shell {
+  width: 100%;
+  max-width: 410px;
+}
+
+.login-card {
+  border: 1px solid rgba(15, 52, 102, 0.2);
+  border-radius: 10px;
+  padding: 30px;
+  background: #fff;
+  box-shadow: 0 18px 50px rgba(10, 25, 45, 0.3);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 26px;
+}
+
+.login-brand .brand-name {
+  color: var(--ink);
+}
+
+.login-brand .brand-name span {
+  color: var(--muted);
+}
+
+.login-card h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.login-intro,
+.login-note {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.login-intro {
+  margin: 8px 0 22px;
+}
+
+.login-note {
+  margin: 20px 0 0;
+  font-size: 11.5px;
+}
+
+.login-alert {
+  margin-bottom: 16px;
+  border: 1px solid #e5baba;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #fbeaea;
+  color: var(--danger);
+  font-size: 12.5px;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.login-form label {
+  margin-top: 6px;
+  color: var(--body);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.login-form input {
+  height: 42px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 0 11px;
+  background: #fff;
+}
+
+.login-form input:focus {
+  border-color: var(--bright-blue);
+}
+
+.login-form .primary-button {
+  width: 100%;
+  margin-top: 14px;
+  justify-content: center;
+}
+
+@media (max-width: 700px) {
+  .auth-email,
+  .refresh-text {
+    display: none;
+  }
+
+  .topbar {
+    gap: 8px;
+    padding-inline: 12px;
+  }
+
+  .app-nav {
+    margin-left: 0;
+  }
+}
+
 .quote-search-band {
   display: flex;
   align-items: flex-end;

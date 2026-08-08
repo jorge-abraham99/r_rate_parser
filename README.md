@@ -27,9 +27,9 @@ Stage 0 of the auth and rate-database migration is captured in `supabase/`. The 
 
 See [supabase/README.md](supabase/README.md) for the project reference, applied migration versions, security baseline, credential handling, and the required future `application_id` reconciliation.
 
-Stage 1 adds server-side Supabase JWT validation and `GET /api/me`. It uses the project's public asymmetric JWKS and validates the signature, issuer, `authenticated` audience, expiry, UUID subject, and role. It does not use the JWT secret or a service-role key.
+Stages 1 and 2 add invite-only Supabase authentication. The backend validates user tokens against the project's public asymmetric JWKS. It then reads `organization_members` through RLS with the same user token. It does not use the JWT secret or a service-role key.
 
-`/api/me` is the only protected route in Stage 1. Existing import, approval, search, and Rate Desk routes stay public until the Stage 2 login cutover. Set `SUPABASE_URL` to use `/api/me`; keep `AUTH_REQUIRED=false` during this stage.
+The browser restores Supabase sessions, adds the access token through one shared API helper, and sends logged-out users to `/ui/login.html`. Viewers can read imports and rates. Operators and admins can also upload, approve, reject, and delete. Health and public browser configuration stay public; all rate APIs require both a valid user and an organization membership. The runtime still uses CSV/JSON storage.
 
 ## Canonical Output
 
@@ -229,7 +229,7 @@ Connected UI entrypoint:
 ## Current Operational Boundaries
 
 - Storage is local CSV/JSON under `data/`; production deployment therefore requires a persistent volume.
-- The API is currently intended for a trusted internal environment. `/api/me` checks Supabase user tokens, but business routes do not require login yet and CORS is still permissive.
+- The API requires Supabase authentication and an organization membership for all rate data. Mutations also require the `operator` or `admin` role. The same-origin UI does not enable cross-origin API access.
 - Rate Desk currency comparison uses static demonstration FX rates from `rate_ingest/services.py`, not a live FX feed.
 - Template recognition is heuristic and requires a score of at least `0.55`; unknown formats fail explicitly.
 - Approval is the publication boundary. When an approved import has a `carrier_key`, approving a newer import with the same key archives the previous one and removes its published warehouse rows.
@@ -287,9 +287,9 @@ python -m rate_ingest review <import_id>
 Or through the local UI:
 
 ```bash
-uvicorn rate_ingest.api:app --reload
+uvicorn rate_ingest.api:app --reload --env-file .env
 ```
 
-Then upload the same file through the browser.
+Then sign in with an invited Supabase user and upload the same file through the browser. The user must have an `organization_members` row. Public Supabase sign-up must stay disabled.
 
 If a file is unseen, the intended next phase is AI-assisted template drafting on top of this deterministic flow, not replacing it.

@@ -3,13 +3,22 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from rate_ingest.api import app as api_app
+from rate_ingest.auth import (
+    AuthenticatedUser,
+    OrganizationMembership,
+    RequestContext,
+    require_operator,
+    require_organization_member,
+)
 from rate_ingest.cli import app
 from rate_ingest.config import Settings
 from rate_ingest.models import InspectResult, SourceDocument
@@ -18,6 +27,30 @@ from rate_ingest.template_matcher import load_templates, score_template
 
 runner = CliRunner()
 api_client = TestClient(api_app)
+
+
+@pytest.fixture(autouse=True)
+def authenticated_api_client():
+    context = RequestContext(
+        user=AuthenticatedUser(
+            user_id=UUID("123e4567-e89b-12d3-a456-426614174000"),
+            email="test@example.com",
+            access_token="test-token",
+            claims={},
+        ),
+        memberships=(
+            OrganizationMembership(
+                organization_id=UUID("123e4567-e89b-12d3-a456-426614174001"),
+                organization_name="Reudan",
+                organization_slug="reudan",
+                role="admin",
+            ),
+        ),
+    )
+    api_app.dependency_overrides[require_organization_member] = lambda: context
+    api_app.dependency_overrides[require_operator] = lambda: context
+    yield
+    api_app.dependency_overrides.clear()
 
 
 def seed_templates(tmp_path: Path) -> None:

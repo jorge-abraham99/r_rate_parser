@@ -5,6 +5,11 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
 
 def _optional_env(name: str) -> str | None:
     value = os.getenv(name, "").strip()
@@ -52,7 +57,7 @@ class Settings:
             supabase_url=_optional_env("SUPABASE_URL"),
             supabase_publishable_key=_optional_env("SUPABASE_PUBLISHABLE_KEY"),
             supabase_db_url=_optional_env("SUPABASE_DB_URL"),
-            auth_required=_boolean_env("AUTH_REQUIRED", default=False),
+            auth_required=_boolean_env("AUTH_REQUIRED", default=True),
         )
 
     def ensure(self) -> None:

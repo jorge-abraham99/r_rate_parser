@@ -60,19 +60,23 @@ The running application exposes string IDs such as `import_...`, `card_...`, and
 
 Use organization-scoped uniqueness where appropriate. Database foreign keys remain UUID-based; repository adapters translate between UUID primary keys and application-facing string IDs. This must be an additive migration after the current model and relationship mapping is verified, not a broad rewrite of API IDs.
 
-## Stage 1 authentication status
+## Stage 1 and Stage 2 authentication status
 
-The FastAPI backend can validate Supabase user access tokens through the project's public ES256 JWKS. `GET /api/me` is protected and returns the verified user UUID and email. Organization membership lookup is deferred until a database repository is available, so the Stage 1 `organizations` list is empty.
+The FastAPI backend validates Supabase user access tokens through the project's public ES256 JWKS. It then reads `organization_members` through the Data API with the same user token. Existing RLS limits the result to the signed-in user. `GET /api/me` returns the verified user and memberships.
 
 The verifier checks the signature, exact issuer, `authenticated` audience, expiry, UUID subject, and authenticated role. It does not use the JWT signing secret or a service-role key. JWKS data is cached for no more than 10 minutes.
 
-Stage 1 does not enforce login on import, approval, search, or Rate Desk routes. `AUTH_REQUIRED` stays `false`. Stage 2 will add the login UI, membership checks, route protection, and restrictive CORS.
+Stage 2 protects imports, search, and Rate Desk. Viewer, operator, and admin roles can read. Only operator and admin roles can mutate. Health, public browser configuration, and static files remain public. The same-origin application has no CORS middleware. `AUTH_REQUIRED` defaults to `true`.
+
+The static browser UI uses pinned `@supabase/supabase-js` `2.112.2` with a SHA-384 integrity value. It supports email/password login, session restoration, token refresh, local logout, and one shared authenticated API helper. It has no public sign-up action.
+
+Before deployment, confirm that email/password login is enabled, public sign-up is disabled, the Site URL and redirect URLs are correct, and each invited user has an `organization_members` row.
 
 ## Credentials
 
 Copy `.env.example` to `.env` for local work. `.env` is ignored by Git.
 
-- `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` are used by the future authenticated client flow.
+- `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` are used by the authenticated client and membership flow.
 - `SUPABASE_DB_URL` is server-only and must never be exposed to browser code.
 - `SUPABASE_ACCESS_TOKEN` is local migration tooling only and must never be committed.
 

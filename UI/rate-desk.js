@@ -80,6 +80,13 @@ elements.qtyInput.addEventListener("input", () => {
 bootRateDesk();
 
 async function bootRateDesk() {
+  try {
+    const session = await window.RATE_DESK_AUTH.requireSession();
+    if (!session) return;
+  } catch (error) {
+    showAlert(error.message);
+    return;
+  }
   elements.demoBadge.hidden = !RATE_DESK_DEMO_MODE;
   if (RATE_DESK_DEMO_MODE) {
     deskState.loaded = true;
@@ -90,7 +97,7 @@ async function bootRateDesk() {
   }
 
   try {
-    const response = await fetch("/api/rate-desk?limit=5000");
+    const response = await window.RATE_DESK_AUTH.apiFetch("/api/rate-desk?limit=5000");
     if (!response.ok) throw new Error("The approved-rate service did not respond.");
     const payload = await response.json();
     deskState.connectedRates = (Array.isArray(payload.rates) ? payload.rates : []).filter((rate) => !isSpotRate(rate));
@@ -241,7 +248,7 @@ async function refreshConnectedRates() {
   if (equipment) params.set("equipment_type", equipment);
 
   try {
-    const response = await fetch(`/api/search?${params.toString()}`);
+    const response = await window.RATE_DESK_AUTH.apiFetch(`/api/search?${params.toString()}`);
     if (!response.ok) throw new Error("The approved-rate service did not respond.");
     deskState.connectedRates = await response.json();
     renderDesk();
