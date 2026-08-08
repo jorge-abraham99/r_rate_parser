@@ -29,7 +29,9 @@ See [supabase/README.md](supabase/README.md) for the project reference, applied 
 
 Stages 1 and 2 add invite-only Supabase authentication. The backend validates user tokens against the project's public asymmetric JWKS. It then reads `organization_members` through RLS with the same user token. It does not use the JWT secret or a service-role key.
 
-The browser restores Supabase sessions, adds the access token through one shared API helper, and sends logged-out users to `/ui/login.html`. Viewers can read imports and rates. Operators and admins can also upload, approve, reject, and delete. Health and public browser configuration stay public; all rate APIs require both a valid user and an organization membership. The runtime still uses CSV/JSON storage.
+The browser restores Supabase sessions, adds the access token through one shared API helper, and sends logged-out users to `/ui/login.html`. Viewers can read imports and rates. Operators and admins can also upload, approve, reject, and delete. Health and public browser configuration stay public; all rate APIs require both a valid user and an organization membership.
+
+Stage 3 puts all rate persistence behind `RateRepository`. `CsvRateRepository` is the active implementation, so the runtime still uses the same CSV/JSON files. `RATE_STORAGE_BACKEND` defaults to `csv`. The `postgres` value is reserved for Stage 4 and fails clearly because the Postgres repository does not exist yet.
 
 ## Canonical Output
 
@@ -82,6 +84,14 @@ In practice this means a random unseen file will not magically work today.
 ```bash
 pip install -r requirements.txt
 ```
+
+The active storage setting is:
+
+```bash
+RATE_STORAGE_BACKEND=csv
+```
+
+Do not set it to `postgres` before Stage 4 is complete.
 
 ## CLI Workflow
 

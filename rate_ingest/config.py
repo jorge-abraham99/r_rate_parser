@@ -28,6 +28,13 @@ def _boolean_env(name: str, *, default: bool) -> bool:
     raise ValueError(f"{name} must be true or false")
 
 
+def _storage_backend_env() -> str:
+    value = os.getenv("RATE_STORAGE_BACKEND", "csv").strip().lower()
+    if value not in {"csv", "postgres"}:
+        raise ValueError("RATE_STORAGE_BACKEND must be csv or postgres")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     root_dir: Path
@@ -41,6 +48,7 @@ class Settings:
     supabase_publishable_key: str | None = None
     supabase_db_url: str | None = None
     auth_required: bool = False
+    rate_storage_backend: str = "csv"
 
     @classmethod
     def load(cls, cwd: Path | None = None) -> "Settings":
@@ -58,6 +66,7 @@ class Settings:
             supabase_publishable_key=_optional_env("SUPABASE_PUBLISHABLE_KEY"),
             supabase_db_url=_optional_env("SUPABASE_DB_URL"),
             auth_required=_boolean_env("AUTH_REQUIRED", default=True),
+            rate_storage_backend=_storage_backend_env(),
         )
 
     def ensure(self) -> None:

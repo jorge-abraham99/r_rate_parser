@@ -14,7 +14,7 @@ from rate_ingest.services import (
     import_source_file,
     reject_import_by_id,
 )
-from rate_ingest.source_registry import register_source
+from rate_ingest.repositories import get_rate_repository
 from rate_ingest.template_matcher import find_best_template
 from rate_ingest.utils import write_json
 
@@ -31,7 +31,7 @@ def settings() -> Settings:
 @app.command(hidden=True, help="Inspect a source file without creating a full import. This is for debugging.")
 def inspect(source_path: Path, uploaded_by: str | None = None) -> None:
     cfg = settings()
-    source = register_source(cfg, source_path, uploaded_by=uploaded_by)
+    source = get_rate_repository(cfg).register_source_document(source_path, uploaded_by=uploaded_by)
     inspected = inspect_source(source)
     _, scored = find_best_template(cfg, inspected)
     inspected.possible_templates = scored

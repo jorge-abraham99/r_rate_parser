@@ -25,11 +25,10 @@ from rate_ingest.parsers.offer_block import parse_workbook as parse_offer_block_
 from rate_ingest.parsers.site_to_site_rows import parse_workbook as parse_site_to_site_workbook
 from rate_ingest.parsers.tabular_lane import parse_workbook as parse_tabular_workbook
 from rate_ingest.review import generate_review_markdown
-from rate_ingest.source_registry import register_source
+from rate_ingest.repositories import RateRepository, get_rate_repository
 from rate_ingest.template_matcher import find_best_template, load_templates
 from rate_ingest.utils import read_csv_rows, read_json, write_csv_rows, write_json
 from rate_ingest.validate import validate_import
-from rate_ingest.warehouse import record_import, remove_import_rows, replace_import, warehouse_paths
 
 FX_RATES = {
     "USD": 1.0,
@@ -91,9 +90,12 @@ def import_source_file(
     template: str | None = None,
     uploaded_by: str | None = None,
     source_file_name: str | None = None,
+    *,
+    repository: RateRepository | None = None,
 ) -> dict[str, Any]:
     settings.ensure()
-    source = register_source(settings, source_path, uploaded_by=uploaded_by)
+    rate_repository = repository if repository is not None else get_rate_repository(settings)
+    source = rate_repository.register_source_document(source_path, uploaded_by=uploaded_by)
     if source_file_name:
         source.file_name = Path(source_file_name).name
     inspected, _ = classify_source(settings, source)
@@ -172,7 +174,7 @@ def import_source_file(
         notes,
         validation,
     )
-    record_import(settings, rate_import)
+    rate_repository.add_import(rate_import)
 
     return {
         "import_id": rate_import.id,
@@ -232,11 +234,15 @@ def get_import_detail(settings: Settings, import_id: str) -> dict[str, Any]:
     }
 
 
-def list_imports(settings: Settings, limit: int = 50) -> list[dict[str, Any]]:
-    rows = read_csv_rows(warehouse_paths(settings)["imports"])
+def list_imports(
+    settings: Settings,
+    limit: int = 50,
+    *,
+    repository: RateRepository | None = None,
+) -> list[dict[str, Any]]:
+    rate_repository = repository if repository is not None else get_rate_repository(settings)
     imports: list[dict[str, Any]] = []
-    for row in rows:
-        item = RateImport(**deserialize_row(row))
+    for item in rate_repository.list_import_records():
         run_dir = settings.runs_dir / item.id
         source_snapshot = read_json_if_exists(run_dir / "source_snapshot.json") or {}
         validation_report = read_json_if_exists(run_dir / "validation_report.json") or {"summary": {}}
@@ -279,7 +285,9 @@ def approve_import_by_id(
     carrier_key: str | None = None,
     carrier_label: str | None = None,
     contract_tag: str | None = None,
+    repository: RateRepository | None = None,
 ) -> dict[str, Any]:
+    rate_repository = repository if repository is not None else get_rate_repository(settings)
     run_dir = find_run_dir(settings, import_id)
     payload = load_run_payload(run_dir)
     rate_import = RateImport(**payload["rate_import"])
@@ -301,39 +309,75 @@ def approve_import_by_id(
         source_snapshot["contract_tag"] = contract_tag
         write_json(run_dir / "source_snapshot.json", source_snapshot)
     if carrier_key:
-        archive_previous_imports(settings, carrier_key, excluding=import_id)
-    approve_run(settings, run_dir, rate_import, validation_report, cards, offers, charges, notes, approved_by)
+        archive_previous_imports(
+            settings,
+            carrier_key,
+            excluding=import_id,
+            repository=rate_repository,
+        )
+    approve_run(
+        settings,
+        run_dir,
+        rate_import,
+        validation_report,
+        cards,
+        offers,
+        charges,
+        notes,
+        approved_by,
+        repository=rate_repository,
+    )
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
     return get_import_detail(settings, import_id)
 
 
-def reject_import_by_id(settings: Settings, import_id: str, reason: str) -> dict[str, Any]:
+def reject_import_by_id(
+    settings: Settings,
+    import_id: str,
+    reason: str,
+    *,
+    repository: RateRepository | None = None,
+) -> dict[str, Any]:
+    rate_repository = repository if repository is not None else get_rate_repository(settings)
     run_dir = find_run_dir(settings, import_id)
     rate_import = RateImport(**read_json(run_dir / "rate_import.json"))
-    reject_run(settings, run_dir, rate_import, reason)
+    reject_run(settings, run_dir, rate_import, reason, repository=rate_repository)
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
     return get_import_detail(settings, import_id)
 
 
-def delete_import_by_id(settings: Settings, import_id: str) -> dict[str, Any]:
+def delete_import_by_id(
+    settings: Settings,
+    import_id: str,
+    *,
+    repository: RateRepository | None = None,
+) -> dict[str, Any]:
+    rate_repository = repository if repository is not None else get_rate_repository(settings)
     run_dir = find_run_dir(settings, import_id)
-    remove_import_rows(settings, import_id, remove_import_record=True)
+    rate_repository.remove_import_data(import_id, remove_import_record=True)
     shutil.rmtree(run_dir)
     return {"deleted": True, "import_id": import_id}
 
 
-def archive_previous_imports(settings: Settings, carrier_key: str, *, excluding: str) -> None:
-    for item in list_imports(settings, limit=5000):
+def archive_previous_imports(
+    settings: Settings,
+    carrier_key: str,
+    *,
+    excluding: str,
+    repository: RateRepository | None = None,
+) -> None:
+    rate_repository = repository if repository is not None else get_rate_repository(settings)
+    for item in list_imports(settings, limit=5000, repository=rate_repository):
         if item["import_id"] == excluding or item.get("status") != "approved":
             continue
         if item.get("carrier_key") != carrier_key:
             continue
         previous_dir = find_run_dir(settings, item["import_id"])
         previous = RateImport(**read_json(previous_dir / "rate_import.json"))
-        remove_import_rows(settings, previous.id)
+        rate_repository.remove_import_data(previous.id)
         previous.status = "archived"
         write_json(previous_dir / "rate_import.json", previous.model_dump(mode="json"))
-        replace_import(settings, previous)
+        rate_repository.update_import(previous)
 
 
 def search_approved_offers(
@@ -346,19 +390,18 @@ def search_approved_offers(
     equipment_type: str | None = None,
     valid_on: str | None = None,
     limit: int = 200,
+    *,
+    repository: RateRepository | None = None,
 ) -> list[dict[str, Any]]:
-    paths = warehouse_paths(settings)
-    cards = [RateCard(**deserialize_row(row)) for row in read_csv_rows(paths["cards"])]
-    offers = [RateOffer(**deserialize_row(row)) for row in read_csv_rows(paths["offers"])]
-    charges = [RateChargeLine(**deserialize_row(row)) for row in read_csv_rows(paths["charges"])]
-    notes = [RateNote(**deserialize_row(row)) for row in read_csv_rows(paths["notes"])]
+    rate_repository = repository if repository is not None else get_rate_repository(settings)
+    library = rate_repository.load_approved_rate_library()
+    cards = library.cards
+    offers = library.offers
+    charges = library.charges
+    notes = library.notes
 
     cards_by_id = {card.id: card for card in cards}
-    source_by_import: dict[str, dict[str, Any]] = {}
-    for card in cards:
-        source_path = settings.runs_dir / card.rate_import_id / "source_snapshot.json"
-        if source_path.exists():
-            source_by_import[card.rate_import_id] = read_json(source_path)
+    source_by_import = library.source_by_import
     charges_by_offer: dict[str, list[RateChargeLine]] = {}
     for charge in charges:
         charges_by_offer.setdefault(charge.rate_offer_id, []).append(charge)
@@ -467,12 +510,22 @@ def search_approved_offers(
     return results[:limit]
 
 
-def get_rate_desk_data(settings: Settings, limit: int = 2000) -> dict[str, Any]:
-    all_rates = search_approved_offers(settings, limit=max(limit * 20, 50000))
+def get_rate_desk_data(
+    settings: Settings,
+    limit: int = 2000,
+    *,
+    repository: RateRepository | None = None,
+) -> dict[str, Any]:
+    rate_repository = repository if repository is not None else get_rate_repository(settings)
+    all_rates = search_approved_offers(
+        settings,
+        limit=max(limit * 20, 50000),
+        repository=rate_repository,
+    )
     haulage_rates = [rate for rate in all_rates if is_haulage_rate(rate)]
     quote_rates = [rate for rate in all_rates if not is_haulage_rate(rate)]
     rates = quote_rates[:limit]
-    imports = list_imports(settings, limit=500)
+    imports = list_imports(settings, limit=500, repository=rate_repository)
     approved_at = [item.get("approved_at") for item in imports if item.get("approved_at")]
     last_refreshed = max(approved_at, key=parse_datetime_sort_key) if approved_at else None
 

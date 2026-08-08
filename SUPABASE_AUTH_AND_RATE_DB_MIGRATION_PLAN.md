@@ -1001,6 +1001,8 @@ This is an intentional stable checkpoint.
 
 STAGE 3 — Introduce a persistence/repository abstraction with CSV still active
 
+Implementation status: complete on 8 August 2026. `RateRepository` and `CsvRateRepository` now cover source registration, import records, approval publication, removal, and approved-library reads. `RATE_STORAGE_BACKEND=csv` remains the default. The `postgres` value is reserved and fails clearly until Stage 4. Existing run artifacts and API/UI contracts are unchanged.
+
 Objective
 
 Separate business logic in services.py from the implementation details in warehouse.py.
@@ -1605,6 +1607,49 @@ Suggested trial roles:
 client power users -> operator
 client search-only users -> viewer
 internal owner/admin -> admin
+
+Invitation acceptance and password setup
+
+This is required before inviting the full client trial group.
+
+The current Stage 2 login screen supports email/password sign-in, but it does not let a newly invited user choose a password. Do not assume that Supabase supplies this application screen automatically.
+
+Add a dedicated invitation-acceptance page, for example:
+
+UI/set-password.html
+UI/set-password.js
+
+The page must:
+
+accept the Supabase invitation session from the email link;
+
+show new-password and confirm-password fields;
+
+validate that the two values match and meet the configured password rules;
+
+set the password with the authenticated Supabase client;
+
+verify organization membership through GET /api/me;
+
+redirect an authorized user to the Rate Desk;
+
+show a clear expired/invalid-link message without exposing internal details;
+
+deny application access when no organization_members row exists.
+
+Configure the Supabase invite redirect to this page and add the exact URL to the allowed redirect URLs. Keep public signup disabled. Never put a Supabase secret or service-role key in this page.
+
+Add automated and manual checks for:
+
+new invited user can choose a password and sign in again later;
+
+password confirmation mismatch is rejected;
+
+expired or reused invitation link is handled safely;
+
+invited user without an organization membership cannot access rate data;
+
+existing email/password login and logout still work.
 
 Smoke test
 

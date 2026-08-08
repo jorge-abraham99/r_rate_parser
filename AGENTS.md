@@ -22,18 +22,18 @@ Deterministic, template-based freight rate sheet ingestion tool. **No AI API key
 - **Shared logic**: `rate_ingest/services.py` — called by both CLI and API
 
 ## Parser Families (in `rate_ingest/parsers/`)
-`tabular_lane` (MSC), `matrix` (COSCO), `offer_block` (MAERSK), `site_to_site_rows` (Maersk AFLS), `haulage_matrix` (UK inland), `email_table` (CMA email)
+`tabular_lane` (MSC), `matrix` (COSCO), `cosco_pdf_quote` (COSCO PDF), `offer_block` (MAERSK), `site_to_site_rows` (Maersk AFLS), `haulage_matrix` (UK inland), `msc_zoned_inline` (MSC door-to-quay), `hapag_door_matrix` (Hapag-Lloyd door-to-quay), `email_table` (CMA email)
 
 ## Templates
-YAML files in `data/templates/`: `msc_far_east_v1.yaml`, `cosco_matrix_v1.yaml`, `maersk_offer_block_v1.yaml`, `maersk_afls_site_to_site_v1.yaml`, `uk_haulage_matrix_v1.yaml`, `cma_email_table_v1.yaml`
+YAML files in `data/templates/`: `msc_far_east_v1.yaml`, `msc_zoned_inline_v1.yaml`, `cosco_matrix_v1.yaml`, `cosco_pdf_quote_v1.yaml`, `hapag_door_matrix_v1.yaml`, `maersk_offer_block_v1.yaml`, `maersk_afls_site_to_site_v1.yaml`, `uk_haulage_matrix_v1.yaml`, `cma_email_table_v1.yaml`
 
 ## Data Flow
-`register_source → inspect → classify → find_best_template → parse → validate → review → approve/warehouse`
+`repository/register source → inspect → classify → find_best_template → parse → validate → review → repository/approve`
 
 Data lives at `data/runs/<import_id>/`. Approved rates go to `data/warehouse/approved_rates.csv`.
 
 ## Config
-Env var `RATE_INGEST_ROOT` overrides data root (defaults to cwd). Tests always set it:
+Env var `RATE_INGEST_ROOT` overrides data root (defaults to cwd). `RATE_STORAGE_BACKEND` defaults to `csv`; `postgres` is reserved for Stage 4. Tests always set the data root:
 ```python
 monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
 ```
@@ -59,13 +59,16 @@ monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
 ```
 rate_ingest/         # Python package (main logic)
   parsers/           # Parser family implementations
+  repositories/      # Persistence interface and CSV adapter
   cli.py             # Typer CLI app
   api.py             # FastAPI app
   services.py        # Shared service layer
   models.py          # Pydantic models
   config.py          # Settings (file-system paths)
 tests/
-  test_rate_ingest_cli.py   # Single test file, all integration-style
+  test_rate_ingest_cli.py   # Parser/API integration tests
+  test_auth.py              # Auth/API/UI contract tests
+  test_repositories.py      # Repository parity and boundary tests
 UI/                          # Frontend (static files, no build)
 data/
   templates/                 # YAML template definitions
@@ -77,4 +80,5 @@ rate_sheet_files/            # Test fixtures (real carrier files)
 - Tests copy real `.xlsx`/`.eml` files — ensure paths exist
 - `.eml` parser reads only the latest body, not the reply chain
 - Approving a new import with the same `carrier_key` auto-archives the previous approved one
-- No auth, no DB, no concurrency protection — filesystem-backed
+- Supabase Auth is active; rate data is still one shared CSV warehouse
+- No Postgres rate adapter or concurrency protection yet
