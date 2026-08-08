@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in — Reudan Rate Desk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/ui/styles.css?v=17">
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-card" aria-labelledby="loginTitle">
+      <div class="login-brand">
+        <span class="logo" aria-hidden="true">R</span>
+        <span class="brand-name">REUDAN <span>Rate Desk</span></span>
+      </div>
+      <h1 id="loginTitle">Sign in</h1>
+      <p class="login-intro">Use the email and password from your Reudan invitation.</p>
+      <div id="loginAlert" class="login-alert" role="alert" hidden></div>
+      <form id="loginForm" class="login-form">
+        <label for="loginEmail">Email</label>
+        <input id="loginEmail" name="email" type="email" autocomplete="username" required autofocus>
+        <label for="loginPassword">Password</label>
+        <input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+        <button id="loginSubmit" class="primary-button" type="submit">Sign in</button>
+      </form>
+      <p class="login-note">Access is invitation-only. Contact your Reudan administrator if you need an account.</p>
+    </section>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2/dist/umd/supabase.min.js" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
+  <script src="/ui/auth.js?v=1"></script>
+  <script src="/ui/login.js?v=1"></script>
+</body>
+</html>

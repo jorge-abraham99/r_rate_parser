@@ -21,6 +21,16 @@ The repo now has two operator surfaces over the same parser logic:
 
 For a concise architecture and maintenance guide, see [CONTEXT.md](CONTEXT.md).
 
+## Supabase migration status
+
+Stage 0 of the auth and rate-database migration is captured in `supabase/`. The hosted `carrier-quotes` project already has eight RLS-protected tables and two applied migrations; their authoritative SQL is now versioned locally. The running application still uses filesystem CSV/JSON storage.
+
+See [supabase/README.md](supabase/README.md) for the project reference, applied migration versions, security baseline, credential handling, and the required future `application_id` reconciliation.
+
+Stages 1 and 2 add invite-only Supabase authentication. The backend validates user tokens against the project's public asymmetric JWKS. It then reads `organization_members` through RLS with the same user token. It does not use the JWT secret or a service-role key.
+
+The browser restores Supabase sessions, adds the access token through one shared API helper, and sends logged-out users to `/ui/login.html`. Viewers can read imports and rates. Operators and admins can also upload, approve, reject, and delete. Health and public browser configuration stay public; all rate APIs require both a valid user and an organization membership. The runtime still uses CSV/JSON storage.
+
 ## Canonical Output
 
 The business-facing output is intentionally small:
@@ -49,6 +59,7 @@ Implemented parser families:
 
 - `tabular_lane` for known MSC-style Excel workbooks
 - `matrix` for known COSCO-style matrix workbooks
+- `cosco_pdf_quote` for COSCO India/Far East door-to-quay PDF quotations
 - `offer_block` for known MAERSK quote workbooks
 - `site_to_site_rows` for known MAERSK AFLS site-to-site workbooks
 - `haulage_matrix` for known UK inland-haulage Excel/CSV matrices
@@ -60,7 +71,7 @@ Not implemented yet:
 
 - random unknown workbooks
 - AI template drafting
-- PDF parsing
+- unknown or scanned PDF parsing
 - deep email thread parsing
 - attachment extraction from emails
 
@@ -199,6 +210,7 @@ Templates live here:
 
 - `data/templates/msc_far_east_v1.yaml`
 - `data/templates/cosco_matrix_v1.yaml`
+- `data/templates/cosco_pdf_quote_v1.yaml`
 - `data/templates/maersk_offer_block_v1.yaml`
 - `data/templates/maersk_afls_site_to_site_v1.yaml`
 - `data/templates/uk_haulage_matrix_v1.yaml`
@@ -217,7 +229,7 @@ Connected UI entrypoint:
 ## Current Operational Boundaries
 
 - Storage is local CSV/JSON under `data/`; production deployment therefore requires a persistent volume.
-- The API is currently intended for a trusted internal environment. It has no authentication and uses permissive CORS.
+- The API requires Supabase authentication and an organization membership for all rate data. Mutations also require the `operator` or `admin` role. The same-origin UI does not enable cross-origin API access.
 - Rate Desk currency comparison uses static demonstration FX rates from `rate_ingest/services.py`, not a live FX feed.
 - Template recognition is heuristic and requires a score of at least `0.55`; unknown formats fail explicitly.
 - Approval is the publication boundary. When an approved import has a `carrier_key`, approving a newer import with the same key archives the previous one and removes its published warehouse rows.
@@ -240,6 +252,12 @@ The import summary preserves and displays the complete 252-row workbook table fo
 The `hapag_door_matrix` parser expands the collection locations in column C against the destination headers in columns D–J. The preferred POL from column B and applicable routing from row 2 are retained on every resulting `SD / CY` offer.
 
 The matrix amount is supplemented with a USD 15 live-position charge per container. A separate USD 20 emergency-fuel destination charge is added only for Binh Duong Terminal and Lat Krabang. These component lines remain visible in the quote breakdown; the source validity and commercial terms in column K are also preserved.
+
+## COSCO India/Far East PDF Quotes
+
+The `cosco_pdf_quote` parser reads text-based COSCO quotations with repeated ocean and origin-charge tables. It creates an `SD / CY` offer for each collection and quoted 40GP/40HC equipment column, retaining the PDF's POL, POD, validity, and document reference.
+
+Only three components affect the quoted total: Freight Rate, Emergency Fuel Surcharge (EFS), and collection-specific Inland Haulage at Load (IHL). Documentation, destination handling, and other tariff charges in the PDF are intentionally excluded. For example, Birmingham to Tuticorin is USD 360 freight + USD 150 EFS + USD 264 haulage = USD 774.
 
 ## Email Parser Boundaries
 
@@ -269,9 +287,9 @@ python -m rate_ingest review <import_id>
 Or through the local UI:
 
 ```bash
-uvicorn rate_ingest.api:app --reload
+uvicorn rate_ingest.api:app --reload --env-file .env
 ```
 
-Then upload the same file through the browser.
+Then sign in with an invited Supabase user and upload the same file through the browser. The user must have an `organization_members` row. Public Supabase sign-up must stay disabled.
 
 If a file is unseen, the intended next phase is AI-assisted template drafting on top of this deterministic flow, not replacing it.

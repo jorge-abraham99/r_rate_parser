@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from rate_ingest.auth import (
+    RequestContext,
+    require_operator,
+    require_organization_member,
+)
 from rate_ingest.config import Settings
 from rate_ingest.services import (
     approve_import_by_id,
@@ -35,13 +40,6 @@ class RejectRequest(BaseModel):
 
 
 app = FastAPI(title="Freight Rate Ingest API", version="0.1.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 def settings() -> Settings:
@@ -52,7 +50,7 @@ def settings() -> Settings:
 
 @app.get("/")
 def root() -> RedirectResponse:
-    return RedirectResponse(url="/ui/")
+    return RedirectResponse(url="/ui/login.html")
 
 
 @app.get("/api/health")
@@ -60,13 +58,43 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/public-config")
+def public_config() -> dict[str, str | bool]:
+    cfg = Settings.load()
+    if not cfg.supabase_url or not cfg.supabase_publishable_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Supabase login is not configured",
+        )
+    return {
+        "supabase_url": cfg.supabase_url,
+        "supabase_publishable_key": cfg.supabase_publishable_key,
+        "auth_required": True,
+    }
+
+
+@app.get("/api/me")
+def api_me(
+    context: Annotated[RequestContext, Depends(require_organization_member)],
+) -> dict:
+    return {
+        "user_id": str(context.user.user_id),
+        "email": context.user.email,
+        "organizations": [membership.as_dict() for membership in context.memberships],
+    }
+
+
 @app.get("/api/imports")
-def api_list_imports(limit: int = 50) -> list[dict]:
+def api_list_imports(
+    _context: Annotated[RequestContext, Depends(require_organization_member)],
+    limit: int = 50,
+) -> list[dict]:
     return list_imports(settings(), limit=limit)
 
 
 @app.post("/api/imports")
 async def api_import_source(
+    _context: Annotated[RequestContext, Depends(require_operator)],
     file: UploadFile = File(...),
     template: str | None = Form(default=None),
     uploaded_by: str | None = Form(default=None),
@@ -93,7 +121,10 @@ async def api_import_source(
 
 
 @app.get("/api/imports/{import_id}")
-def api_get_import(import_id: str) -> dict:
+def api_get_import(
+    import_id: str,
+    _context: Annotated[RequestContext, Depends(require_organization_member)],
+) -> dict:
     try:
         return get_import_detail(settings(), import_id)
     except ValueError as exc:
@@ -101,7 +132,11 @@ def api_get_import(import_id: str) -> dict:
 
 
 @app.post("/api/imports/{import_id}/approve")
-def api_approve_import(import_id: str, payload: ApproveRequest) -> dict:
+def api_approve_import(
+    import_id: str,
+    payload: ApproveRequest,
+    _context: Annotated[RequestContext, Depends(require_operator)],
+) -> dict:
     try:
         return approve_import_by_id(
             settings(),
@@ -117,7 +152,11 @@ def api_approve_import(import_id: str, payload: ApproveRequest) -> dict:
 
 
 @app.post("/api/imports/{import_id}/reject")
-def api_reject_import(import_id: str, payload: RejectRequest) -> dict:
+def api_reject_import(
+    import_id: str,
+    payload: RejectRequest,
+    _context: Annotated[RequestContext, Depends(require_operator)],
+) -> dict:
     try:
         return reject_import_by_id(settings(), import_id, payload.reason)
     except ValueError as exc:
@@ -125,7 +164,10 @@ def api_reject_import(import_id: str, payload: RejectRequest) -> dict:
 
 
 @app.delete("/api/imports/{import_id}")
-def api_delete_import(import_id: str) -> dict:
+def api_delete_import(
+    import_id: str,
+    _context: Annotated[RequestContext, Depends(require_operator)],
+) -> dict:
     try:
         return delete_import_by_id(settings(), import_id)
     except ValueError as exc:
@@ -134,6 +176,7 @@ def api_delete_import(import_id: str) -> dict:
 
 @app.get("/api/search")
 def api_search(
+    _context: Annotated[RequestContext, Depends(require_organization_member)],
     provider_name: str | None = None,
     carrier_name: str | None = None,
     collection: str | None = None,
@@ -157,7 +200,10 @@ def api_search(
 
 
 @app.get("/api/rate-desk")
-def api_rate_desk(limit: int = 2000) -> dict:
+def api_rate_desk(
+    _context: Annotated[RequestContext, Depends(require_organization_member)],
+    limit: int = 2000,
+) -> dict:
     return get_rate_desk_data(settings(), limit=min(max(limit, 1), 5000))
 
 

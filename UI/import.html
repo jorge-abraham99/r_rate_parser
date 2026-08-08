@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/ui/styles.css?v=16">
+  <link rel="stylesheet" href="/ui/styles.css?v=17">
 </head>
 <body>
   <div class="app-shell">
@@ -23,6 +23,8 @@
       <div class="topbar-status">
         <span id="demoBadge" class="demo-badge" hidden>Demo data</span>
         <span id="periodText" class="refresh-text"></span>
+        <span class="auth-email" data-auth-email></span>
+        <button class="logout-button" type="button" data-auth-logout>Sign out</button>
       </div>
     </header>
 
@@ -84,6 +86,7 @@
               <option value="">Select…</option>
               <option value="msc">MSC</option>
               <option value="hapag">Hapag-Lloyd</option>
+              <option value="cosco">COSCO</option>
               <option value="maersk">Maersk</option>
               <option value="haulage">UK Inland Haulage</option>
               <option value="__new">Another provider…</option>
@@ -146,8 +149,10 @@
   </div>
 
   <div id="toast" class="toast" role="status" hidden></div>
-  <script src="/ui/config.js?v=3"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2/dist/umd/supabase.min.js" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
+  <script src="/ui/auth.js?v=1"></script>
+  <script src="/ui/config.js?v=4"></script>
   <script src="/ui/demo-data.js?v=2"></script>
-  <script src="/ui/app.js?v=6"></script>
+  <script src="/ui/app.js?v=7"></script>
 </body>
 </html>

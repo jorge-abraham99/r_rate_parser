@@ -44,7 +44,7 @@
     return {
       id,
       carrier: "MSC",
-      service: "Quay-to-quay",
+      service: "Door-to-quay",
       destinations: [destination],
       origins: ["Felixstowe", "Liverpool"],
       equipment: "40HC",
@@ -70,7 +70,7 @@
     return {
       id,
       carrier: "Hapag-Lloyd",
-      service: "Quay-to-quay",
+      service: "Door-to-quay",
       destinations: [destination],
       origins: ["Felixstowe", "Southampton"],
       equipment: "40HC",
@@ -131,7 +131,7 @@
       {
         key: "msc-inline",
         provider: "MSC",
-        service: "Quay-to-quay",
+        service: "Door-to-quay",
         cadence: "monthly",
         current: {
           id: "demo-msc-aug",
@@ -157,7 +157,7 @@
       {
         key: "hapag-door",
         provider: "Hapag-Lloyd",
-        service: "Quay-to-quay",
+        service: "Door-to-quay",
         cadence: "monthly",
         current: {
           id: "demo-hapag-aug",

@@ -15,6 +15,7 @@ from rate_ingest.config import Settings
 from rate_ingest.inspector import inspect_source
 from rate_ingest.models import RateCard, RateChargeLine, RateImport, RateNote, RateOffer, ValidationReport, new_id
 from rate_ingest.parsers.email_table import parse_email as parse_email_table
+from rate_ingest.parsers.cosco_pdf_quote import parse_pdf as parse_cosco_pdf_quote
 from rate_ingest.parsers.hapag_door_matrix import parse_workbook as parse_hapag_door_matrix_workbook
 from rate_ingest.parsers.haulage_matrix import parse_workbook as parse_haulage_matrix_workbook
 from rate_ingest.parsers.matrix import parse_workbook as parse_matrix_workbook
@@ -103,7 +104,18 @@ def import_source_file(
         matched_template, scored = find_best_template(settings, inspected)
 
     if not matched_template:
-        raise ValueError("No matching parser template found. Use inspect output to add a template.")
+        best = scored[0] if scored else None
+        best_detail = (
+            f" Best candidate: {best['template_id']} ({best['confidence']:.2f})."
+            if best
+            else " No active templates were found."
+        )
+        raise ValueError(
+            "No matching parser template found."
+            f" Detected type={inspected.workbook_type}, provider={inspected.provider_guess or 'unknown'},"
+            f" parser={inspected.parser_family_guess or 'unknown'}."
+            f"{best_detail}"
+        )
 
     rate_import = RateImport(
         id=new_id("import"),
@@ -620,6 +632,8 @@ def parse_source_by_family(
         return parse_msc_zoned_inline_workbook(source_path, matched_template, rate_import)
     if parser_family == "hapag_door_matrix":
         return parse_hapag_door_matrix_workbook(source_path, matched_template, rate_import)
+    if parser_family == "cosco_pdf_quote":
+        return parse_cosco_pdf_quote(source_path, matched_template, rate_import)
     if parser_family == "offer_block":
         return parse_offer_block_workbook(source_path, matched_template, rate_import)
     if parser_family == "site_to_site_rows":

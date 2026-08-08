@@ -2,8 +2,9 @@ const IMPORT_DEMO_MODE = Boolean(window.RATE_DESK_CONFIG?.demoMode);
 const SOURCE_DEFINITIONS = [
   { key: "maersk-contract", provider: "Maersk", service: "Quay-to-quay", cadence: "monthly" },
   { key: "maersk-door", provider: "Maersk", service: "Door-to-quay", cadence: "monthly" },
-  { key: "msc-inline", provider: "MSC", service: "Quay-to-quay", cadence: "monthly" },
-  { key: "hapag-door", provider: "Hapag-Lloyd", service: "Quay-to-quay", cadence: "monthly" },
+  { key: "msc-inline", provider: "MSC", service: "Door-to-quay", cadence: "monthly" },
+  { key: "hapag-door", provider: "Hapag-Lloyd", service: "Door-to-quay", cadence: "monthly" },
+  { key: "cosco-door", provider: "COSCO", service: "India/Far East Door-to-quay", cadence: "monthly" },
   { key: "haulage-q2", provider: "UK Inland Haulage", service: "Export · all UK POLs", cadence: "quarterly" },
 ];
 
@@ -14,6 +15,7 @@ const importState = {
   preview: null,
   menuId: null,
   busy: false,
+  canMutate: false,
   toastTimer: null,
 };
 
@@ -58,20 +60,21 @@ const elements = {
 };
 
 elements.sourceFile.addEventListener("change", () => {
+  if (!importState.canMutate) return;
   const file = elements.sourceFile.files?.[0];
   if (file) receiveFile(file);
   elements.sourceFile.value = "";
 });
 elements.dropZone.addEventListener("dragover", (event) => {
   event.preventDefault();
-  if (!importState.busy) elements.dropZone.classList.add("drag-active");
+  if (importState.canMutate && !importState.busy) elements.dropZone.classList.add("drag-active");
 });
 elements.dropZone.addEventListener("dragleave", () => elements.dropZone.classList.remove("drag-active"));
 elements.dropZone.addEventListener("drop", (event) => {
   event.preventDefault();
   elements.dropZone.classList.remove("drag-active");
   const file = event.dataTransfer?.files?.[0];
-  if (file && !importState.busy) receiveFile(file);
+  if (file && importState.canMutate && !importState.busy) receiveFile(file);
 });
 elements.sourceSelect.addEventListener("change", () => {
   if (!importState.preview) return;
@@ -108,6 +111,20 @@ document.addEventListener("keydown", (event) => {
 bootImport();
 
 async function bootImport() {
+  try {
+    const session = await window.RATE_DESK_AUTH.requireSession();
+    if (!session) return;
+    const profileResponse = await window.RATE_DESK_AUTH.apiFetch("/api/me");
+    if (!profileResponse.ok) throw new Error("Your access details could not be loaded.");
+    const profile = await profileResponse.json();
+    importState.canMutate = ["operator", "admin"].includes(
+      profile.organizations?.[0]?.role,
+    );
+    elements.dropZone.hidden = !importState.canMutate;
+  } catch (error) {
+    showAlert(error.message);
+    return;
+  }
   elements.demoBadge.hidden = !IMPORT_DEMO_MODE;
   renderPeriod();
   if (IMPORT_DEMO_MODE) {
@@ -121,8 +138,8 @@ async function bootImport() {
 async function refreshConnectedWorkspace() {
   try {
     const [importsResponse, deskResponse] = await Promise.all([
-      fetch("/api/imports?limit=500"),
-      fetch("/api/rate-desk?limit=5000"),
+      window.RATE_DESK_AUTH.apiFetch("/api/imports?limit=500"),
+      window.RATE_DESK_AUTH.apiFetch("/api/rate-desk?limit=5000"),
     ]);
     if (!importsResponse.ok || !deskResponse.ok) throw new Error("Could not load the import workspace.");
     importState.imports = (await importsResponse.json()).filter((item) => !isSpotImport(item));
@@ -146,7 +163,7 @@ function adaptConnectedSources(imports) {
       const matching = imports.filter((item) => inferSourceKey(item) === key);
       const provider = matching.find((item) => item.carrier_name)?.carrier_name
         || matching.find((item) => item.carrier_label)?.carrier_label
-        || "Another source";
+        || "Another provider";
       const service = inferServiceLabel(matching[0]);
       return buildConnectedSource({ key, provider, service, cadence: "—" }, imports);
     }),
@@ -220,6 +237,7 @@ function renderSourceRow(source, file, archived, startsProviderGroup = false) {
   const menuOpen = importState.menuId === rowId;
   const provider = source.provider || source.name || "Another provider";
   const service = source.service || "—";
+  const hasActions = file && (!archived || importState.canMutate);
   return `
     <div class="sources-grid source-row${archived ? " archived-row" : ""}${startsProviderGroup ? " provider-group" : " service-group"}">
       <span class="provider-name" title="${escapeAttr(provider)}">${archived || !startsProviderGroup ? "" : escapeHtml(provider)}</span>
@@ -231,12 +249,12 @@ function renderSourceRow(source, file, archived, startsProviderGroup = false) {
       <span class="number mono">${file ? escapeHtml(String(file.lanes ?? "—")) : "—"}</span>
       <span><span class="source-status ${escapeAttr(status)}">${escapeHtml(statusLabel(status))}</span></span>
       <span class="row-menu">
-        ${file ? `
+        ${hasActions ? `
           <button class="menu-trigger" type="button" data-menu-id="${escapeAttr(rowId)}" aria-label="Actions for ${escapeAttr(file.file)}" aria-expanded="${menuOpen}">⋯</button>
           ${menuOpen ? `
             <span class="menu-popover">
               ${archived ? "" : `<button type="button" data-action="summary" data-source-key="${escapeAttr(source.key)}" data-file-id="${escapeAttr(file.id)}">View parse summary</button>`}
-              <button class="danger" type="button" data-action="delete" data-source-key="${escapeAttr(source.key)}" data-file-id="${escapeAttr(file.id)}">Delete upload</button>
+              ${importState.canMutate ? `<button class="danger" type="button" data-action="delete" data-source-key="${escapeAttr(source.key)}" data-file-id="${escapeAttr(file.id)}">Delete upload</button>` : ""}
             </span>` : ""}` : ""}
       </span>
     </div>
@@ -244,6 +262,7 @@ function renderSourceRow(source, file, archived, startsProviderGroup = false) {
 }
 
 async function receiveFile(file) {
+  if (!importState.canMutate) return;
   hideAlert();
   if (IMPORT_DEMO_MODE) {
     openReview({ fileName: file.name, source: "", contractType: "", newSourceName: "", detail: null, importId: null });
@@ -255,10 +274,10 @@ async function receiveFile(file) {
     const form = new FormData();
     form.append("file", file);
     form.append("uploaded_by", "Rate Desk operator");
-    const response = await fetch("/api/imports", { method: "POST", body: form });
+    const response = await window.RATE_DESK_AUTH.apiFetch("/api/imports", { method: "POST", body: form });
     if (!response.ok) throw new Error((await safeJson(response)).detail || "The parser could not import this file.");
     const imported = await response.json();
-    const detailResponse = await fetch(`/api/imports/${encodeURIComponent(imported.import_id)}`);
+    const detailResponse = await window.RATE_DESK_AUTH.apiFetch(`/api/imports/${encodeURIComponent(imported.import_id)}`);
     if (!detailResponse.ok) throw new Error("The sheet parsed, but its preview could not be loaded.");
     const detail = await detailResponse.json();
     openReview({
@@ -306,7 +325,7 @@ async function openSummary(sourceKey, fileId) {
 
   setBusy(true);
   try {
-    const response = await fetch(`/api/imports/${encodeURIComponent(fileId)}`);
+    const response = await window.RATE_DESK_AUTH.apiFetch(`/api/imports/${encodeURIComponent(fileId)}`);
     if (!response.ok) throw new Error("The parse summary could not be loaded.");
     const detail = await response.json();
     importState.preview = {
@@ -386,7 +405,7 @@ function renderPreview() {
     : "First sheet from this source — nothing to compare against yet.";
 
   elements.publishButton.hidden = preview.readOnly;
-  elements.publishButton.disabled = preview.readOnly || !ready || importState.busy;
+  elements.publishButton.disabled = preview.readOnly || !importState.canMutate || !ready || importState.busy;
   elements.cancelPreviewButton.textContent = preview.readOnly ? "Close" : "Cancel";
 }
 
@@ -541,7 +560,7 @@ async function publishPreview() {
   const payload = sourcePayload(preview, sourceKey);
   setBusy(true);
   try {
-    const response = await fetch(`/api/imports/${encodeURIComponent(preview.importId)}/approve`, {
+    const response = await window.RATE_DESK_AUTH.apiFetch(`/api/imports/${encodeURIComponent(preview.importId)}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -615,7 +634,7 @@ function sourcePayload(preview, sourceKey) {
       approved_by: "Rate Desk operator",
       carrier_name: "MSC",
       carrier_key: sourceKey,
-      carrier_label: "MSC · Quay-to-quay",
+      carrier_label: "MSC · Door-to-quay",
       contract_tag: null,
     };
   }
@@ -624,7 +643,16 @@ function sourcePayload(preview, sourceKey) {
       approved_by: "Rate Desk operator",
       carrier_name: "Hapag-Lloyd",
       carrier_key: sourceKey,
-      carrier_label: "Hapag-Lloyd · Quay-to-quay",
+      carrier_label: "Hapag-Lloyd · Door-to-quay",
+      contract_tag: null,
+    };
+  }
+  if (sourceKey === "cosco-door") {
+    return {
+      approved_by: "Rate Desk operator",
+      carrier_name: "COSCO",
+      carrier_key: sourceKey,
+      carrier_label: "COSCO · India/Far East Door-to-quay",
       contract_tag: null,
     };
   }
@@ -648,7 +676,7 @@ async function cancelPreview() {
   const importId = preview.importId;
   closePreviewImmediately();
   try {
-    await fetch(`/api/imports/${encodeURIComponent(importId)}`, { method: "DELETE" });
+    await window.RATE_DESK_AUTH.apiFetch(`/api/imports/${encodeURIComponent(importId)}`, { method: "DELETE" });
   } finally {
     await refreshConnectedWorkspace();
   }
@@ -664,6 +692,7 @@ function closePreviewImmediately() {
 }
 
 async function deleteFile(sourceKey, fileId) {
+  if (!importState.canMutate) return;
   const source = importState.sources.find((item) => item.key === sourceKey);
   if (!source || !window.confirm("Delete this upload?")) return;
   importState.menuId = null;
@@ -677,7 +706,7 @@ async function deleteFile(sourceKey, fileId) {
   }
 
   try {
-    const response = await fetch(`/api/imports/${encodeURIComponent(fileId)}`, { method: "DELETE" });
+    const response = await window.RATE_DESK_AUTH.apiFetch(`/api/imports/${encodeURIComponent(fileId)}`, { method: "DELETE" });
     if (!response.ok) throw new Error((await safeJson(response)).detail || "The upload could not be deleted.");
     showToast("Upload deleted");
     await refreshConnectedWorkspace();
@@ -689,6 +718,7 @@ async function deleteFile(sourceKey, fileId) {
 function selectedSourceKey(preview) {
   if (preview.source === "msc") return "msc-inline";
   if (preview.source === "hapag") return "hapag-door";
+  if (preview.source === "cosco") return "cosco-door";
   if (preview.source === "maersk") {
     if (preview.contractType === "k2k") return "maersk-contract";
     if (preview.contractType === "d2k") return "maersk-door";
@@ -700,9 +730,11 @@ function selectedSourceKey(preview) {
 }
 
 function inferSourceKey(item) {
+  if (item.parser_family === "cosco_pdf_quote") return "cosco-door";
   if (item.carrier_key) {
     const key = normalized(item.carrier_key);
     if (key.includes("hapag")) return "hapag-door";
+    if (key.includes("cosco") && key.includes("door")) return "cosco-door";
     if (key.includes("door")) return "maersk-door";
     if (key.includes("haulage")) return "haulage-q2";
     if (key.includes("msc")) return "msc-inline";
@@ -728,12 +760,14 @@ function inferServiceLabel(item) {
 function suggestedSource(detail) {
   if (detail?.rate_import?.parser_family === "msc_zoned_inline") return "msc";
   if (detail?.rate_import?.parser_family === "hapag_door_matrix") return "hapag";
+  if (detail?.rate_import?.parser_family === "cosco_pdf_quote") return "cosco";
   return "";
 }
 
 function sourceChoiceForKey(sourceKey) {
   if (sourceKey === "msc-inline") return "msc";
   if (sourceKey === "hapag-door") return "hapag";
+  if (sourceKey === "cosco-door") return "cosco";
   if (sourceKey === "haulage-q2") return "haulage";
   return "maersk";
 }

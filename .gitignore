@@ -1,4 +1,7 @@
 .DS_Store
+.env
+.env.*
+!.env.example
 .pytest_cache/
 .venv/
 __pycache__/
@@ -8,4 +11,3 @@ data/runs/
 data/sources/raw/
 data/sources/registered/
 data/warehouse/
-

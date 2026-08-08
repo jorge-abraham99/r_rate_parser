@@ -10,22 +10,41 @@ from rate_ingest.models import InspectResult, ParserTemplate
 
 
 def load_templates(settings: Settings) -> list[ParserTemplate]:
-    templates: list[ParserTemplate] = []
-    for path in sorted(settings.templates_dir.glob("*.yaml")):
+    templates_by_id: dict[str, ParserTemplate] = {}
+    bundled_dir = Path(__file__).resolve().parent / "bundled_templates"
+    template_paths = [
+        *sorted(bundled_dir.glob("*.yaml")),
+        *sorted(settings.templates_dir.glob("*.yaml")),
+    ]
+    for path in template_paths:
         payload = yaml.safe_load(path.read_text(encoding="utf-8"))
         if payload:
-            templates.append(ParserTemplate(**payload))
-    return [template for template in templates if template.active]
+            parsed = ParserTemplate(**payload)
+            templates_by_id[parsed.template_id] = parsed
+    return [template for template in templates_by_id.values() if template.active]
 
 
 def score_template(template: ParserTemplate, inspect_result: InspectResult) -> float:
+    source_type = inspect_result.source_document.source_type.lower()
+    template_type = template.file_type.lower()
+    compatible_types = {template_type}
+    if template_type == "xlsx":
+        compatible_types.add("xlsm")
+    if source_type not in compatible_types:
+        return 0.0
+
     score = 0.0
     name_upper = inspect_result.source_document.file_name.upper()
     rules = template.match_rules
 
-    for token in rules.get("filename_contains", []):
-        if token.upper() in name_upper:
-            score += 0.2
+    filename_matches = [
+        token for token in rules.get("filename_contains", [])
+        if token.upper() in name_upper
+    ]
+    if rules.get("strong_filename_match") and filename_matches:
+        score += 0.6
+    else:
+        score += 0.2 * len(filename_matches)
 
     sheet_names = [summary["sheet_name"].upper() for summary in inspect_result.sheet_summaries]
     for token in rules.get("sheet_name_contains_any", []):

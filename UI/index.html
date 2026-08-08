@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/ui/styles.css?v=16">
+  <link rel="stylesheet" href="/ui/styles.css?v=17">
 </head>
 <body>
   <div class="app-shell">
@@ -23,6 +23,8 @@
       <div class="topbar-status">
         <span id="demoBadge" class="demo-badge" hidden>Demo data</span>
         <span id="refreshText" class="refresh-text">Loading approved rates…</span>
+        <span class="auth-email" data-auth-email></span>
+        <button class="logout-button" type="button" data-auth-logout>Sign out</button>
       </div>
     </header>
 
@@ -102,8 +104,10 @@
     </main>
   </div>
 
-  <script src="/ui/config.js?v=3"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2/dist/umd/supabase.min.js" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
+  <script src="/ui/auth.js?v=1"></script>
+  <script src="/ui/config.js?v=4"></script>
   <script src="/ui/demo-data.js?v=2"></script>
-  <script src="/ui/rate-desk.js?v=17"></script>
+  <script src="/ui/rate-desk.js?v=18"></script>
 </body>
 </html>

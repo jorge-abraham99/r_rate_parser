@@ -67,6 +67,13 @@ elements.qtyInput.addEventListener("input", () => {
 bootRateDesk();
 
 async function bootRateDesk() {
+  try {
+    const session = await window.RATE_DESK_AUTH.requireSession();
+    if (!session) return;
+  } catch (error) {
+    showAlert(error.message);
+    return;
+  }
   elements.demoBadge.hidden = !RATE_DESK_DEMO_MODE;
   if (RATE_DESK_DEMO_MODE) {
     deskState.loaded = true;
@@ -77,7 +84,7 @@ async function bootRateDesk() {
   }
 
   try {
-    const response = await fetch("/api/rate-desk?limit=5000");
+    const response = await window.RATE_DESK_AUTH.apiFetch("/api/rate-desk?limit=5000");
     if (!response.ok) throw new Error("The approved-rate service did not respond.");
     const payload = await response.json();
     deskState.connectedRates = (Array.isArray(payload.rates) ? payload.rates : []).filter((rate) => !isSpotRate(rate));
@@ -206,16 +213,31 @@ async function refreshConnectedRates() {
   const origin = elements.originSelect.value;
   const destination = elements.destinationSelect.value;
   const equipment = elements.equipmentSelect.value;
-  const params = new URLSearchParams({ limit: "5000" });
-  if (collection) params.set("collection", collection);
-  if (origin) params.set("pol", origin);
-  if (destination) params.set("pod", destination);
-  if (equipment) params.set("equipment_type", equipment);
+  const portParams = new URLSearchParams({ limit: "5000" });
+  if (origin) portParams.set("pol", origin);
+  if (destination) portParams.set("pod", destination);
+  if (equipment) portParams.set("equipment_type", equipment);
+
+  const queries = [portParams];
+  if (collection) {
+    const doorParams = new URLSearchParams(portParams);
+    doorParams.set("collection", collection);
+    queries.push(doorParams);
+  }
 
   try {
-    const response = await fetch(`/api/search?${params.toString()}`);
-    if (!response.ok) throw new Error("The approved-rate service did not respond.");
-    deskState.connectedRates = await response.json();
+    const responses = await Promise.all(queries.map((params) =>
+      window.RATE_DESK_AUTH.apiFetch(`/api/search?${params.toString()}`)));
+    if (responses.some((response) => !response.ok)) {
+      throw new Error("The approved-rate service did not respond.");
+    }
+    const resultSets = await Promise.all(responses.map((response) => response.json()));
+    const ratesById = new Map();
+    resultSets.flat().forEach((rate) => {
+      const key = rate.offer_id || `${rate.source_file_name || "rate"}-${rate.raw_row_reference || ratesById.size}`;
+      ratesById.set(key, rate);
+    });
+    deskState.connectedRates = [...ratesById.values()];
     renderDesk();
   } catch (error) {
     showAlert(`Could not update quotes: ${error.message}`);
@@ -295,13 +317,17 @@ function buildDemoRows(quantity) {
   const rows = [];
   baseRates.forEach((rate) => {
     if (!collection) {
-      rows.push(makeDemoVariant(rate, "quay", quantity, origin, ""));
+      if (rate.service === "Quay-to-quay") {
+        rows.push(makeDemoVariant(rate, "quay", quantity, origin, ""));
+      }
       return;
     }
-    if (rate.carrier === "Maersk") {
+    if (rate.service === "Door-to-quay" || rate.carrier === "Maersk") {
       rows.push(makeDemoVariant(rate, "door", quantity, origin, collection));
     }
-    rows.push(makeDemoVariant(rate, "haulier", quantity, origin, collection));
+    if (rate.service === "Quay-to-quay") {
+      rows.push(makeDemoVariant(rate, "haulier", quantity, origin, collection));
+    }
   });
   return sortViewRows(rows);
 }
@@ -323,10 +349,14 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
   let fineprint = "";
 
   if (mode === "door") {
-    const uplift = quote.doorUplift[collection] || 0;
-    freightLines = freightLines.map((line) => line.name === "Basic Ocean Freight"
-      ? makeLineView({ ...line, name: "Basic Ocean Freight — door-to-quay", unit: line.unit + uplift }, quantity, fx)
-      : line);
+    const isPublishedDoorRate = rate.service === "Door-to-quay";
+    if (!isPublishedDoorRate) {
+      const uplift = quote.doorUplift[collection] || 0;
+      freightLines = freightLines.map((line) => line.name === "Basic Ocean Freight"
+        ? makeLineView({ ...line, name: "Basic Ocean Freight — door-to-quay", unit: line.unit + uplift }, quantity, fx)
+        : line);
+      sourceFile = "MAERSK_DOOR_299077037_JUL.xlsx";
+    }
     inlandLines = [makeLineView({
       name: `Inland Haulage Export — ${collection}`,
       basis: "Container",
@@ -336,9 +366,8 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
     }, quantity, fx)];
     routing = "Door to quay";
     routingDetail = "Door to quay · carrier haulage included in freight, not itemised";
-    sourceFile = "MAERSK_DOOR_299077037_JUL.xlsx";
     service = "Door-to-quay";
-    fineprint = `Inland haulage from ${collection} is included in the freight price — Maersk door rates do not itemise it.`;
+    fineprint = `Inland haulage from ${collection} is included in the freight price — ${rate.carrier} door rates do not itemise it.`;
   }
 
   if (mode === "haulier") {
@@ -1057,15 +1086,12 @@ function allQuotesTitle() {
 }
 
 function countHiddenExpiredMatches() {
-  return filterConnectedRates({ includeExpired: true, kind: "all" }).filter((rate) => isExpiredRate(rate)).length;
+  const kind = elements.collectionSelect.value ? "all" : "port";
+  return filterConnectedRates({ includeExpired: true, kind }).filter((rate) => isExpiredRate(rate)).length;
 }
 
 function hasExpiredMatches() {
   return countHiddenExpiredMatches() > 0;
-}
-
-function matchingConnectedRates({ includeExpired }) {
-  return filterConnectedRates({ includeExpired, kind: "port" });
 }
 
 function filterConnectedRates({ includeExpired, kind }) {
@@ -1077,13 +1103,14 @@ function filterConnectedRates({ includeExpired, kind }) {
   return deskState.connectedRates
     .filter((rate) => {
       if (isHaulageRate(rate)) return false;
-      if (kind === "port" && isDoorRate(rate)) return false;
-      if (kind === "door" && !isDoorRate(rate)) return false;
+      const doorRate = isDoorRate(rate);
+      if (kind === "port" && doorRate) return false;
+      if (kind === "door" && !doorRate) return false;
       if (!includeExpired && isExpiredRate(rate)) return false;
       if (!matchesFilter(rateDestination(rate), destination)) return false;
       if (equipment && canonicalEquipment(rate.equipment_type) !== equipment) return false;
       if (!(material === "All materials" || (rate.materials || []).some((item) => sameValue(item, material)))) return false;
-      if (kind === "door") {
+      if (doorRate) {
         if (collection && !locationsMatch(firstPresent(rate.place_of_receipt, rate.origin), collection)) return false;
         const explicitPort = rate.pol || "";
         if (origin && explicitPort && !matchesFilter(explicitPort, origin)) return false;
