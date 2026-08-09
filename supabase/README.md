@@ -47,9 +47,9 @@ The public schema has no custom functions, triggers, views, materialized views, 
 
 The Supabase Security Advisor reported zero findings at capture time. The Performance Advisor reported 22 informational `unused_index` findings, expected because the project was newly created and had not served application traffic. No indexes were removed.
 
-## Required first additive migration
+## Stage 4 additive migration
 
-The running application exposes string IDs such as `import_...`, `card_...`, and `offer_...`, while the captured database uses UUID primary keys. Before PostgreSQL becomes the runtime source of truth, add `application_id text` to:
+Migration `20260808150650_add_application_ids.sql` was applied to the hosted project on 9 August 2026. It adds `application_id text` to:
 
 - `source_documents`
 - `rate_imports`
@@ -58,7 +58,19 @@ The running application exposes string IDs such as `import_...`, `card_...`, and
 - `rate_charge_lines`
 - `rate_notes`
 
-Use organization-scoped uniqueness where appropriate. Database foreign keys remain UUID-based; repository adapters translate between UUID primary keys and application-facing string IDs. This must be an additive migration after the current model and relationship mapping is verified, not a broad rewrite of API IDs.
+Each new value is non-empty and unique within one organization. Existing rows receive a deterministic value based on their UUID before the columns become `NOT NULL`. Database foreign keys remain UUID-based; repository adapters translate between UUID primary keys and application-facing string IDs.
+
+The post-migration Supabase security and performance advisor check reported no warning- or error-level issues. The guarded Hapag integration test passed and verified source deduplication, cross-organization checksum reuse, entity counts, application-ID round trips, and organization isolation. Run the test only with disposable data:
+
+```bash
+RUN_POSTGRES_INTEGRATION_TESTS=true pytest -q tests/test_postgres_repository_integration.py
+```
+
+The test creates two unique temporary organizations and deletes only those organization IDs in cleanup.
+
+The committed migration file SHA-256 is `6c69c57abdda4a25785a84fda7b0475fcacbb912ffcbb4198448748e9b176715`.
+
+Production remains on `RATE_STORAGE_BACKEND=csv`. Stage 5 will add full Postgres import and approval lifecycle ownership before any production cutover.
 
 ## Stage 1 and Stage 2 authentication status
 
@@ -78,6 +90,7 @@ Copy `.env.example` to `.env` for local work. `.env` is ignored by Git.
 
 - `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` are used by the authenticated client and membership flow.
 - `SUPABASE_DB_URL` is server-only and must never be exposed to browser code.
+- `SUPABASE_DB_URL` must require SSL. Use a direct connection or the session pooler for this persistent FastAPI service.
 - `SUPABASE_ACCESS_TOKEN` is local migration tooling only and must never be committed.
 
 Do not add a Supabase secret/service-role key to frontend configuration.

@@ -58,6 +58,8 @@ The application is currently a single Python web process with local filesystem p
 - `rate_ingest/services.py`: central orchestration for imports, review detail, approval/rejection, archive/delete, search, Rate Desk shaping, charge grouping, and static FX conversion.
 - `rate_ingest/repositories/base.py`: business persistence interface and approved-rate library result.
 - `rate_ingest/repositories/csv_repository.py`: active adapter over the existing source registry and CSV warehouse.
+- `rate_ingest/repositories/postgres_repository.py`: Stage 4 organization-scoped Postgres adapter with pooled connections, transactions, and batched child writes.
+- `rate_ingest/repositories/postgres_mappings.py`: explicit Pydantic-to-relational mappings and reverse mappings.
 - `rate_ingest/repositories/__init__.py`: selects the repository from `RATE_STORAGE_BACKEND`.
 - `rate_ingest/models.py`: Pydantic models for source documents, imports, cards, offers, charge lines, notes, validation, templates, and canonical rates.
 - `rate_ingest/config.py`: resolves the data root and creates/seeds required directories.
@@ -175,9 +177,9 @@ The canonical export intentionally contains the offer base amount only. It is no
 
 ## Repository and Filesystem Storage
 
-`RateRepository` is the only business persistence boundary used by services, approval, CLI search, and CLI inspection. Stage 3 has one working adapter: `CsvRateRepository`. The existing `source_registry.py` and `warehouse.py` modules remain as low-level CSV implementation details.
+`RateRepository` is the only business persistence boundary used by services, approval, CLI search, and CLI inspection. `CsvRateRepository` is the active adapter. `PostgresRateRepository` is available for Stage 4 integration tests. The existing `source_registry.py` and `warehouse.py` modules remain as low-level CSV implementation details.
 
-`RATE_STORAGE_BACKEND` defaults to `csv`. `postgres` is an allowed future setting, but selection fails with a Stage 4 error until `PostgresRateRepository` is implemented. There are no Postgres rate writes or reads in Stage 3.
+`RATE_STORAGE_BACKEND` defaults to `csv`. Selecting `postgres` requires `SUPABASE_DB_URL` and an explicit organization UUID for every repository operation. The adapter requires SSL, disables prepared statements for transaction-pooler compatibility, reuses a small connection pool, and uses batched child inserts. The application-ID migration and real-database integration test passed, but the deployed backend remains `csv` until the later lifecycle and read-cutover stages.
 
 The data root defaults to the current working directory and can be replaced with `RATE_INGEST_ROOT`. All mutable application state is under `<root>/data/`.
 
@@ -225,13 +227,15 @@ Stage 0 of `SUPABASE_AUTH_AND_RATE_DB_MIGRATION_PLAN.md` has captured, but not a
 - membership-scoped authenticated policies and service-role grants;
 - zero Security Advisor findings at capture time.
 
-The remote migration ledger already contains `20260807222346_initial_rate_library_schema` and `20260807222404_add_missing_fk_indexes`. The local SQL files match the ledger's stored statements by normalized MD5. They must not be replayed against the existing project.
+The remote migration ledger contains `20260807222346_initial_rate_library_schema`, `20260807222404_add_missing_fk_indexes`, and `20260808150650_add_application_ids`. They must not be replayed against the existing project.
 
-Supabase rate persistence is not yet in the runtime path: imports, approvals, and searches still use the existing filesystem behavior. The first future additive schema change must add organization-scoped `application_id` text identifiers to `source_documents`, `rate_imports`, `rate_cards`, `rate_offers`, `rate_charge_lines`, and `rate_notes`. UUIDs remain internal database keys while current string IDs remain authoritative in API payloads and artifacts.
+Supabase rate persistence is not yet the deployed runtime path: imports, approvals, and searches still use the existing filesystem behavior. Stage 4 migration `20260808150650_add_application_ids.sql` is applied remotely. It adds organization-scoped `application_id` values to `source_documents`, `rate_imports`, `rate_cards`, `rate_offers`, `rate_charge_lines`, and `rate_notes`. UUIDs remain internal database keys while current string IDs remain authoritative in API payloads and artifacts.
 
 Stage 1 added Supabase access-token validation through the public JWKS. Stage 2 added invite-only browser login and membership-aware API authorization. The server sends the verified user token to the Supabase Data API to read only that user's `organization_members` rows through RLS. It does not use `user_metadata`, a JWT secret, a database password, or a service-role key for authorization.
 
 Stage 3 added the repository boundary with the CSV adapter still active. It did not change the hosted schema, Data API exposure, RLS, or production rate storage.
+
+Stage 4 adds the Postgres adapter and explicit mappings without a production cutover. API routes now pass the authenticated organization ID into repository-backed service calls. The Postgres bundle writer validates relationships and writes cards, offers, charges, and notes in one short transaction. The guarded integration test passed with the real Hapag source and two temporary organizations; cleanup left zero test organizations and zero test rate rows.
 
 `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_DB_URL`, `AUTH_REQUIRED`, and `RATE_STORAGE_BACKEND` are available through `Settings`. `AUTH_REQUIRED` defaults to `true`, and `RATE_STORAGE_BACKEND` defaults to `csv`. The public configuration endpoint returns only the URL, publishable key, and auth flag. The database URL remains server-only.
 
@@ -292,7 +296,7 @@ The hidden `inspect` command creates diagnostic inspection artifacts. CLI search
 
 ## Testing
 
-The suite contains 15 end-to-end parser tests that use real carrier samples, 32 auth/configuration/UI contract tests, and 6 repository tests. It covers parser behavior, JWT claims, membership lookup, protected routes, role gates, public endpoints, same-origin policy, the browser auth contract, CSV parity, and repository-boundary enforcement.
+The suite contains 15 end-to-end parser tests that use real carrier samples, 32 auth/configuration/UI contract tests, and 14 repository tests. It covers parser behavior, JWT claims, membership lookup, protected routes, role gates, public endpoints, same-origin policy, the browser auth contract, CSV parity, Postgres mappings, batch behavior, and repository-boundary enforcement. The real Postgres test is skipped unless its explicit environment flag and database URL are present.
 
 Run:
 
@@ -318,6 +322,7 @@ PyMuPDF is listed in both dependency manifests and is imported lazily by PDF-spe
 ## Current Constraints and Risks
 
 - Runtime rate storage is the repository-backed CSV/JSON adapter; the captured Supabase rate tables are not connected yet.
+- The Stage 4 Postgres adapter is verified, but import lifecycle ownership and Rate Desk read cutover remain future stages.
 - The filesystem runtime has no transaction boundaries, multi-process locks, or concurrent-writer protection. Database migrations now exist only as a captured baseline.
 - Authentication and membership role checks are active, but CSV storage is still one shared runtime warehouse. Organization-scoped rate persistence starts with the Postgres repository in Stage 4.
 - Parsing and large response construction happen synchronously in the API process.

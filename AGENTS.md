@@ -33,7 +33,7 @@ YAML files in `data/templates/`: `msc_far_east_v1.yaml`, `msc_zoned_inline_v1.ya
 Data lives at `data/runs/<import_id>/`. Approved rates go to `data/warehouse/approved_rates.csv`.
 
 ## Config
-Env var `RATE_INGEST_ROOT` overrides data root (defaults to cwd). `RATE_STORAGE_BACKEND` defaults to `csv`; `postgres` is reserved for Stage 4. Tests always set the data root:
+Env var `RATE_INGEST_ROOT` overrides data root (defaults to cwd). `RATE_STORAGE_BACKEND` defaults to `csv`. The Stage 4 Postgres adapter requires server-only `SUPABASE_DB_URL` and an explicit organization UUID. Tests always set the data root:
 ```python
 monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
 ```
@@ -59,7 +59,7 @@ monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
 ```
 rate_ingest/         # Python package (main logic)
   parsers/           # Parser family implementations
-  repositories/      # Persistence interface and CSV adapter
+  repositories/      # Persistence interface, CSV/Postgres adapters, mappings
   cli.py             # Typer CLI app
   api.py             # FastAPI app
   services.py        # Shared service layer
@@ -69,6 +69,8 @@ tests/
   test_rate_ingest_cli.py   # Parser/API integration tests
   test_auth.py              # Auth/API/UI contract tests
   test_repositories.py      # Repository parity and boundary tests
+  test_postgres_repository.py              # Postgres mapping/unit tests
+  test_postgres_repository_integration.py  # Explicit opt-in DB test
 UI/                          # Frontend (static files, no build)
 data/
   templates/                 # YAML template definitions
@@ -81,4 +83,5 @@ rate_sheet_files/            # Test fixtures (real carrier files)
 - `.eml` parser reads only the latest body, not the reply chain
 - Approving a new import with the same `carrier_key` auto-archives the previous approved one
 - Supabase Auth is active; rate data is still one shared CSV warehouse
-- No Postgres rate adapter or concurrency protection yet
+- Postgres adapter exists, but the runtime backend still defaults to CSV
+- Postgres integration tests require explicit opt-in and disposable organizations

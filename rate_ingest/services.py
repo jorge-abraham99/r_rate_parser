@@ -25,7 +25,12 @@ from rate_ingest.parsers.offer_block import parse_workbook as parse_offer_block_
 from rate_ingest.parsers.site_to_site_rows import parse_workbook as parse_site_to_site_workbook
 from rate_ingest.parsers.tabular_lane import parse_workbook as parse_tabular_workbook
 from rate_ingest.review import generate_review_markdown
-from rate_ingest.repositories import RateRepository, get_rate_repository
+from rate_ingest.repositories import (
+    LOCAL_CSV_ORGANIZATION_ID,
+    OrganizationId,
+    RateRepository,
+    get_rate_repository,
+)
 from rate_ingest.template_matcher import find_best_template, load_templates
 from rate_ingest.utils import read_csv_rows, read_json, write_csv_rows, write_json
 from rate_ingest.validate import validate_import
@@ -39,6 +44,17 @@ FX_RATES = {
 }
 
 BILL_OF_LADING_BASES = {"bill of lading", "b/l", "bl", "booking"}
+
+
+def resolve_repository_organization_id(
+    settings: Settings,
+    organization_id: OrganizationId | None,
+) -> OrganizationId:
+    if organization_id is not None and str(organization_id).strip():
+        return organization_id
+    if settings.rate_storage_backend == "csv":
+        return LOCAL_CSV_ORGANIZATION_ID
+    raise ValueError("organization_id is required for Postgres rate storage")
 
 
 def find_run_dir(settings: Settings, import_id: str) -> Path:
@@ -92,10 +108,16 @@ def import_source_file(
     source_file_name: str | None = None,
     *,
     repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
 ) -> dict[str, Any]:
     settings.ensure()
     rate_repository = repository if repository is not None else get_rate_repository(settings)
-    source = rate_repository.register_source_document(source_path, uploaded_by=uploaded_by)
+    repository_org_id = resolve_repository_organization_id(settings, organization_id)
+    source = rate_repository.register_source_document(
+        source_path,
+        organization_id=repository_org_id,
+        uploaded_by=uploaded_by,
+    )
     if source_file_name:
         source.file_name = Path(source_file_name).name
     inspected, _ = classify_source(settings, source)
@@ -174,7 +196,7 @@ def import_source_file(
         notes,
         validation,
     )
-    rate_repository.add_import(rate_import)
+    rate_repository.add_import(rate_import, organization_id=repository_org_id)
 
     return {
         "import_id": rate_import.id,
@@ -239,10 +261,12 @@ def list_imports(
     limit: int = 50,
     *,
     repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
 ) -> list[dict[str, Any]]:
     rate_repository = repository if repository is not None else get_rate_repository(settings)
+    repository_org_id = resolve_repository_organization_id(settings, organization_id)
     imports: list[dict[str, Any]] = []
-    for item in rate_repository.list_import_records():
+    for item in rate_repository.list_import_records(organization_id=repository_org_id):
         run_dir = settings.runs_dir / item.id
         source_snapshot = read_json_if_exists(run_dir / "source_snapshot.json") or {}
         validation_report = read_json_if_exists(run_dir / "validation_report.json") or {"summary": {}}
@@ -286,8 +310,10 @@ def approve_import_by_id(
     carrier_label: str | None = None,
     contract_tag: str | None = None,
     repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
 ) -> dict[str, Any]:
     rate_repository = repository if repository is not None else get_rate_repository(settings)
+    repository_org_id = resolve_repository_organization_id(settings, organization_id)
     run_dir = find_run_dir(settings, import_id)
     payload = load_run_payload(run_dir)
     rate_import = RateImport(**payload["rate_import"])
@@ -314,6 +340,7 @@ def approve_import_by_id(
             carrier_key,
             excluding=import_id,
             repository=rate_repository,
+            organization_id=repository_org_id,
         )
     approve_run(
         settings,
@@ -326,6 +353,7 @@ def approve_import_by_id(
         notes,
         approved_by,
         repository=rate_repository,
+        organization_id=repository_org_id,
     )
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
     return get_import_detail(settings, import_id)
@@ -337,11 +365,20 @@ def reject_import_by_id(
     reason: str,
     *,
     repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
 ) -> dict[str, Any]:
     rate_repository = repository if repository is not None else get_rate_repository(settings)
+    repository_org_id = resolve_repository_organization_id(settings, organization_id)
     run_dir = find_run_dir(settings, import_id)
     rate_import = RateImport(**read_json(run_dir / "rate_import.json"))
-    reject_run(settings, run_dir, rate_import, reason, repository=rate_repository)
+    reject_run(
+        settings,
+        run_dir,
+        rate_import,
+        reason,
+        repository=rate_repository,
+        organization_id=repository_org_id,
+    )
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
     return get_import_detail(settings, import_id)
 
@@ -351,10 +388,16 @@ def delete_import_by_id(
     import_id: str,
     *,
     repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
 ) -> dict[str, Any]:
     rate_repository = repository if repository is not None else get_rate_repository(settings)
+    repository_org_id = resolve_repository_organization_id(settings, organization_id)
     run_dir = find_run_dir(settings, import_id)
-    rate_repository.remove_import_data(import_id, remove_import_record=True)
+    rate_repository.remove_import_data(
+        import_id,
+        organization_id=repository_org_id,
+        remove_import_record=True,
+    )
     shutil.rmtree(run_dir)
     return {"deleted": True, "import_id": import_id}
 
@@ -365,19 +408,29 @@ def archive_previous_imports(
     *,
     excluding: str,
     repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
 ) -> None:
     rate_repository = repository if repository is not None else get_rate_repository(settings)
-    for item in list_imports(settings, limit=5000, repository=rate_repository):
+    repository_org_id = resolve_repository_organization_id(settings, organization_id)
+    for item in list_imports(
+        settings,
+        limit=5000,
+        repository=rate_repository,
+        organization_id=repository_org_id,
+    ):
         if item["import_id"] == excluding or item.get("status") != "approved":
             continue
         if item.get("carrier_key") != carrier_key:
             continue
         previous_dir = find_run_dir(settings, item["import_id"])
         previous = RateImport(**read_json(previous_dir / "rate_import.json"))
-        rate_repository.remove_import_data(previous.id)
+        rate_repository.remove_import_data(
+            previous.id,
+            organization_id=repository_org_id,
+        )
         previous.status = "archived"
         write_json(previous_dir / "rate_import.json", previous.model_dump(mode="json"))
-        rate_repository.update_import(previous)
+        rate_repository.update_import(previous, organization_id=repository_org_id)
 
 
 def search_approved_offers(
@@ -392,9 +445,13 @@ def search_approved_offers(
     limit: int = 200,
     *,
     repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
 ) -> list[dict[str, Any]]:
     rate_repository = repository if repository is not None else get_rate_repository(settings)
-    library = rate_repository.load_approved_rate_library()
+    repository_org_id = resolve_repository_organization_id(settings, organization_id)
+    library = rate_repository.load_approved_rate_library(
+        organization_id=repository_org_id,
+    )
     cards = library.cards
     offers = library.offers
     charges = library.charges
@@ -515,17 +572,25 @@ def get_rate_desk_data(
     limit: int = 2000,
     *,
     repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
 ) -> dict[str, Any]:
     rate_repository = repository if repository is not None else get_rate_repository(settings)
+    repository_org_id = resolve_repository_organization_id(settings, organization_id)
     all_rates = search_approved_offers(
         settings,
         limit=max(limit * 20, 50000),
         repository=rate_repository,
+        organization_id=repository_org_id,
     )
     haulage_rates = [rate for rate in all_rates if is_haulage_rate(rate)]
     quote_rates = [rate for rate in all_rates if not is_haulage_rate(rate)]
     rates = quote_rates[:limit]
-    imports = list_imports(settings, limit=500, repository=rate_repository)
+    imports = list_imports(
+        settings,
+        limit=500,
+        repository=rate_repository,
+        organization_id=repository_org_id,
+    )
     approved_at = [item.get("approved_at") for item in imports if item.get("approved_at")]
     last_refreshed = max(approved_at, key=parse_datetime_sort_key) if approved_at else None
 

@@ -23,15 +23,17 @@ For a concise architecture and maintenance guide, see [CONTEXT.md](CONTEXT.md).
 
 ## Supabase migration status
 
-Stage 0 of the auth and rate-database migration is captured in `supabase/`. The hosted `carrier-quotes` project already has eight RLS-protected tables and two applied migrations; their authoritative SQL is now versioned locally. The running application still uses filesystem CSV/JSON storage.
+Stage 0 of the auth and rate-database migration is captured in `supabase/`. The hosted `carrier-quotes` project has eight RLS-protected tables and three applied migrations; their SQL is versioned locally. The running application still uses filesystem CSV/JSON storage.
 
-See [supabase/README.md](supabase/README.md) for the project reference, applied migration versions, security baseline, credential handling, and the required future `application_id` reconciliation.
+See [supabase/README.md](supabase/README.md) for the project reference, applied migration versions, security baseline, credential handling, and the Stage 4 `application_id` reconciliation.
 
 Stages 1 and 2 add invite-only Supabase authentication. The backend validates user tokens against the project's public asymmetric JWKS. It then reads `organization_members` through RLS with the same user token. It does not use the JWT secret or a service-role key.
 
 The browser restores Supabase sessions, adds the access token through one shared API helper, and sends logged-out users to `/ui/login.html`. Viewers can read imports and rates. Operators and admins can also upload, approve, reject, and delete. Health and public browser configuration stay public; all rate APIs require both a valid user and an organization membership.
 
-Stage 3 puts all rate persistence behind `RateRepository`. `CsvRateRepository` is the active implementation, so the runtime still uses the same CSV/JSON files. `RATE_STORAGE_BACKEND` defaults to `csv`. The `postgres` value is reserved for Stage 4 and fails clearly because the Postgres repository does not exist yet.
+Stage 3 puts all rate persistence behind `RateRepository`. Stage 4 adds `PostgresRateRepository`, explicit model mappings, a small connection pool, organization-scoped queries, and batched writes. `CsvRateRepository` stays active because `RATE_STORAGE_BACKEND` defaults to `csv`.
+
+The Stage 4 `application_id` migration is applied to the hosted project. The guarded real-database Hapag integration test passed with organization isolation and complete cleanup. Production still stays on `csv` until the later lifecycle and read-cutover stages are complete.
 
 ## Canonical Output
 
@@ -91,7 +93,13 @@ The active storage setting is:
 RATE_STORAGE_BACKEND=csv
 ```
 
-Do not set it to `postgres` before Stage 4 is complete.
+For Stage 4 integration testing, set the server-only `SUPABASE_DB_URL` and run:
+
+```bash
+RUN_POSTGRES_INTEGRATION_TESTS=true pytest -q tests/test_postgres_repository_integration.py
+```
+
+The test creates two temporary organizations and deletes only those exact organizations when it finishes. Keep production on `csv` until the later cutover stages are complete.
 
 ## CLI Workflow
 

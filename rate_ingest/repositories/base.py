@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from rate_ingest.models import (
     CanonicalRate,
@@ -14,6 +15,10 @@ from rate_ingest.models import (
     RateOffer,
     SourceDocument,
 )
+
+
+OrganizationId = UUID | str
+LOCAL_CSV_ORGANIZATION_ID = "local-csv"
 
 
 @dataclass(frozen=True)
@@ -37,20 +42,44 @@ class RateRepository(ABC):
         self,
         source_path: Path,
         *,
+        organization_id: OrganizationId,
         uploaded_by: str | None = None,
     ) -> SourceDocument:
         raise NotImplementedError
 
     @abstractmethod
-    def add_import(self, rate_import: RateImport) -> None:
+    def add_import(
+        self,
+        rate_import: RateImport,
+        *,
+        organization_id: OrganizationId,
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def update_import(self, rate_import: RateImport) -> None:
+    def update_import(
+        self,
+        rate_import: RateImport,
+        *,
+        organization_id: OrganizationId,
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def list_import_records(self) -> tuple[RateImport, ...]:
+    def get_import_record(
+        self,
+        import_id: str,
+        *,
+        organization_id: OrganizationId,
+    ) -> RateImport | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_import_records(
+        self,
+        *,
+        organization_id: OrganizationId,
+    ) -> tuple[RateImport, ...]:
         raise NotImplementedError
 
     @abstractmethod
@@ -61,6 +90,8 @@ class RateRepository(ABC):
         charges: list[RateChargeLine],
         notes: list[RateNote],
         canonical_rates: list[CanonicalRate],
+        *,
+        organization_id: OrganizationId,
     ) -> None:
         raise NotImplementedError
 
@@ -69,10 +100,15 @@ class RateRepository(ABC):
         self,
         import_id: str,
         *,
+        organization_id: OrganizationId,
         remove_import_record: bool = False,
     ) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def load_approved_rate_library(self) -> ApprovedRateLibrary:
+    def load_approved_rate_library(
+        self,
+        *,
+        organization_id: OrganizationId,
+    ) -> ApprovedRateLibrary:
         raise NotImplementedError

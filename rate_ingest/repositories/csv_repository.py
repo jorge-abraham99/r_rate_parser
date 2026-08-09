@@ -14,7 +14,7 @@ from rate_ingest.models import (
     RateOffer,
     SourceDocument,
 )
-from rate_ingest.repositories.base import ApprovedRateLibrary, RateRepository
+from rate_ingest.repositories.base import ApprovedRateLibrary, OrganizationId, RateRepository
 from rate_ingest.source_registry import register_source
 from rate_ingest.utils import read_csv_rows, read_json
 from rate_ingest.warehouse import (
@@ -38,17 +38,51 @@ class CsvRateRepository(RateRepository):
         self,
         source_path: Path,
         *,
+        organization_id: OrganizationId,
         uploaded_by: str | None = None,
     ) -> SourceDocument:
+        del organization_id
         return register_source(self.settings, source_path, uploaded_by=uploaded_by)
 
-    def add_import(self, rate_import: RateImport) -> None:
+    def add_import(
+        self,
+        rate_import: RateImport,
+        *,
+        organization_id: OrganizationId,
+    ) -> None:
+        del organization_id
         record_import(self.settings, rate_import)
 
-    def update_import(self, rate_import: RateImport) -> None:
+    def update_import(
+        self,
+        rate_import: RateImport,
+        *,
+        organization_id: OrganizationId,
+    ) -> None:
+        del organization_id
         replace_import(self.settings, rate_import)
 
-    def list_import_records(self) -> tuple[RateImport, ...]:
+    def get_import_record(
+        self,
+        import_id: str,
+        *,
+        organization_id: OrganizationId,
+    ) -> RateImport | None:
+        return next(
+            (
+                item
+                for item in self.list_import_records(organization_id=organization_id)
+                if item.id == import_id
+            ),
+            None,
+        )
+
+    def list_import_records(
+        self,
+        *,
+        organization_id: OrganizationId,
+    ) -> tuple[RateImport, ...]:
+        del organization_id
         rows = read_csv_rows(warehouse_paths(self.settings)["imports"])
         return tuple(RateImport(**_deserialize_row(row)) for row in rows)
 
@@ -59,7 +93,10 @@ class CsvRateRepository(RateRepository):
         charges: list[RateChargeLine],
         notes: list[RateNote],
         canonical_rates: list[CanonicalRate],
+        *,
+        organization_id: OrganizationId,
     ) -> None:
+        del organization_id
         publish_approved_rows(
             self.settings,
             cards,
@@ -73,15 +110,22 @@ class CsvRateRepository(RateRepository):
         self,
         import_id: str,
         *,
+        organization_id: OrganizationId,
         remove_import_record: bool = False,
     ) -> None:
+        del organization_id
         remove_import_rows(
             self.settings,
             import_id,
             remove_import_record=remove_import_record,
         )
 
-    def load_approved_rate_library(self) -> ApprovedRateLibrary:
+    def load_approved_rate_library(
+        self,
+        *,
+        organization_id: OrganizationId,
+    ) -> ApprovedRateLibrary:
+        del organization_id
         paths = warehouse_paths(self.settings)
         cards = tuple(
             RateCard(**_deserialize_row(row))

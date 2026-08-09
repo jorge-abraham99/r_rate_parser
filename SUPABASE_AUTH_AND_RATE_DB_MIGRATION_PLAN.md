@@ -1001,7 +1001,7 @@ This is an intentional stable checkpoint.
 
 STAGE 3 — Introduce a persistence/repository abstraction with CSV still active
 
-Implementation status: complete on 8 August 2026. `RateRepository` and `CsvRateRepository` now cover source registration, import records, approval publication, removal, and approved-library reads. `RATE_STORAGE_BACKEND=csv` remains the default. The `postgres` value is reserved and fails clearly until Stage 4. Existing run artifacts and API/UI contracts are unchanged.
+Implementation status: complete on 8 August 2026. `RateRepository` and `CsvRateRepository` now cover source registration, import records, approval publication, removal, and approved-library reads. `RATE_STORAGE_BACKEND=csv` remains the default. At this checkpoint, the `postgres` value was reserved until Stage 4. Existing run artifacts and API/UI contracts were unchanged.
 
 Objective
 
@@ -1107,6 +1107,8 @@ Stop here
 Do not add Postgres writes until the CSV adapter is proven.
 
 STAGE 4 — Implement PostgresRateRepository without production cutover
+
+Implementation status: complete on 9 August 2026. The Postgres adapter, explicit mappings, SSL connection pool, organization-scoped operations, bulk writes, and application-ID migration are present. Migration `20260808150650_add_application_ids` is applied remotely. The guarded real Hapag test passed its entity-count, application-ID, checksum, cleanup, and organization-isolation checks. Post-migration advisors found no warning- or error-level issues. Production remains on CSV.
 
 Objective
 

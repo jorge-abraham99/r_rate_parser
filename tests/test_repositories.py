@@ -19,6 +19,7 @@ from rate_ingest.models import (
     RateOffer,
 )
 from rate_ingest.repositories import (
+    LOCAL_CSV_ORGANIZATION_ID,
     ApprovedRateLibrary,
     CsvRateRepository,
     RateRepository,
@@ -37,13 +38,6 @@ def test_rate_storage_backend_defaults_to_csv(tmp_path: Path, monkeypatch) -> No
     assert isinstance(get_rate_repository(settings), CsvRateRepository)
 
 
-def test_postgres_backend_is_reserved_for_stage_4(tmp_path: Path) -> None:
-    settings = replace(Settings.load(cwd=tmp_path), rate_storage_backend="postgres")
-
-    with pytest.raises(RuntimeError, match="Stage 4"):
-        get_rate_repository(settings)
-
-
 def test_invalid_rate_storage_backend_fails_at_startup(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("RATE_STORAGE_BACKEND", "sqlite")
 
@@ -58,8 +52,16 @@ def test_csv_repository_preserves_entities_and_source_metadata(tmp_path: Path) -
     incoming = tmp_path / "sample.csv"
     incoming.write_text("origin,destination,amount\nLondon,Singapore,100\n", encoding="utf-8")
 
-    source = repository.register_source_document(incoming, uploaded_by="operator@example.com")
-    duplicate = repository.register_source_document(incoming, uploaded_by="other@example.com")
+    source = repository.register_source_document(
+        incoming,
+        organization_id=LOCAL_CSV_ORGANIZATION_ID,
+        uploaded_by="operator@example.com",
+    )
+    duplicate = repository.register_source_document(
+        incoming,
+        organization_id=LOCAL_CSV_ORGANIZATION_ID,
+        uploaded_by="other@example.com",
+    )
     rate_import = RateImport(
         id="import_repository_test",
         source_document_id=source.id,
@@ -111,7 +113,10 @@ def test_csv_repository_preserves_entities_and_source_metadata(tmp_path: Path) -
     )
 
     assert duplicate.id == source.id
-    repository.add_import(rate_import)
+    repository.add_import(
+        rate_import,
+        organization_id=LOCAL_CSV_ORGANIZATION_ID,
+    )
     write_json(
         settings.runs_dir / rate_import.id / "source_snapshot.json",
         {
@@ -119,10 +124,21 @@ def test_csv_repository_preserves_entities_and_source_metadata(tmp_path: Path) -
             "operator_carrier_key": "test-carrier",
         },
     )
-    repository.publish_import_bundle([card], [offer], [charge], [note], [canonical])
+    repository.publish_import_bundle(
+        [card],
+        [offer],
+        [charge],
+        [note],
+        [canonical],
+        organization_id=LOCAL_CSV_ORGANIZATION_ID,
+    )
 
-    import_records = repository.list_import_records()
-    library = repository.load_approved_rate_library()
+    import_records = repository.list_import_records(
+        organization_id=LOCAL_CSV_ORGANIZATION_ID,
+    )
+    library = repository.load_approved_rate_library(
+        organization_id=LOCAL_CSV_ORGANIZATION_ID,
+    )
 
     assert import_records[0].id == rate_import.id
     assert import_records[0].source_document_id == source.id
@@ -133,14 +149,27 @@ def test_csv_repository_preserves_entities_and_source_metadata(tmp_path: Path) -
     assert library.source_by_import[rate_import.id]["operator_carrier_key"] == "test-carrier"
 
     rate_import.status = "archived"
-    repository.update_import(rate_import)
+    repository.update_import(
+        rate_import,
+        organization_id=LOCAL_CSV_ORGANIZATION_ID,
+    )
 
-    assert repository.list_import_records()[0].status == "archived"
+    assert repository.list_import_records(
+        organization_id=LOCAL_CSV_ORGANIZATION_ID,
+    )[0].status == "archived"
 
-    repository.remove_import_data(rate_import.id, remove_import_record=True)
+    repository.remove_import_data(
+        rate_import.id,
+        organization_id=LOCAL_CSV_ORGANIZATION_ID,
+        remove_import_record=True,
+    )
 
-    assert repository.list_import_records() == ()
-    assert repository.load_approved_rate_library().offers == ()
+    assert repository.list_import_records(
+        organization_id=LOCAL_CSV_ORGANIZATION_ID,
+    ) == ()
+    assert repository.load_approved_rate_library(
+        organization_id=LOCAL_CSV_ORGANIZATION_ID,
+    ).offers == ()
 
 
 def test_search_service_uses_injected_repository(tmp_path: Path) -> None:
@@ -177,7 +206,9 @@ def test_search_service_uses_injected_repository(tmp_path: Path) -> None:
         repository=repository,
     )
 
-    repository.load_approved_rate_library.assert_called_once_with()
+    repository.load_approved_rate_library.assert_called_once_with(
+        organization_id=LOCAL_CSV_ORGANIZATION_ID,
+    )
     assert [row["offer_id"] for row in rows] == [offer.id]
 
 
