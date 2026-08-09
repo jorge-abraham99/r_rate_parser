@@ -49,7 +49,9 @@ SOURCE_COLUMNS = """
 IMPORT_COLUMNS = """
     i.id, i.application_id, i.organization_id, i.source_document_id,
     i.template_id, i.parser_family, i.match_confidence, i.status,
-    i.validation_report, i.parse_summary, i.approved_at, i.approved_by,
+    i.carrier_key, i.validation_report, i.parse_summary,
+    i.approved_at, i.approved_by, i.rejected_at, i.rejected_by,
+    i.rejection_reason, i.archived_at,
     i.created_at, s.application_id as source_application_id
 """
 
@@ -136,59 +138,7 @@ class PostgresRateRepository(RateRepository):
     ) -> None:
         organization_uuid = require_organization_uuid(organization_id)
         with self._pool.connection() as connection:
-            source_database_id = self._application_database_id(
-                connection,
-                "source_documents",
-                rate_import.source_document_id,
-                organization_uuid,
-            )
-            existing_id = self._optional_application_database_id(
-                connection,
-                "rate_imports",
-                rate_import.id,
-                organization_uuid,
-            )
-            payload = rate_import_to_db(
-                rate_import,
-                organization_id=organization_uuid,
-                database_id=existing_id or uuid4(),
-                source_document_database_id=source_database_id,
-            )
-            connection.execute(
-                """
-                insert into public.rate_imports (
-                    id, application_id, organization_id, source_document_id,
-                    template_id, parser_family, match_confidence, status,
-                    validation_error_count, validation_warning_count,
-                    validation_report, parse_summary, approved_at, approved_by,
-                    created_at
-                ) values (
-                    %(id)s, %(application_id)s, %(organization_id)s,
-                    %(source_document_id)s, %(template_id)s, %(parser_family)s,
-                    %(match_confidence)s, %(status)s,
-                    %(validation_error_count)s, %(validation_warning_count)s,
-                    %(validation_report)s, %(parse_summary)s, %(approved_at)s,
-                    %(approved_by)s, %(created_at)s
-                )
-                on conflict (organization_id, application_id) do update set
-                    source_document_id = excluded.source_document_id,
-                    template_id = excluded.template_id,
-                    parser_family = excluded.parser_family,
-                    match_confidence = excluded.match_confidence,
-                    status = excluded.status,
-                    validation_error_count = excluded.validation_error_count,
-                    validation_warning_count = excluded.validation_warning_count,
-                    validation_report = excluded.validation_report,
-                    parse_summary = excluded.parse_summary,
-                    approved_at = excluded.approved_at,
-                    approved_by = excluded.approved_by
-                """,
-                {
-                    **payload,
-                    "validation_report": Jsonb(payload["validation_report"]),
-                    "parse_summary": Jsonb(payload["parse_summary"]),
-                },
-            )
+            self._upsert_import(connection, rate_import, organization_uuid)
 
     def update_import(
         self,
@@ -257,71 +207,210 @@ class PostgresRateRepository(RateRepository):
             return
 
         with self._pool.connection() as connection:
-            import_database_id = self._application_database_id(
+            self._replace_import_bundle(
                 connection,
-                "rate_imports",
                 import_application_id,
+                cards,
+                offers,
+                charges,
+                notes,
                 organization_uuid,
             )
+
+    def save_import_bundle(
+        self,
+        rate_import: RateImport,
+        cards: list[RateCard],
+        offers: list[RateOffer],
+        charges: list[RateChargeLine],
+        notes: list[RateNote],
+        canonical_rates: list[CanonicalRate],
+        *,
+        organization_id: OrganizationId,
+    ) -> None:
+        del canonical_rates
+        organization_uuid = require_organization_uuid(organization_id)
+        import_application_id = validate_bundle(cards, offers, charges, notes)
+        if (
+            import_application_id is not None
+            and import_application_id != rate_import.id
+        ):
+            raise ValueError("The parsed rows do not belong to the supplied import")
+        with self._pool.connection() as connection:
+            self._upsert_import(connection, rate_import, organization_uuid)
+            if import_application_id is not None:
+                self._replace_import_bundle(
+                    connection,
+                    import_application_id,
+                    cards,
+                    offers,
+                    charges,
+                    notes,
+                    organization_uuid,
+                )
+
+    def approve_import(
+        self,
+        rate_import: RateImport,
+        cards: list[RateCard],
+        offers: list[RateOffer],
+        charges: list[RateChargeLine],
+        notes: list[RateNote],
+        canonical_rates: list[CanonicalRate],
+        *,
+        organization_id: OrganizationId,
+        carrier_key: str | None,
+        approved_by: str,
+        approved_by_user_id: str | None = None,
+    ) -> RateImport:
+        del canonical_rates
+        import_application_id = validate_bundle(cards, offers, charges, notes)
+        if (
+            import_application_id is not None
+            and import_application_id != rate_import.id
+        ):
+            raise ValueError("The parsed rows do not belong to the supplied import")
+        organization_uuid = require_organization_uuid(organization_id)
+        approver_uuid = optional_uuid(approved_by_user_id)
+
+        with self._pool.connection() as connection:
+            if carrier_key:
+                connection.execute(
+                    """
+                    select pg_advisory_xact_lock(hashtextextended(%s, 0))
+                    """,
+                    (f"{organization_uuid}:{carrier_key}",),
+                )
+                rows = connection.execute(
+                    """
+                    select id, application_id, status, validation_error_count
+                    from public.rate_imports
+                    where organization_id = %s
+                      and (
+                        application_id = %s
+                        or (carrier_key = %s and status = 'approved')
+                      )
+                    order by id
+                    for update
+                    """,
+                    (organization_uuid, rate_import.id, carrier_key),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    select id, application_id, status, validation_error_count
+                    from public.rate_imports
+                    where organization_id = %s and application_id = %s
+                    for update
+                    """,
+                    (organization_uuid, rate_import.id),
+                ).fetchall()
+            target = next(
+                (row for row in rows if row["application_id"] == rate_import.id),
+                None,
+            )
+            if target is None:
+                raise ValueError(f"Import not found: {rate_import.id}")
+            if target["status"] != "pending_review":
+                raise ValueError("Only a pending review import can be approved.")
+            if target["validation_error_count"]:
+                raise ValueError(
+                    "Import has blocking validation errors and cannot be approved."
+                )
+
+            if cards:
+                self._update_cards_for_approval(
+                    connection,
+                    cards,
+                    target["id"],
+                    organization_uuid,
+                )
+
+            archived_ids = [
+                row["id"]
+                for row in rows
+                if row["application_id"] != rate_import.id
+                and row["status"] == "approved"
+            ]
+            if archived_ids:
+                connection.execute(
+                    """
+                    update public.rate_imports
+                    set status = 'archived', archived_at = now()
+                    where organization_id = %s and id = any(%s)
+                    """,
+                    (organization_uuid, archived_ids),
+                )
             connection.execute(
                 """
-                delete from public.rate_cards
-                where organization_id = %s and import_id = %s
+                update public.rate_imports
+                set status = 'approved',
+                    carrier_key = %s,
+                    approved_at = now(),
+                    approved_by = %s,
+                    rejected_at = null,
+                    rejected_by = null,
+                    rejection_reason = null,
+                    archived_at = null,
+                    parse_summary = parse_summary || %s
+                where organization_id = %s and id = %s
                 """,
-                (organization_uuid, import_database_id),
+                (
+                    carrier_key,
+                    approver_uuid,
+                    Jsonb({"approved_by_label": approved_by}),
+                    organization_uuid,
+                    target["id"],
+                ),
             )
+            row = self._get_import_row(connection, rate_import.id, organization_uuid)
+        if row is None:
+            raise ValueError(f"Import not found after approval: {rate_import.id}")
+        return rate_import_from_db(row)
 
-            card_ids = {card.id: uuid4() for card in cards}
-            offer_ids = {offer.id: uuid4() for offer in offers}
-            card_payloads = [
-                rate_card_to_db(
-                    card,
-                    organization_id=organization_uuid,
-                    database_id=card_ids[card.id],
-                    import_database_id=import_database_id,
-                )
-                for card in cards
-            ]
-            offer_payloads = [
-                rate_offer_to_db(
-                    offer,
-                    organization_id=organization_uuid,
-                    database_id=offer_ids[offer.id],
-                    import_database_id=import_database_id,
-                    card_database_id=card_ids[offer.rate_card_id],
-                )
-                for offer in offers
-            ]
-            offer_by_id = {offer.id: offer for offer in offers}
-            charge_payloads = [
-                rate_charge_line_to_db(
-                    charge,
-                    organization_id=organization_uuid,
-                    database_id=uuid4(),
-                    card_database_id=card_ids[
-                        offer_by_id[charge.rate_offer_id].rate_card_id
-                    ],
-                    offer_database_id=offer_ids[charge.rate_offer_id],
-                )
-                for charge in charges
-            ]
-            note_payloads = [
-                rate_note_to_db(
-                    note,
-                    organization_id=organization_uuid,
-                    database_id=uuid4(),
-                    card_database_id=card_ids[note.rate_card_id],
-                    offer_database_id=(
-                        offer_ids[note.rate_offer_id] if note.rate_offer_id else None
-                    ),
-                )
-                for note in notes
-            ]
-
-            self._insert_cards(connection, card_payloads)
-            self._insert_offers(connection, offer_payloads)
-            self._insert_charges(connection, charge_payloads)
-            self._insert_notes(connection, note_payloads)
+    def reject_import(
+        self,
+        rate_import: RateImport,
+        reason: str,
+        *,
+        organization_id: OrganizationId,
+        rejected_by_user_id: str | None = None,
+    ) -> RateImport:
+        organization_uuid = require_organization_uuid(organization_id)
+        rejector_uuid = optional_uuid(rejected_by_user_id)
+        with self._pool.connection() as connection:
+            row = connection.execute(
+                """
+                select id, status
+                from public.rate_imports
+                where organization_id = %s and application_id = %s
+                for update
+                """,
+                (organization_uuid, rate_import.id),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Import not found: {rate_import.id}")
+            if row["status"] not in {"pending_review", "failed"}:
+                raise ValueError("Only a pending or failed import can be rejected.")
+            connection.execute(
+                """
+                update public.rate_imports
+                set status = 'rejected',
+                    rejected_at = now(),
+                    rejected_by = %s,
+                    rejection_reason = %s
+                where organization_id = %s and id = %s
+                """,
+                (rejector_uuid, reason, organization_uuid, row["id"]),
+            )
+            stored = self._get_import_row(
+                connection,
+                rate_import.id,
+                organization_uuid,
+            )
+        if stored is None:
+            raise ValueError(f"Import not found after rejection: {rate_import.id}")
+        return rate_import_from_db(stored)
 
     def remove_import_data(
         self,
@@ -364,6 +453,23 @@ class PostgresRateRepository(RateRepository):
     ) -> ApprovedRateLibrary:
         organization_uuid = require_organization_uuid(organization_id)
         with self._pool.connection() as connection:
+            approved_import_rows = connection.execute(
+                """
+                select id
+                from public.rate_imports
+                where organization_id = %s and status = 'approved'
+                """,
+                (organization_uuid,),
+            ).fetchall()
+            if not approved_import_rows:
+                return ApprovedRateLibrary(
+                    cards=(),
+                    offers=(),
+                    charges=(),
+                    notes=(),
+                    source_by_import={},
+                )
+            approved_import_ids = [row["id"] for row in approved_import_rows]
             card_rows = connection.execute(
                 """
                 select c.id, c.application_id, c.provider, c.carrier,
@@ -373,10 +479,10 @@ class PostgresRateRepository(RateRepository):
                 from public.rate_cards c
                 join public.rate_imports i
                   on i.organization_id = c.organization_id and i.id = c.import_id
-                where c.organization_id = %s and i.status = 'approved'
+                where c.organization_id = %s and c.import_id = any(%s)
                 order by c.created_at, c.application_id
                 """,
-                (organization_uuid,),
+                (organization_uuid, approved_import_ids),
             ).fetchall()
             offer_rows = connection.execute(
                 """
@@ -390,10 +496,10 @@ class PostgresRateRepository(RateRepository):
                   on c.organization_id = o.organization_id and c.id = o.rate_card_id
                 join public.rate_imports i
                   on i.organization_id = o.organization_id and i.id = o.import_id
-                where o.organization_id = %s and i.status = 'approved'
+                where o.organization_id = %s and o.import_id = any(%s)
                 order by o.created_at, o.application_id
                 """,
-                (organization_uuid,),
+                (organization_uuid, approved_import_ids),
             ).fetchall()
             charge_rows = connection.execute(
                 """
@@ -405,12 +511,10 @@ class PostgresRateRepository(RateRepository):
                 join public.rate_offers o
                   on o.organization_id = ch.organization_id
                  and o.id = ch.rate_offer_id
-                join public.rate_imports i
-                  on i.organization_id = o.organization_id and i.id = o.import_id
-                where ch.organization_id = %s and i.status = 'approved'
+                where ch.organization_id = %s and o.import_id = any(%s)
                 order by ch.created_at, ch.application_id
                 """,
-                (organization_uuid,),
+                (organization_uuid, approved_import_ids),
             ).fetchall()
             note_rows = connection.execute(
                 """
@@ -423,12 +527,10 @@ class PostgresRateRepository(RateRepository):
                   on c.organization_id = n.organization_id and c.id = n.rate_card_id
                 left join public.rate_offers o
                   on o.organization_id = n.organization_id and o.id = n.rate_offer_id
-                join public.rate_imports i
-                  on i.organization_id = c.organization_id and i.id = c.import_id
-                where n.organization_id = %s and i.status = 'approved'
+                where n.organization_id = %s and c.import_id = any(%s)
                 order by n.created_at, n.application_id
                 """,
-                (organization_uuid,),
+                (organization_uuid, approved_import_ids),
             ).fetchall()
             source_rows = connection.execute(
                 """
@@ -441,9 +543,9 @@ class PostgresRateRepository(RateRepository):
                 join public.rate_imports i
                   on i.organization_id = s.organization_id
                  and i.source_document_id = s.id
-                where s.organization_id = %s and i.status = 'approved'
+                where s.organization_id = %s and i.id = any(%s)
                 """,
-                (organization_uuid,),
+                (organization_uuid, approved_import_ids),
             ).fetchall()
 
         source_by_import: dict[str, dict[str, Any]] = {}
@@ -459,6 +561,196 @@ class PostgresRateRepository(RateRepository):
             notes=tuple(rate_note_from_db(row) for row in note_rows),
             source_by_import=source_by_import,
         )
+
+    def _upsert_import(
+        self,
+        connection: Any,
+        rate_import: RateImport,
+        organization_id: UUID,
+    ) -> None:
+        source_database_id = self._application_database_id(
+            connection,
+            "source_documents",
+            rate_import.source_document_id,
+            organization_id,
+        )
+        existing_id = self._optional_application_database_id(
+            connection,
+            "rate_imports",
+            rate_import.id,
+            organization_id,
+        )
+        payload = rate_import_to_db(
+            rate_import,
+            organization_id=organization_id,
+            database_id=existing_id or uuid4(),
+            source_document_database_id=source_database_id,
+        )
+        connection.execute(
+            """
+            insert into public.rate_imports (
+                id, application_id, organization_id, source_document_id,
+                template_id, parser_family, match_confidence, status,
+                carrier_key, validation_error_count, validation_warning_count,
+                validation_report, parse_summary, approved_at, approved_by,
+                rejected_at, rejected_by, rejection_reason, archived_at,
+                created_at
+            ) values (
+                %(id)s, %(application_id)s, %(organization_id)s,
+                %(source_document_id)s, %(template_id)s, %(parser_family)s,
+                %(match_confidence)s, %(status)s, %(carrier_key)s,
+                %(validation_error_count)s, %(validation_warning_count)s,
+                %(validation_report)s, %(parse_summary)s, %(approved_at)s,
+                %(approved_by)s, %(rejected_at)s, %(rejected_by)s,
+                %(rejection_reason)s, %(archived_at)s, %(created_at)s
+            )
+            on conflict (organization_id, application_id) do update set
+                source_document_id = excluded.source_document_id,
+                template_id = excluded.template_id,
+                parser_family = excluded.parser_family,
+                match_confidence = excluded.match_confidence,
+                status = excluded.status,
+                carrier_key = excluded.carrier_key,
+                validation_error_count = excluded.validation_error_count,
+                validation_warning_count = excluded.validation_warning_count,
+                validation_report = excluded.validation_report,
+                parse_summary = excluded.parse_summary,
+                approved_at = excluded.approved_at,
+                approved_by = excluded.approved_by,
+                rejected_at = excluded.rejected_at,
+                rejected_by = excluded.rejected_by,
+                rejection_reason = excluded.rejection_reason,
+                archived_at = excluded.archived_at
+            """,
+            {
+                **payload,
+                "validation_report": Jsonb(payload["validation_report"]),
+                "parse_summary": Jsonb(payload["parse_summary"]),
+            },
+        )
+
+    def _replace_import_bundle(
+        self,
+        connection: Any,
+        import_application_id: str,
+        cards: list[RateCard],
+        offers: list[RateOffer],
+        charges: list[RateChargeLine],
+        notes: list[RateNote],
+        organization_id: UUID,
+    ) -> None:
+        import_database_id = self._application_database_id(
+            connection,
+            "rate_imports",
+            import_application_id,
+            organization_id,
+        )
+        connection.execute(
+            """
+            delete from public.rate_cards
+            where organization_id = %s and import_id = %s
+            """,
+            (organization_id, import_database_id),
+        )
+
+        card_ids = {card.id: uuid4() for card in cards}
+        offer_ids = {offer.id: uuid4() for offer in offers}
+        card_payloads = [
+            rate_card_to_db(
+                card,
+                organization_id=organization_id,
+                database_id=card_ids[card.id],
+                import_database_id=import_database_id,
+            )
+            for card in cards
+        ]
+        offer_payloads = [
+            rate_offer_to_db(
+                offer,
+                organization_id=organization_id,
+                database_id=offer_ids[offer.id],
+                import_database_id=import_database_id,
+                card_database_id=card_ids[offer.rate_card_id],
+            )
+            for offer in offers
+        ]
+        offer_by_id = {offer.id: offer for offer in offers}
+        charge_payloads = [
+            rate_charge_line_to_db(
+                charge,
+                organization_id=organization_id,
+                database_id=uuid4(),
+                card_database_id=card_ids[
+                    offer_by_id[charge.rate_offer_id].rate_card_id
+                ],
+                offer_database_id=offer_ids[charge.rate_offer_id],
+            )
+            for charge in charges
+        ]
+        note_payloads = [
+            rate_note_to_db(
+                note,
+                organization_id=organization_id,
+                database_id=uuid4(),
+                card_database_id=card_ids[note.rate_card_id],
+                offer_database_id=(
+                    offer_ids[note.rate_offer_id] if note.rate_offer_id else None
+                ),
+            )
+            for note in notes
+        ]
+
+        self._insert_cards(connection, card_payloads)
+        self._insert_offers(connection, offer_payloads)
+        self._insert_charges(connection, charge_payloads)
+        self._insert_notes(connection, note_payloads)
+
+    @staticmethod
+    def _update_cards_for_approval(
+        connection: Any,
+        cards: list[RateCard],
+        import_database_id: UUID,
+        organization_id: UUID,
+    ) -> None:
+        with connection.cursor() as cursor:
+            cursor.executemany(
+                """
+                update public.rate_cards
+                set provider = %(provider)s,
+                    carrier = %(carrier)s
+                where organization_id = %(organization_id)s
+                  and import_id = %(import_id)s
+                  and application_id = %(application_id)s
+                """,
+                [
+                    {
+                        "provider": card.provider_name,
+                        "carrier": card.carrier_name,
+                        "organization_id": organization_id,
+                        "import_id": import_database_id,
+                        "application_id": card.id,
+                    }
+                    for card in cards
+                ],
+            )
+
+    def _get_import_row(
+        self,
+        connection: Any,
+        import_id: str,
+        organization_id: UUID,
+    ) -> dict[str, Any] | None:
+        return connection.execute(
+            f"""
+            select {IMPORT_COLUMNS}
+            from public.rate_imports i
+            join public.source_documents s
+              on s.organization_id = i.organization_id
+             and s.id = i.source_document_id
+            where i.organization_id = %s and i.application_id = %s
+            """,
+            (organization_id, import_id),
+        ).fetchone()
 
     def _application_database_id(
         self,
@@ -591,6 +883,15 @@ def require_organization_uuid(organization_id: OrganizationId) -> UUID:
         return UUID(str(organization_id))
     except (TypeError, ValueError) as exc:
         raise ValueError("A valid organization_id UUID is required") from exc
+
+
+def optional_uuid(value: str | None) -> UUID | None:
+    if not value:
+        return None
+    try:
+        return UUID(str(value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("A valid authenticated user UUID is required") from exc
 
 
 def validate_bundle(

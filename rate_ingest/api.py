@@ -100,7 +100,9 @@ def api_list_imports(
     context: Annotated[RequestContext, Depends(require_organization_member)],
     limit: int = 50,
 ) -> list[dict]:
-    return list_imports(settings(), limit=limit, organization_id=context.organization_id)
+    return list_imports(
+        settings(), limit=limit, organization_id=context.organization_id
+    )
 
 
 @app.post("/api/imports")
@@ -159,6 +161,7 @@ def api_approve_import(
             carrier_label=payload.carrier_label,
             contract_tag=payload.contract_tag,
             organization_id=context.organization_id,
+            approved_by_user_id=str(context.user.user_id),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -176,6 +179,7 @@ def api_reject_import(
             import_id,
             payload.reason,
             organization_id=context.organization_id,
+            rejected_by_user_id=str(context.user.user_id),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

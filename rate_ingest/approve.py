@@ -23,29 +23,34 @@ def approve_import(
     *,
     repository: RateRepository,
     organization_id: OrganizationId,
-) -> None:
+    carrier_key: str | None = None,
+    approved_by_user_id: str | None = None,
+) -> RateImport:
     if validation.summary.get("errors", 0) > 0:
-        raise ValueError("Import has blocking validation errors and cannot be approved.")
-    approval_payload = {
-        "import_id": rate_import.id,
-        "decision": "approved",
-        "approved_by": approved_by,
-        "approved_at": datetime.now(timezone.utc).isoformat(),
-    }
-    write_json(run_dir / "approval.json", approval_payload)
-    rate_import.status = "approved"
-    rate_import.approved_by = approved_by
-    rate_import.approved_at = datetime.now(timezone.utc)
+        raise ValueError(
+            "Import has blocking validation errors and cannot be approved."
+        )
     canonical_rates = build_canonical_rates(cards[0], offers) if cards else []
-    repository.publish_import_bundle(
+    approved = repository.approve_import(
+        rate_import,
         cards,
         offers,
         charges,
         notes,
         canonical_rates,
         organization_id=organization_id,
+        carrier_key=carrier_key,
+        approved_by=approved_by,
+        approved_by_user_id=approved_by_user_id,
     )
-    repository.update_import(rate_import, organization_id=organization_id)
+    approval_payload = {
+        "import_id": approved.id,
+        "decision": "approved",
+        "approved_by": approved_by,
+        "approved_at": (approved.approved_at or datetime.now(timezone.utc)).isoformat(),
+    }
+    write_json(run_dir / "approval.json", approval_payload)
+    return approved
 
 
 def reject_import(
@@ -56,13 +61,20 @@ def reject_import(
     *,
     repository: RateRepository,
     organization_id: OrganizationId,
-) -> None:
+    rejected_by_user_id: str | None = None,
+) -> RateImport:
+    rejected = repository.reject_import(
+        rate_import,
+        reason,
+        organization_id=organization_id,
+        rejected_by_user_id=rejected_by_user_id,
+    )
     approval_payload = {
-        "import_id": rate_import.id,
+        "import_id": rejected.id,
         "decision": "rejected",
         "reason": reason,
-        "rejected_at": datetime.now(timezone.utc).isoformat(),
+        "rejected_at": (rejected.rejected_at or datetime.now(timezone.utc)).isoformat(),
+        "rejected_by": rejected_by_user_id,
     }
     write_json(run_dir / "approval.json", approval_payload)
-    rate_import.status = "rejected"
-    repository.update_import(rate_import, organization_id=organization_id)
+    return rejected

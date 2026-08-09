@@ -96,6 +96,51 @@ class RateRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def save_import_bundle(
+        self,
+        rate_import: RateImport,
+        cards: list[RateCard],
+        offers: list[RateOffer],
+        charges: list[RateChargeLine],
+        notes: list[RateNote],
+        canonical_rates: list[CanonicalRate],
+        *,
+        organization_id: OrganizationId,
+    ) -> None:
+        """Persist parsed rows before review. CSV keeps its legacy warehouse rule."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def approve_import(
+        self,
+        rate_import: RateImport,
+        cards: list[RateCard],
+        offers: list[RateOffer],
+        charges: list[RateChargeLine],
+        notes: list[RateNote],
+        canonical_rates: list[CanonicalRate],
+        *,
+        organization_id: OrganizationId,
+        carrier_key: str | None,
+        approved_by: str,
+        approved_by_user_id: str | None = None,
+    ) -> RateImport:
+        """Approve one import and archive its current carrier replacement."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def reject_import(
+        self,
+        rate_import: RateImport,
+        reason: str,
+        *,
+        organization_id: OrganizationId,
+        rejected_by_user_id: str | None = None,
+    ) -> RateImport:
+        """Reject an import without deleting its parsed rows."""
+        raise NotImplementedError
+
+    @abstractmethod
     def remove_import_data(
         self,
         import_id: str,

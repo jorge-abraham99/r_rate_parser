@@ -70,7 +70,17 @@ The test creates two unique temporary organizations and deletes only those organ
 
 The committed migration file SHA-256 is `6c69c57abdda4a25785a84fda7b0475fcacbb912ffcbb4198448748e9b176715`.
 
-Production remains on `RATE_STORAGE_BACKEND=csv`. Stage 5 will add full Postgres import and approval lifecycle ownership before any production cutover.
+Production remains on `RATE_STORAGE_BACKEND=csv`. Stage 5 lifecycle ownership is complete; Stage 6 will move Import UI and Rate Desk reads before the production cutover.
+
+## Stage 5 lifecycle migration
+
+Migration `20260809210000_allow_signed_charge_amounts.sql` was applied on 9 August 2026. It removes the non-negative check from charge-line amounts. Existing parsers use signed charge values for discounts and freight adjustments, so Postgres must preserve those values. Offer base amounts remain non-negative.
+
+Stage 5 persists cards, offers, charge lines, and notes before review. Approval and same-carrier archive run in one transaction. Archived and rejected rows remain in Postgres. Deleting an import cascades to parsed children but does not delete its source document.
+
+The remote migration list matches all four local migrations, and the post-migration public-schema lint reports no errors. Guarded tests compare real CSV parser output with Postgres for all nine parser families. The tests create unique temporary organizations and remove only those exact IDs during cleanup.
+
+Production remains on `RATE_STORAGE_BACKEND=csv` until Stage 6 moves Import UI and Rate Desk reads.
 
 ## Stage 1 and Stage 2 authentication status
 

@@ -69,10 +69,13 @@ def rate_import_to_db(
     source_document_database_id: UUID,
 ) -> dict[str, Any]:
     approved_by = _uuid_or_none(rate_import.approved_by)
+    rejected_by = _uuid_or_none(rate_import.rejected_by)
     validation = dict(rate_import.validation_summary_json)
     metadata: dict[str, Any] = {}
     if rate_import.approved_by and approved_by is None:
         metadata["approved_by_label"] = rate_import.approved_by
+    if rate_import.rejected_by and rejected_by is None:
+        metadata["rejected_by_label"] = rate_import.rejected_by
     return {
         "id": database_id,
         "application_id": rate_import.id,
@@ -82,19 +85,25 @@ def rate_import_to_db(
         "parser_family": rate_import.parser_family,
         "match_confidence": _decimal_or_none(rate_import.classification_confidence),
         "status": rate_import.status,
+        "carrier_key": rate_import.carrier_key,
         "validation_error_count": int(validation.get("errors", 0) or 0),
         "validation_warning_count": int(validation.get("warnings", 0) or 0),
         "validation_report": _json_mapping(validation),
         "parse_summary": _json_mapping(metadata),
         "approved_at": rate_import.approved_at,
         "approved_by": approved_by,
+        "rejected_at": rate_import.rejected_at,
+        "rejected_by": rejected_by,
+        "rejection_reason": rate_import.rejection_reason,
+        "archived_at": rate_import.archived_at,
         "created_at": rate_import.created_at,
     }
 
 
 def rate_import_from_db(row: dict[str, Any]) -> RateImport:
     parse_summary = row.get("parse_summary") or {}
-    approved_by = row.get("approved_by") or parse_summary.get("approved_by_label")
+    approved_by = parse_summary.get("approved_by_label") or row.get("approved_by")
+    rejected_by = parse_summary.get("rejected_by_label") or row.get("rejected_by")
     return RateImport(
         id=row["application_id"],
         source_document_id=row["source_application_id"],
@@ -102,9 +111,14 @@ def rate_import_from_db(row: dict[str, Any]) -> RateImport:
         template_id=row.get("template_id"),
         classification_confidence=_float_or_none(row.get("match_confidence")),
         status=row["status"],
+        carrier_key=row.get("carrier_key"),
         validation_summary_json=row.get("validation_report") or {},
         approved_by=str(approved_by) if approved_by else None,
         approved_at=row.get("approved_at"),
+        rejected_by=str(rejected_by) if rejected_by else None,
+        rejected_at=row.get("rejected_at"),
+        rejection_reason=row.get("rejection_reason"),
+        archived_at=row.get("archived_at"),
         created_at=row["created_at"],
     )
 

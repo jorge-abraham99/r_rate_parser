@@ -84,6 +84,9 @@ def test_repository_operations_require_explicit_organization_id() -> None:
         "get_import_record",
         "list_import_records",
         "publish_import_bundle",
+        "save_import_bundle",
+        "approve_import",
+        "reject_import",
         "remove_import_data",
         "load_approved_rate_library",
     ):

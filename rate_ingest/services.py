@@ -12,17 +12,32 @@ from rate_ingest.approve import reject_import as reject_run
 from rate_ingest.canonical import build_canonical_rates
 from rate_ingest.classifier import classify_source
 from rate_ingest.config import Settings
-from rate_ingest.inspector import inspect_source
-from rate_ingest.models import RateCard, RateChargeLine, RateImport, RateNote, RateOffer, ValidationReport, new_id
+from rate_ingest.models import (
+    RateCard,
+    RateChargeLine,
+    RateImport,
+    RateNote,
+    RateOffer,
+    ValidationReport,
+    new_id,
+)
 from rate_ingest.parsers.email_table import parse_email as parse_email_table
 from rate_ingest.parsers.cosco_pdf_quote import parse_pdf as parse_cosco_pdf_quote
-from rate_ingest.parsers.hapag_door_matrix import parse_workbook as parse_hapag_door_matrix_workbook
-from rate_ingest.parsers.haulage_matrix import parse_workbook as parse_haulage_matrix_workbook
+from rate_ingest.parsers.hapag_door_matrix import (
+    parse_workbook as parse_hapag_door_matrix_workbook,
+)
+from rate_ingest.parsers.haulage_matrix import (
+    parse_workbook as parse_haulage_matrix_workbook,
+)
 from rate_ingest.parsers.matrix import parse_workbook as parse_matrix_workbook
 from rate_ingest.parsers.msc_zoned_inline import extract_tier_rate_tables
-from rate_ingest.parsers.msc_zoned_inline import parse_workbook as parse_msc_zoned_inline_workbook
+from rate_ingest.parsers.msc_zoned_inline import (
+    parse_workbook as parse_msc_zoned_inline_workbook,
+)
 from rate_ingest.parsers.offer_block import parse_workbook as parse_offer_block_workbook
-from rate_ingest.parsers.site_to_site_rows import parse_workbook as parse_site_to_site_workbook
+from rate_ingest.parsers.site_to_site_rows import (
+    parse_workbook as parse_site_to_site_workbook,
+)
 from rate_ingest.parsers.tabular_lane import parse_workbook as parse_tabular_workbook
 from rate_ingest.review import generate_review_markdown
 from rate_ingest.repositories import (
@@ -94,7 +109,8 @@ def load_run_payload(run_dir: Path) -> dict[str, Any]:
         "rate_notes": read_csv_rows(run_dir / "parsed_rate_notes.csv"),
         "canonical_rates": read_json(run_dir / "canonical_rates.json"),
         "validation_report": read_json(run_dir / "validation_report.json"),
-        "tier_rate_tables": read_json_if_exists(run_dir / "tier_rate_tables.json") or {},
+        "tier_rate_tables": read_json_if_exists(run_dir / "tier_rate_tables.json")
+        or {},
         "review_markdown": read_review_markdown(run_dir),
         "approval": read_json_if_exists(run_dir / "approval.json"),
     }
@@ -111,7 +127,9 @@ def import_source_file(
     organization_id: OrganizationId | None = None,
 ) -> dict[str, Any]:
     settings.ensure()
-    rate_repository = repository if repository is not None else get_rate_repository(settings)
+    rate_repository = (
+        repository if repository is not None else get_rate_repository(settings)
+    )
     repository_org_id = resolve_repository_organization_id(settings, organization_id)
     source = rate_repository.register_source_document(
         source_path,
@@ -123,7 +141,10 @@ def import_source_file(
     inspected, _ = classify_source(settings, source)
     scored = inspected.possible_templates
     if template:
-        matched_template = next((item for item in load_templates(settings) if item.template_id == template), None)
+        matched_template = next(
+            (item for item in load_templates(settings) if item.template_id == template),
+            None,
+        )
     else:
         matched_template, scored = find_best_template(settings, inspected)
 
@@ -147,7 +168,11 @@ def import_source_file(
         parser_family=matched_template.parser_family,
         template_id=matched_template.template_id,
         classification_confidence=next(
-            (item["confidence"] for item in scored if item["template_id"] == matched_template.template_id),
+            (
+                item["confidence"]
+                for item in scored
+                if item["template_id"] == matched_template.template_id
+            ),
             None,
         ),
         status="pending_review",
@@ -177,13 +202,28 @@ def import_source_file(
 
     canonical_rates = build_canonical_rates(card, offers)
     if matched_template.parser_family == "msc_zoned_inline":
-        write_json(run_dir / "tier_rate_tables.json", extract_tier_rate_tables(Path(source.source_path), matched_template))
+        write_json(
+            run_dir / "tier_rate_tables.json",
+            extract_tier_rate_tables(Path(source.source_path), matched_template),
+        )
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
     write_csv_rows(run_dir / "parsed_rate_cards.csv", [card.model_dump(mode="json")])
-    write_csv_rows(run_dir / "parsed_rate_offers.csv", [offer.model_dump(mode="json") for offer in offers])
-    write_csv_rows(run_dir / "parsed_rate_charge_lines.csv", [charge.model_dump(mode="json") for charge in charges])
-    write_csv_rows(run_dir / "parsed_rate_notes.csv", [note.model_dump(mode="json") for note in notes])
-    write_json(run_dir / "canonical_rates.json", [rate.model_dump(mode="json") for rate in canonical_rates])
+    write_csv_rows(
+        run_dir / "parsed_rate_offers.csv",
+        [offer.model_dump(mode="json") for offer in offers],
+    )
+    write_csv_rows(
+        run_dir / "parsed_rate_charge_lines.csv",
+        [charge.model_dump(mode="json") for charge in charges],
+    )
+    write_csv_rows(
+        run_dir / "parsed_rate_notes.csv",
+        [note.model_dump(mode="json") for note in notes],
+    )
+    write_json(
+        run_dir / "canonical_rates.json",
+        [rate.model_dump(mode="json") for rate in canonical_rates],
+    )
     write_json(run_dir / "validation_report.json", validation.model_dump(mode="json"))
     review_path = generate_review_markdown(
         run_dir,
@@ -196,7 +236,15 @@ def import_source_file(
         notes,
         validation,
     )
-    rate_repository.add_import(rate_import, organization_id=repository_org_id)
+    rate_repository.save_import_bundle(
+        rate_import,
+        [card],
+        offers,
+        charges,
+        notes,
+        canonical_rates,
+        organization_id=repository_org_id,
+    )
 
     return {
         "import_id": rate_import.id,
@@ -224,7 +272,9 @@ def get_import_detail(settings: Settings, import_id: str) -> dict[str, Any]:
     rate_import = RateImport(**payload["rate_import"])
     cards = [RateCard(**deserialize_row(row)) for row in payload["rate_cards"]]
     offers = [RateOffer(**deserialize_row(row)) for row in payload["rate_offers"]]
-    charges = [RateChargeLine(**deserialize_row(row)) for row in payload["rate_charge_lines"]]
+    charges = [
+        RateChargeLine(**deserialize_row(row)) for row in payload["rate_charge_lines"]
+    ]
     notes = [RateNote(**deserialize_row(row)) for row in payload["rate_notes"]]
     card = cards[0] if cards else None
     charge_bucket_summary = analyze_charge_collection(
@@ -263,13 +313,17 @@ def list_imports(
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
 ) -> list[dict[str, Any]]:
-    rate_repository = repository if repository is not None else get_rate_repository(settings)
+    rate_repository = (
+        repository if repository is not None else get_rate_repository(settings)
+    )
     repository_org_id = resolve_repository_organization_id(settings, organization_id)
     imports: list[dict[str, Any]] = []
     for item in rate_repository.list_import_records(organization_id=repository_org_id):
         run_dir = settings.runs_dir / item.id
         source_snapshot = read_json_if_exists(run_dir / "source_snapshot.json") or {}
-        validation_report = read_json_if_exists(run_dir / "validation_report.json") or {"summary": {}}
+        validation_report = read_json_if_exists(run_dir / "validation_report.json") or {
+            "summary": {}
+        }
         card_rows = read_csv_rows(run_dir / "parsed_rate_cards.csv")
         offer_rows = read_csv_rows(run_dir / "parsed_rate_offers.csv")
         card = card_rows[0] if card_rows else {}
@@ -293,7 +347,9 @@ def list_imports(
                 "valid_from": card.get("valid_from"),
                 "valid_to": card.get("valid_to"),
                 "lane_count": len(offer_rows),
-                "validation_summary": validation_report.get("summary", item.validation_summary_json),
+                "validation_summary": validation_report.get(
+                    "summary", item.validation_summary_json
+                ),
             }
         )
     imports.sort(key=lambda item: item.get("created_at") or "", reverse=True)
@@ -311,8 +367,11 @@ def approve_import_by_id(
     contract_tag: str | None = None,
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
+    approved_by_user_id: str | None = None,
 ) -> dict[str, Any]:
-    rate_repository = repository if repository is not None else get_rate_repository(settings)
+    rate_repository = (
+        repository if repository is not None else get_rate_repository(settings)
+    )
     repository_org_id = resolve_repository_organization_id(settings, organization_id)
     run_dir = find_run_dir(settings, import_id)
     payload = load_run_payload(run_dir)
@@ -320,29 +379,18 @@ def approve_import_by_id(
     validation_report = ValidationReport(**payload["validation_report"])
     cards = [RateCard(**deserialize_row(row)) for row in payload["rate_cards"]]
     offers = [RateOffer(**deserialize_row(row)) for row in payload["rate_offers"]]
-    charges = [RateChargeLine(**deserialize_row(row)) for row in payload["rate_charge_lines"]]
+    charges = [
+        RateChargeLine(**deserialize_row(row)) for row in payload["rate_charge_lines"]
+    ]
     notes = [RateNote(**deserialize_row(row)) for row in payload["rate_notes"]]
     if validation_report.summary.get("errors", 0) > 0:
-        raise ValueError("Import has blocking validation errors and cannot be approved.")
+        raise ValueError(
+            "Import has blocking validation errors and cannot be approved."
+        )
     if carrier_name and cards:
         cards[0].carrier_name = carrier_name
         cards[0].provider_name = carrier_name
-        write_csv_rows(run_dir / "parsed_rate_cards.csv", [card.model_dump(mode="json") for card in cards])
-    if carrier_key or carrier_label or contract_tag:
-        source_snapshot = payload["source_snapshot"]
-        source_snapshot["operator_carrier_key"] = carrier_key
-        source_snapshot["operator_carrier_label"] = carrier_label or carrier_name
-        source_snapshot["contract_tag"] = contract_tag
-        write_json(run_dir / "source_snapshot.json", source_snapshot)
-    if carrier_key:
-        archive_previous_imports(
-            settings,
-            carrier_key,
-            excluding=import_id,
-            repository=rate_repository,
-            organization_id=repository_org_id,
-        )
-    approve_run(
+    rate_import = approve_run(
         settings,
         run_dir,
         rate_import,
@@ -354,7 +402,20 @@ def approve_import_by_id(
         approved_by,
         repository=rate_repository,
         organization_id=repository_org_id,
+        carrier_key=carrier_key,
+        approved_by_user_id=approved_by_user_id,
     )
+    if carrier_name and cards:
+        write_csv_rows(
+            run_dir / "parsed_rate_cards.csv",
+            [card.model_dump(mode="json") for card in cards],
+        )
+    if carrier_key or carrier_label or contract_tag:
+        source_snapshot = payload["source_snapshot"]
+        source_snapshot["operator_carrier_key"] = carrier_key
+        source_snapshot["operator_carrier_label"] = carrier_label or carrier_name
+        source_snapshot["contract_tag"] = contract_tag
+        write_json(run_dir / "source_snapshot.json", source_snapshot)
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
     return get_import_detail(settings, import_id)
 
@@ -366,18 +427,22 @@ def reject_import_by_id(
     *,
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
+    rejected_by_user_id: str | None = None,
 ) -> dict[str, Any]:
-    rate_repository = repository if repository is not None else get_rate_repository(settings)
+    rate_repository = (
+        repository if repository is not None else get_rate_repository(settings)
+    )
     repository_org_id = resolve_repository_organization_id(settings, organization_id)
     run_dir = find_run_dir(settings, import_id)
     rate_import = RateImport(**read_json(run_dir / "rate_import.json"))
-    reject_run(
+    rate_import = reject_run(
         settings,
         run_dir,
         rate_import,
         reason,
         repository=rate_repository,
         organization_id=repository_org_id,
+        rejected_by_user_id=rejected_by_user_id,
     )
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
     return get_import_detail(settings, import_id)
@@ -390,7 +455,9 @@ def delete_import_by_id(
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
 ) -> dict[str, Any]:
-    rate_repository = repository if repository is not None else get_rate_repository(settings)
+    rate_repository = (
+        repository if repository is not None else get_rate_repository(settings)
+    )
     repository_org_id = resolve_repository_organization_id(settings, organization_id)
     run_dir = find_run_dir(settings, import_id)
     rate_repository.remove_import_data(
@@ -400,37 +467,6 @@ def delete_import_by_id(
     )
     shutil.rmtree(run_dir)
     return {"deleted": True, "import_id": import_id}
-
-
-def archive_previous_imports(
-    settings: Settings,
-    carrier_key: str,
-    *,
-    excluding: str,
-    repository: RateRepository | None = None,
-    organization_id: OrganizationId | None = None,
-) -> None:
-    rate_repository = repository if repository is not None else get_rate_repository(settings)
-    repository_org_id = resolve_repository_organization_id(settings, organization_id)
-    for item in list_imports(
-        settings,
-        limit=5000,
-        repository=rate_repository,
-        organization_id=repository_org_id,
-    ):
-        if item["import_id"] == excluding or item.get("status") != "approved":
-            continue
-        if item.get("carrier_key") != carrier_key:
-            continue
-        previous_dir = find_run_dir(settings, item["import_id"])
-        previous = RateImport(**read_json(previous_dir / "rate_import.json"))
-        rate_repository.remove_import_data(
-            previous.id,
-            organization_id=repository_org_id,
-        )
-        previous.status = "archived"
-        write_json(previous_dir / "rate_import.json", previous.model_dump(mode="json"))
-        rate_repository.update_import(previous, organization_id=repository_org_id)
 
 
 def search_approved_offers(
@@ -447,7 +483,9 @@ def search_approved_offers(
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
 ) -> list[dict[str, Any]]:
-    rate_repository = repository if repository is not None else get_rate_repository(settings)
+    rate_repository = (
+        repository if repository is not None else get_rate_repository(settings)
+    )
     repository_org_id = resolve_repository_organization_id(settings, organization_id)
     library = rate_repository.load_approved_rate_library(
         organization_id=repository_org_id,
@@ -479,13 +517,20 @@ def search_approved_offers(
             continue
         if carrier_name and not contains_text(card.carrier_name, carrier_name):
             continue
-        if collection and not contains_text(first_present(offer.place_of_receipt, offer.origin), collection):
+        if collection and not contains_text(
+            first_present(offer.place_of_receipt, offer.origin), collection
+        ):
             continue
         if pol and not contains_text(offer.pol, pol):
             continue
-        if pod and not contains_text(first_present(offer.pod, offer.final_destination), pod):
+        if pod and not contains_text(
+            first_present(offer.pod, offer.final_destination), pod
+        ):
             continue
-        if equipment_type and (offer.equipment_type or "").upper() != equipment_type.upper():
+        if (
+            equipment_type
+            and (offer.equipment_type or "").upper() != equipment_type.upper()
+        ):
             continue
         if valid_on_date and not offer_valid_on(offer, card, valid_on_date):
             continue
@@ -499,9 +544,12 @@ def search_approved_offers(
             base_label=base_charge_label(offer),
         )
         additive_charges = [
-            charge for charge in offer_charges
+            charge
+            for charge in offer_charges
             if not is_base_charge(charge)
-            and currencies_match(charge.currency, offer.base_currency or card.currency_default)
+            and currencies_match(
+                charge.currency, offer.base_currency or card.currency_default
+            )
         ]
         charge_total = round(sum(charge.amount or 0 for charge in additive_charges), 2)
         if offer.base_amount is None and charge_total == 0:
@@ -552,7 +600,9 @@ def search_approved_offers(
                 "raw_row_reference": offer.raw_row_reference,
                 "routing_note": offer.routing_note,
                 "charge_analysis": charge_analysis,
-                "notes_summary": note_bucket[0].note_text if note_bucket else card.notes_summary,
+                "notes_summary": note_bucket[0].note_text
+                if note_bucket
+                else card.notes_summary,
                 "charges": [charge.model_dump(mode="json") for charge in offer_charges],
                 "notes": [note.model_dump(mode="json") for note in note_bucket[:10]],
             }
@@ -574,7 +624,9 @@ def get_rate_desk_data(
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
 ) -> dict[str, Any]:
-    rate_repository = repository if repository is not None else get_rate_repository(settings)
+    rate_repository = (
+        repository if repository is not None else get_rate_repository(settings)
+    )
     repository_org_id = resolve_repository_organization_id(settings, organization_id)
     all_rates = search_approved_offers(
         settings,
@@ -591,8 +643,12 @@ def get_rate_desk_data(
         repository=rate_repository,
         organization_id=repository_org_id,
     )
-    approved_at = [item.get("approved_at") for item in imports if item.get("approved_at")]
-    last_refreshed = max(approved_at, key=parse_datetime_sort_key) if approved_at else None
+    approved_at = [
+        item.get("approved_at") for item in imports if item.get("approved_at")
+    ]
+    last_refreshed = (
+        max(approved_at, key=parse_datetime_sort_key) if approved_at else None
+    )
 
     origin_map: dict[str, str] = {}
     dest_map: dict[str, str] = {}
@@ -601,7 +657,9 @@ def get_rate_desk_data(
         val = first_present(rate.get("place_of_receipt"), rate.get("origin"))
         if val:
             collection_map.setdefault(normalize_location_key(val), val)
-        val = first_present(rate.get("pol"), rate.get("place_of_receipt"), rate.get("origin"))
+        val = first_present(
+            rate.get("pol"), rate.get("place_of_receipt"), rate.get("origin")
+        )
         if val:
             origin_map.setdefault(normalize_location_key(val), val)
         val = first_present(rate.get("final_destination"), rate.get("pod"))
@@ -610,7 +668,9 @@ def get_rate_desk_data(
     origins = sorted(origin_map.values())
     destinations = sorted(dest_map.values())
     collections = sorted(collection_map.values())
-    equipment_types = sorted({rate["equipment_type"] for rate in quote_rates if rate.get("equipment_type")})
+    equipment_types = sorted(
+        {rate["equipment_type"] for rate in quote_rates if rate.get("equipment_type")}
+    )
     carriers = sorted(
         {
             first_present(rate.get("carrier_name"), rate.get("provider_name"))
@@ -618,8 +678,12 @@ def get_rate_desk_data(
             if first_present(rate.get("carrier_name"), rate.get("provider_name"))
         }
     )
-    materials = sorted({material for rate in quote_rates for material in rate.get("materials", [])})
-    haulage_tariffs, door_pickups, haulage_currency = build_haulage_lookup(haulage_rates)
+    materials = sorted(
+        {material for rate in quote_rates for material in rate.get("materials", [])}
+    )
+    haulage_tariffs, door_pickups, haulage_currency = build_haulage_lookup(
+        haulage_rates
+    )
     return {
         "last_refreshed": last_refreshed,
         "rates": rates,
@@ -645,10 +709,30 @@ def analyze_charge_collection(
     base_label: str = "Basic Ocean Freight",
 ) -> dict[str, Any]:
     grouped = {
-        "origin": {"key": "origin", "label": "Origin charges", "lines": [], "subtotal_usd": 0.0},
-        "freight": {"key": "freight", "label": "Freight charges", "lines": [], "subtotal_usd": 0.0},
-        "destination": {"key": "destination", "label": "Destination charges", "lines": [], "subtotal_usd": 0.0},
-        "unmatched": {"key": "unmatched", "label": "Unmatched charges", "lines": [], "subtotal_usd": 0.0},
+        "origin": {
+            "key": "origin",
+            "label": "Origin charges",
+            "lines": [],
+            "subtotal_usd": 0.0,
+        },
+        "freight": {
+            "key": "freight",
+            "label": "Freight charges",
+            "lines": [],
+            "subtotal_usd": 0.0,
+        },
+        "destination": {
+            "key": "destination",
+            "label": "Destination charges",
+            "lines": [],
+            "subtotal_usd": 0.0,
+        },
+        "unmatched": {
+            "key": "unmatched",
+            "label": "Unmatched charges",
+            "lines": [],
+            "subtotal_usd": 0.0,
+        },
     }
     matched_count = 0
     unmatched_count = 0
@@ -657,7 +741,9 @@ def analyze_charge_collection(
     if charges:
         for charge in charges:
             bucket, matched_by = classify_charge_bucket(charge)
-            usd_unit_amount = convert_to_usd(charge.amount, charge.currency or base_currency)
+            usd_unit_amount = convert_to_usd(
+                charge.amount, charge.currency or base_currency
+            )
             line = {
                 "name": charge.charge_name,
                 "basis": charge.basis or "Container",
@@ -706,7 +792,9 @@ def analyze_charge_collection(
                 "label": group["label"],
                 "lines": group["lines"],
                 "line_count": len(group["lines"]),
-                "zero_line_count": sum(1 for line in group["lines"] if line["zero_rated"]),
+                "zero_line_count": sum(
+                    1 for line in group["lines"] if line["zero_rated"]
+                ),
                 "subtotal_usd": subtotal,
             }
         )
@@ -726,7 +814,11 @@ def analyze_charge_collection(
 
 def summarize_charge_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
     return {
-        **{key: value for key, value in analysis.items() if key not in {"groups", "unmatched_lines"}},
+        **{
+            key: value
+            for key, value in analysis.items()
+            if key not in {"groups", "unmatched_lines"}
+        },
         "groups": [
             {key: value for key, value in group.items() if key != "lines"}
             for group in analysis.get("groups", [])
@@ -747,9 +839,13 @@ def parse_source_by_family(
     if parser_family == "haulage_matrix":
         return parse_haulage_matrix_workbook(source_path, matched_template, rate_import)
     if parser_family == "msc_zoned_inline":
-        return parse_msc_zoned_inline_workbook(source_path, matched_template, rate_import)
+        return parse_msc_zoned_inline_workbook(
+            source_path, matched_template, rate_import
+        )
     if parser_family == "hapag_door_matrix":
-        return parse_hapag_door_matrix_workbook(source_path, matched_template, rate_import)
+        return parse_hapag_door_matrix_workbook(
+            source_path, matched_template, rate_import
+        )
     if parser_family == "cosco_pdf_quote":
         return parse_cosco_pdf_quote(source_path, matched_template, rate_import)
     if parser_family == "offer_block":
@@ -758,7 +854,9 @@ def parse_source_by_family(
         return parse_site_to_site_workbook(source_path, matched_template, rate_import)
     if parser_family == "email_table":
         return parse_email_table(source_path, matched_template, rate_import)
-    raise ValueError(f"Template {matched_template.template_id} uses unsupported parser family {parser_family}.")
+    raise ValueError(
+        f"Template {matched_template.template_id} uses unsupported parser family {parser_family}."
+    )
 
 
 def read_review_markdown(run_dir: Path) -> str | None:
@@ -784,7 +882,9 @@ def infer_materials(
     source_file_name: str | None,
     sheet_name: str | None,
 ) -> list[str]:
-    text = " ".join(filter(None, [commodity, carrier_key, source_file_name, sheet_name])).lower()
+    text = " ".join(
+        filter(None, [commodity, carrier_key, source_file_name, sheet_name])
+    ).lower()
     materials: list[str] = []
     if "paper" in text or "peute" in text:
         materials.append("Paper")
@@ -801,7 +901,11 @@ def is_haulage_rate(rate: dict[str, Any]) -> bool:
     document_type = str(rate.get("document_type") or "").lower()
     carrier_key = str(rate.get("carrier_key") or "").lower()
     contract_tag = str(rate.get("contract_tag") or "").upper()
-    return document_type == "inland_export" or carrier_key == "haulage-q2" or contract_tag == "HAUL"
+    return (
+        document_type == "inland_export"
+        or carrier_key == "haulage-q2"
+        or contract_tag == "HAUL"
+    )
 
 
 def normalize_location_key(value: str) -> str:
@@ -811,13 +915,17 @@ def normalize_location_key(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def build_haulage_lookup(haulage_rates: list[dict[str, Any]]) -> tuple[dict[str, dict[str, float]], list[dict[str, Any]], str | None]:
+def build_haulage_lookup(
+    haulage_rates: list[dict[str, Any]],
+) -> tuple[dict[str, dict[str, float]], list[dict[str, Any]], str | None]:
     pickups: dict[str, dict[str, Any]] = {}
     tariffs: dict[str, dict[str, float]] = {}
     haulage_currency: str | None = None
     for rate in haulage_rates:
         collection = first_present(rate.get("place_of_receipt"), rate.get("origin"))
-        port = first_present(rate.get("pol"), rate.get("final_destination"), rate.get("pod"))
+        port = first_present(
+            rate.get("pol"), rate.get("final_destination"), rate.get("pod")
+        )
         amount = rate.get("base_amount")
         currency = (rate.get("base_currency") or "").upper()
         if currency and haulage_currency is None:
@@ -839,8 +947,14 @@ def build_haulage_lookup(haulage_rates: list[dict[str, Any]]) -> tuple[dict[str,
             continue
         if haulage_currency and currency and currency != haulage_currency:
             continue
-        tariffs.setdefault(key, {})[normalize_location_key(port)] = round(float(amount), 2)
-    return tariffs, sorted(pickups.values(), key=lambda item: item["name"]), haulage_currency
+        tariffs.setdefault(key, {})[normalize_location_key(port)] = round(
+            float(amount), 2
+        )
+    return (
+        tariffs,
+        sorted(pickups.values(), key=lambda item: item["name"]),
+        haulage_currency,
+    )
 
 
 def is_base_charge(charge: RateChargeLine) -> bool:
@@ -911,18 +1025,56 @@ def classify_charge_bucket(charge: RateChargeLine) -> tuple[str, str]:
     name = (charge.charge_name or "").strip().lower()
     if is_base_charge(charge):
         return "freight", "base_charge"
-    if any(token in name for token in ("origin", "export", "haulage", "intermodal", "pickup", "inland", "rail", "truck")):
+    if any(
+        token in name
+        for token in (
+            "origin",
+            "export",
+            "haulage",
+            "intermodal",
+            "pickup",
+            "inland",
+            "rail",
+            "truck",
+        )
+    ):
         return "origin", "heuristic_name"
-    if any(token in name for token in ("destination", "import", "terminal handling", "documentation", "documentation fee", "container protect", "delivery", "dthc")):
+    if any(
+        token in name
+        for token in (
+            "destination",
+            "import",
+            "terminal handling",
+            "documentation",
+            "documentation fee",
+            "container protect",
+            "delivery",
+            "dthc",
+        )
+    ):
         return "destination", "heuristic_name"
-    if any(token in name for token in ("bunker", "ocean freight", "emission", "peak season", "contingency", "congestion", "freetime extension", "surcharge")):
+    if any(
+        token in name
+        for token in (
+            "bunker",
+            "ocean freight",
+            "emission",
+            "peak season",
+            "contingency",
+            "congestion",
+            "freetime extension",
+            "surcharge",
+        )
+    ):
         return "freight", "heuristic_name"
     return "unmatched", "unclassified"
 
 
 def quantity_rule(basis: str | None) -> str:
     text = (basis or "Container").strip().lower()
-    if text in BILL_OF_LADING_BASES or any(token in text for token in BILL_OF_LADING_BASES):
+    if text in BILL_OF_LADING_BASES or any(
+        token in text for token in BILL_OF_LADING_BASES
+    ):
         return "per_bill_of_lading"
     if "percent" in text:
         return "percent"

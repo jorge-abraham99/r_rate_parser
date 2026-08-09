@@ -1258,6 +1258,8 @@ Do not change the Rate Desk read path yet.
 
 STAGE 5 — Move import persistence + approval lifecycle to Postgres
 
+Implementation status: complete on 9 August 2026. Production remains on the CSV backend until Stage 6.
+
 Objective
 
 Make Postgres capable of owning the complete import/review/approval lifecycle.
