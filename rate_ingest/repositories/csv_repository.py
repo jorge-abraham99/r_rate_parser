@@ -17,6 +17,7 @@ from rate_ingest.models import (
 )
 from rate_ingest.repositories.base import (
     ApprovedRateLibrary,
+    ImportBundle,
     OrganizationId,
     RateRepository,
 )
@@ -90,6 +91,41 @@ class CsvRateRepository(RateRepository):
         del organization_id
         rows = read_csv_rows(warehouse_paths(self.settings)["imports"])
         return tuple(RateImport(**_deserialize_row(row)) for row in rows)
+
+    def load_import_bundle(
+        self,
+        import_id: str,
+        *,
+        organization_id: OrganizationId,
+    ) -> ImportBundle | None:
+        del organization_id
+        run_dir = self.settings.runs_dir / import_id
+        if not run_dir.exists():
+            return None
+        import_path = run_dir / "rate_import.json"
+        source_path = run_dir / "source_snapshot.json"
+        if not import_path.exists() or not source_path.exists():
+            return None
+        return ImportBundle(
+            source=SourceDocument(**read_json(source_path)),
+            rate_import=RateImport(**read_json(import_path)),
+            cards=tuple(
+                RateCard(**_deserialize_row(row))
+                for row in read_csv_rows(run_dir / "parsed_rate_cards.csv")
+            ),
+            offers=tuple(
+                RateOffer(**_deserialize_row(row))
+                for row in read_csv_rows(run_dir / "parsed_rate_offers.csv")
+            ),
+            charges=tuple(
+                RateChargeLine(**_deserialize_row(row))
+                for row in read_csv_rows(run_dir / "parsed_rate_charge_lines.csv")
+            ),
+            notes=tuple(
+                RateNote(**_deserialize_row(row))
+                for row in read_csv_rows(run_dir / "parsed_rate_notes.csv")
+            ),
+        )
 
     def publish_import_bundle(
         self,

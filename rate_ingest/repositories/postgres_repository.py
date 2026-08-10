@@ -21,6 +21,7 @@ from rate_ingest.models import (
 )
 from rate_ingest.repositories.base import (
     ApprovedRateLibrary,
+    ImportBundle,
     OrganizationId,
     RateRepository,
 )
@@ -189,6 +190,100 @@ class PostgresRateRepository(RateRepository):
                 (organization_uuid,),
             ).fetchall()
         return tuple(rate_import_from_db(row) for row in rows)
+
+    def load_import_bundle(
+        self,
+        import_id: str,
+        *,
+        organization_id: OrganizationId,
+    ) -> ImportBundle | None:
+        organization_uuid = require_organization_uuid(organization_id)
+        with self._pool.connection() as connection:
+            import_row = self._get_import_row(connection, import_id, organization_uuid)
+            if import_row is None:
+                return None
+            import_database_id = import_row["id"]
+            source_row = connection.execute(
+                f"""
+                select {SOURCE_COLUMNS}
+                from public.source_documents s
+                join public.rate_imports i
+                  on i.organization_id = s.organization_id
+                 and i.source_document_id = s.id
+                where i.organization_id = %s and i.id = %s
+                """,
+                (organization_uuid, import_database_id),
+            ).fetchone()
+            card_rows = connection.execute(
+                """
+                select c.id, c.application_id, c.provider, c.carrier,
+                       c.commodity, c.currency, c.valid_from, c.valid_to,
+                       c.is_all_in, c.document_type, c.metadata, c.created_at,
+                       i.application_id as import_application_id
+                from public.rate_cards c
+                join public.rate_imports i
+                  on i.organization_id = c.organization_id and i.id = c.import_id
+                where c.organization_id = %s and c.import_id = %s
+                order by c.created_at, c.application_id
+                """,
+                (organization_uuid, import_database_id),
+            ).fetchall()
+            offer_rows = connection.execute(
+                """
+                select o.id, o.application_id, o.collection, o.origin, o.pol,
+                       o.pod, o.destination, o.equipment, o.service_mode,
+                       o.base_amount, o.currency, o.routing, o.valid_from,
+                       o.valid_to, o.source_reference, o.metadata, o.created_at,
+                       c.application_id as card_application_id
+                from public.rate_offers o
+                join public.rate_cards c
+                  on c.organization_id = o.organization_id and c.id = o.rate_card_id
+                where o.organization_id = %s and o.import_id = %s
+                order by o.created_at, o.application_id
+                """,
+                (organization_uuid, import_database_id),
+            ).fetchall()
+            charge_rows = connection.execute(
+                """
+                select ch.id, ch.application_id, ch.charge_name, ch.amount,
+                       ch.currency, ch.basis, ch.charge_type, ch.is_included,
+                       ch.source_reference, ch.metadata, ch.created_at,
+                       o.application_id as offer_application_id
+                from public.rate_charge_lines ch
+                join public.rate_offers o
+                  on o.organization_id = ch.organization_id
+                 and o.id = ch.rate_offer_id
+                where ch.organization_id = %s and o.import_id = %s
+                order by ch.created_at, ch.application_id
+                """,
+                (organization_uuid, import_database_id),
+            ).fetchall()
+            note_rows = connection.execute(
+                """
+                select n.id, n.application_id, n.note_type, n.note_text,
+                       n.source_reference, n.metadata, n.created_at,
+                       c.application_id as card_application_id,
+                       o.application_id as offer_application_id
+                from public.rate_notes n
+                join public.rate_cards c
+                  on c.organization_id = n.organization_id and c.id = n.rate_card_id
+                left join public.rate_offers o
+                  on o.organization_id = n.organization_id and o.id = n.rate_offer_id
+                where n.organization_id = %s and c.import_id = %s
+                order by n.created_at, n.application_id
+                """,
+                (organization_uuid, import_database_id),
+            ).fetchall()
+        if source_row is None:
+            raise RuntimeError(f"Source document missing for import {import_id}")
+        return ImportBundle(
+            source=source_document_from_db(source_row),
+            rate_import=rate_import_from_db(import_row),
+            cards=tuple(rate_card_from_db(row) for row in card_rows),
+            offers=tuple(rate_offer_from_db(row) for row in offer_rows),
+            charges=tuple(rate_charge_line_from_db(row) for row in charge_rows),
+            notes=tuple(rate_note_from_db(row) for row in note_rows),
+        )
 
     def publish_import_bundle(
         self,

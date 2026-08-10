@@ -137,10 +137,12 @@ async def api_import_source(
 @app.get("/api/imports/{import_id}")
 def api_get_import(
     import_id: str,
-    _context: Annotated[RequestContext, Depends(require_organization_member)],
+    context: Annotated[RequestContext, Depends(require_organization_member)],
 ) -> dict:
     try:
-        return get_import_detail(settings(), import_id)
+        return get_import_detail(
+            settings(), import_id, organization_id=context.organization_id
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

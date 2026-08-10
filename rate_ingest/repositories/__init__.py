@@ -6,6 +6,7 @@ from rate_ingest.config import Settings
 from rate_ingest.repositories.base import (
     LOCAL_CSV_ORGANIZATION_ID,
     ApprovedRateLibrary,
+    ImportBundle,
     OrganizationId,
     RateRepository,
 )
@@ -40,6 +41,7 @@ def close_rate_repositories() -> None:
 
 __all__ = [
     "ApprovedRateLibrary",
+    "ImportBundle",
     "CsvRateRepository",
     "LOCAL_CSV_ORGANIZATION_ID",
     "OrganizationId",

@@ -16,7 +16,15 @@ from rate_ingest.config import Settings
 from rate_ingest.models import RateCard, RateChargeLine, RateImport, RateNote, RateOffer
 from rate_ingest.repositories import PostgresRateRepository
 from rate_ingest.repositories.postgres_repository import secure_connection_string
-from rate_ingest.services import deserialize_row, import_source_file, load_run_payload
+from rate_ingest.services import (
+    deserialize_row,
+    get_import_detail,
+    get_rate_desk_data,
+    import_source_file,
+    list_imports,
+    load_run_payload,
+    search_approved_offers,
+)
 
 
 RUN_INTEGRATION = os.getenv("RUN_POSTGRES_INTEGRATION_TESTS", "").lower() == "true"
@@ -531,6 +539,39 @@ def test_real_parser_family_matches_csv_after_postgres_approval(
                 item for item in library.notes if item.id == expected_note.id
             )
             assert stored_note == expected_note
+
+        detail = get_import_detail(
+            csv_settings,
+            rate_import.id,
+            repository=repository,
+            organization_id=organization_id,
+        )
+        assert detail["rate_import"]["status"] == "approved"
+        assert detail["summary"]["rate_offers"] == len(offers)
+        assert detail["source"]["file_name"] == source_path.name
+
+        import_rows = list_imports(
+            csv_settings,
+            repository=repository,
+            organization_id=organization_id,
+        )
+        assert import_rows[0]["import_id"] == rate_import.id
+        assert import_rows[0]["lane_count"] == len(offers)
+
+        search_rows = search_approved_offers(
+            csv_settings,
+            limit=50000,
+            repository=repository,
+            organization_id=organization_id,
+        )
+        assert len(search_rows) == len(offers)
+        rate_desk = get_rate_desk_data(
+            csv_settings,
+            limit=5000,
+            repository=repository,
+            organization_id=organization_id,
+        )
+        assert rate_desk["rates"] or rate_desk["haulage_tariffs"]
     finally:
         repository.close()
         with psycopg.connect(

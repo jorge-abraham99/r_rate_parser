@@ -266,17 +266,37 @@ def import_source_file(
     }
 
 
-def get_import_detail(settings: Settings, import_id: str) -> dict[str, Any]:
-    run_dir = find_run_dir(settings, import_id)
-    payload = load_run_payload(run_dir)
-    rate_import = RateImport(**payload["rate_import"])
-    cards = [RateCard(**deserialize_row(row)) for row in payload["rate_cards"]]
-    offers = [RateOffer(**deserialize_row(row)) for row in payload["rate_offers"]]
-    charges = [
-        RateChargeLine(**deserialize_row(row)) for row in payload["rate_charge_lines"]
-    ]
-    notes = [RateNote(**deserialize_row(row)) for row in payload["rate_notes"]]
+def get_import_detail(
+    settings: Settings,
+    import_id: str,
+    *,
+    repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
+) -> dict[str, Any]:
+    rate_repository = (
+        repository if repository is not None else get_rate_repository(settings)
+    )
+    repository_org_id = resolve_repository_organization_id(settings, organization_id)
+    bundle = rate_repository.load_import_bundle(
+        import_id, organization_id=repository_org_id
+    )
+    if bundle is None:
+        raise ValueError(f"Import not found: {import_id}")
+    run_dir = settings.runs_dir / import_id
+    payload = load_run_payload(run_dir) if run_dir.exists() else {}
+    rate_import = bundle.rate_import
+    cards = list(bundle.cards)
+    offers = list(bundle.offers)
+    charges = list(bundle.charges)
+    notes = list(bundle.notes)
     card = cards[0] if cards else None
+    canonical_rates = payload.get("canonical_rates")
+    if canonical_rates is None:
+        canonical_rates = (
+            [rate.model_dump(mode="json") for rate in build_canonical_rates(card, offers)]
+            if card
+            else []
+        )
     charge_bucket_summary = analyze_charge_collection(
         charges,
         base_currency=card.currency_default if card else None,
@@ -284,25 +304,29 @@ def get_import_detail(settings: Settings, import_id: str) -> dict[str, Any]:
     return {
         "import_id": import_id,
         "rate_import": rate_import.model_dump(mode="json"),
-        "source": payload["source_snapshot"],
-        "detected_structure": payload["detected_structure"],
+        "source": payload.get("source_snapshot") or bundle.source.model_dump(mode="json"),
+        "detected_structure": payload.get("detected_structure") or {},
         "summary": {
             "rate_cards": len(cards),
             "rate_offers": len(offers),
             "charge_lines": len(charges),
             "notes": len(notes),
-            "canonical_rates": len(payload["canonical_rates"]),
+            "canonical_rates": len(canonical_rates),
         },
-        "validation_report": payload["validation_report"],
-        "approval": payload["approval"],
-        "review_markdown": payload["review_markdown"],
+        "validation_report": payload.get("validation_report") or {
+            "import_id": import_id,
+            "summary": rate_import.validation_summary_json,
+            "items": [],
+        },
+        "approval": payload.get("approval"),
+        "review_markdown": payload.get("review_markdown"),
         "card": card.model_dump(mode="json") if card else None,
         "charge_bucket_summary": summarize_charge_analysis(charge_bucket_summary),
-        "tier_rate_tables": payload["tier_rate_tables"],
+        "tier_rate_tables": payload.get("tier_rate_tables") or {},
         "offers_preview": [offer.model_dump(mode="json") for offer in offers[:50]],
         "charges_preview": [charge.model_dump(mode="json") for charge in charges[:50]],
         "notes_preview": [note.model_dump(mode="json") for note in notes[:30]],
-        "canonical_rates": payload["canonical_rates"],
+        "canonical_rates": canonical_rates,
     }
 
 
@@ -319,14 +343,18 @@ def list_imports(
     repository_org_id = resolve_repository_organization_id(settings, organization_id)
     imports: list[dict[str, Any]] = []
     for item in rate_repository.list_import_records(organization_id=repository_org_id):
+        bundle = rate_repository.load_import_bundle(
+            item.id, organization_id=repository_org_id
+        )
+        if bundle is None:
+            continue
         run_dir = settings.runs_dir / item.id
         source_snapshot = read_json_if_exists(run_dir / "source_snapshot.json") or {}
         validation_report = read_json_if_exists(run_dir / "validation_report.json") or {
-            "summary": {}
+            "summary": item.validation_summary_json
         }
-        card_rows = read_csv_rows(run_dir / "parsed_rate_cards.csv")
-        offer_rows = read_csv_rows(run_dir / "parsed_rate_offers.csv")
-        card = card_rows[0] if card_rows else {}
+        source_snapshot = source_snapshot or bundle.source.model_dump(mode="json")
+        card = bundle.cards[0] if bundle.cards else None
         imports.append(
             {
                 "import_id": item.id,
@@ -340,13 +368,16 @@ def list_imports(
                 "file_name": source_snapshot.get("file_name"),
                 "source_type": source_snapshot.get("source_type"),
                 "uploaded_by": source_snapshot.get("uploaded_by"),
-                "carrier_name": card.get("carrier_name") or card.get("provider_name"),
-                "carrier_key": source_snapshot.get("operator_carrier_key"),
+                "carrier_name": (
+                    card.carrier_name or card.provider_name if card else None
+                ),
+                "carrier_key": source_snapshot.get("operator_carrier_key")
+                or item.carrier_key,
                 "carrier_label": source_snapshot.get("operator_carrier_label"),
                 "contract_tag": source_snapshot.get("contract_tag"),
-                "valid_from": card.get("valid_from"),
-                "valid_to": card.get("valid_to"),
-                "lane_count": len(offer_rows),
+                "valid_from": serialize_date(card.valid_from) if card else None,
+                "valid_to": serialize_date(card.valid_to) if card else None,
+                "lane_count": len(bundle.offers),
                 "validation_summary": validation_report.get(
                     "summary", item.validation_summary_json
                 ),
@@ -417,7 +448,12 @@ def approve_import_by_id(
         source_snapshot["contract_tag"] = contract_tag
         write_json(run_dir / "source_snapshot.json", source_snapshot)
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
-    return get_import_detail(settings, import_id)
+    return get_import_detail(
+        settings,
+        import_id,
+        repository=rate_repository,
+        organization_id=repository_org_id,
+    )
 
 
 def reject_import_by_id(
@@ -445,7 +481,12 @@ def reject_import_by_id(
         rejected_by_user_id=rejected_by_user_id,
     )
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
-    return get_import_detail(settings, import_id)
+    return get_import_detail(
+        settings,
+        import_id,
+        repository=rate_repository,
+        organization_id=repository_org_id,
+    )
 
 
 def delete_import_by_id(
@@ -637,14 +678,12 @@ def get_rate_desk_data(
     haulage_rates = [rate for rate in all_rates if is_haulage_rate(rate)]
     quote_rates = [rate for rate in all_rates if not is_haulage_rate(rate)]
     rates = quote_rates[:limit]
-    imports = list_imports(
-        settings,
-        limit=500,
-        repository=rate_repository,
-        organization_id=repository_org_id,
-    )
     approved_at = [
-        item.get("approved_at") for item in imports if item.get("approved_at")
+        serialize_date(item.approved_at)
+        for item in rate_repository.list_import_records(
+            organization_id=repository_org_id
+        )
+        if item.approved_at
     ]
     last_refreshed = (
         max(approved_at, key=parse_datetime_sort_key) if approved_at else None

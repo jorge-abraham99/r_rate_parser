@@ -32,6 +32,18 @@ class ApprovedRateLibrary:
     source_by_import: dict[str, dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class ImportBundle:
+    """One import's persisted source and structured parsed entities."""
+
+    source: SourceDocument
+    rate_import: RateImport
+    cards: tuple[RateCard, ...]
+    offers: tuple[RateOffer, ...]
+    charges: tuple[RateChargeLine, ...]
+    notes: tuple[RateNote, ...]
+
+
 class RateRepository(ABC):
     """Persistence operations used by the parser and Rate Desk services."""
 
@@ -80,6 +92,16 @@ class RateRepository(ABC):
         *,
         organization_id: OrganizationId,
     ) -> tuple[RateImport, ...]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def load_import_bundle(
+        self,
+        import_id: str,
+        *,
+        organization_id: OrganizationId,
+    ) -> ImportBundle | None:
+        """Load one import's persisted source and parsed entities for review."""
         raise NotImplementedError
 
     @abstractmethod
