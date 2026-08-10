@@ -100,6 +100,7 @@ def test_real_hapag_bundle_round_trips_with_organization_isolation(
         duplicate_a = repository.register_source_document(
             source_path,
             organization_id=organization_a,
+            original_file_name="Renamed Hapag rates.xlsx",
         )
         source_b = repository.register_source_document(
             source_path,
@@ -107,6 +108,7 @@ def test_real_hapag_bundle_round_trips_with_organization_isolation(
         )
 
         assert duplicate_a.id == source_a.id
+        assert duplicate_a.file_name == "Renamed Hapag rates.xlsx"
         assert source_b.id != source_a.id
         assert source_b.checksum == source_a.checksum
 
@@ -457,6 +459,7 @@ def test_real_parser_family_matches_csv_after_postgres_approval(
         stored_source = repository.register_source_document(
             source_path,
             organization_id=organization_id,
+            original_file_name=source_path.name,
         )
         csv_root = tmp_path / "csv_parse"
         monkeypatch.setenv("RATE_INGEST_ROOT", str(csv_root))

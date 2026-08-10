@@ -45,7 +45,7 @@ RateRepository
 Quote UI
 ```
 
-The application is currently a single Python web process. Supabase Auth and membership lookup are active. Postgres can now own import persistence and the full review lifecycle, but production still selects CSV until the Stage 6 read cutover. There is no queue, worker, or frontend build service.
+The application is currently a single Python web process. Supabase Auth and membership lookup are active. The selected repository backend now owns import persistence, the full review lifecycle, search, and Rate Desk reads. Stage 7 can select Postgres for the production trial after the deployment checks pass. There is no queue, worker, or frontend build service.
 
 ## Repository Map
 
@@ -177,7 +177,7 @@ The canonical export intentionally contains the offer base amount only. It is no
 
 `RateRepository` is the only business persistence boundary used by services, approval, CLI search, and CLI inspection. `CsvRateRepository` remains the production default. `PostgresRateRepository` now implements the complete Stage 5 import/review lifecycle. The existing `source_registry.py` and `warehouse.py` modules remain as low-level CSV implementation details.
 
-`RATE_STORAGE_BACKEND` defaults to `csv`. Selecting `postgres` requires `SUPABASE_DB_URL` and an explicit organization UUID for every repository operation. The adapter requires SSL, disables prepared statements for pooler compatibility, reuses a small connection pool, and uses batched child inserts. Pending and rejected parsed rows stay in Postgres but are not live. Approved reads first resolve approved import IDs and then use indexed child-table filters. The deployed backend remains `csv` until Stage 6 moves UI and Rate Desk reads.
+`RATE_STORAGE_BACKEND` defaults to `csv`. Selecting `postgres` requires `SUPABASE_DB_URL` and an explicit organization UUID for every repository operation. The adapter requires SSL, disables prepared statements for pooler compatibility, reuses a small connection pool, and uses batched child inserts. Pending and rejected parsed rows stay in Postgres but are not live. Approved reads first resolve approved import IDs and then use indexed child-table filters. Stage 6 moved Import UI and Rate Desk reads to this repository boundary; Stage 7 controls the production backend selection.
 
 The data root defaults to the current working directory and can be replaced with `RATE_INGEST_ROOT`. All mutable application state is under `<root>/data/`.
 
@@ -235,7 +235,7 @@ Stage 3 added the repository boundary with the CSV adapter still active. It did 
 
 Stage 4 adds the Postgres adapter and explicit mappings without a production cutover. API routes now pass the authenticated organization ID into repository-backed service calls. The Postgres bundle writer validates relationships and writes cards, offers, charges, and notes in one short transaction. The guarded integration test passed with the real Hapag source and two temporary organizations; cleanup left zero test organizations and zero test rate rows.
 
-Stage 5 persists complete parsed bundles before review. Approval locks the target and current same-carrier import rows, verifies status and validation, archives the old import, updates the approved card carrier, and marks the new import approved in one transaction. Archived and rejected parsed rows remain for history. Import deletion cascades through parsed children but leaves the source document. The signed-charge migration preserves discounts and signed freight adjustments already produced by existing parsers. Guarded parity tests cover all nine parser families with real files. Stage 7 adds the invitation password setup page and a guarded, retry-safe CSV-to-Postgres backfill command; the current trial intentionally starts with an empty Postgres library, so the command is not part of the cutover.
+Stage 5 persists complete parsed bundles before review. Approval locks the target and current same-carrier import rows, verifies status and validation, archives the old import, updates the approved card carrier, and marks the new import approved in one transaction. Archived and rejected parsed rows remain for history. Import deletion cascades through parsed children but leaves the source document. The signed-charge migration preserves discounts and signed freight adjustments already produced by existing parsers. Stage 6 makes Import review, search, and Rate Desk reads use the selected repository and includes guarded parity tests for all parser families with real files. Stage 7 adds the invitation password setup page and a guarded, retry-safe CSV-to-Postgres backfill command; the current trial intentionally starts with an empty Postgres library, so the command is not part of the cutover.
 
 `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_DB_URL`, `AUTH_REQUIRED`, and `RATE_STORAGE_BACKEND` are available through `Settings`. `AUTH_REQUIRED` defaults to `true`, and `RATE_STORAGE_BACKEND` defaults to `csv`. The public configuration endpoint returns only the URL, publishable key, and auth flag. The database URL remains server-only.
 

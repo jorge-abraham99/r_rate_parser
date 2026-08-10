@@ -56,6 +56,7 @@ class RateRepository(ABC):
         *,
         organization_id: OrganizationId,
         uploaded_by: str | None = None,
+        original_file_name: str | None = None,
     ) -> SourceDocument:
         raise NotImplementedError
 

@@ -1,15 +1,16 @@
-(function initializeSetPassword() {
+(function initializePasswordSetup() {
   "use strict";
 
-  const form = document.getElementById("setPasswordForm");
+  const form = document.getElementById("passwordForm");
   const passwordInput = document.getElementById("newPassword");
   const confirmInput = document.getElementById("confirmPassword");
-  const submitButton = document.getElementById("setPasswordSubmit");
-  const alert = document.getElementById("setPasswordAlert");
+  const submitButton = document.getElementById("passwordSubmit");
+  const alert = document.getElementById("passwordAlert");
   const invalidInviteMessage = "This invitation link is invalid or has expired. Ask your Reudan administrator for a new invitation.";
 
-  function showError(message) {
+  function showMessage(message, success = false) {
     alert.textContent = message;
+    alert.classList.toggle("success", success);
     alert.hidden = false;
   }
 
@@ -18,52 +19,62 @@
     submitButton.textContent = busy ? "Setting password…" : "Set password";
   }
 
-  function disableForm() {
-    form.hidden = false;
-    passwordInput.disabled = true;
-    confirmInput.disabled = true;
-    submitButton.disabled = true;
+  function hasInvitationMarker() {
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const query = new URLSearchParams(window.location.search);
+    return hash.get("type") === "invite" || query.get("type") === "invite";
   }
 
-  async function verifyMembership() {
-    const session = await window.RATE_DESK_AUTH.getSession();
-    if (!session?.access_token) return false;
-    const response = await window.fetch("/api/me", {
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        Accept: "application/json",
-      },
-    });
-    return response.ok;
+  function hasAuthLinkError() {
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const query = new URLSearchParams(window.location.search);
+    return Boolean(
+      hash.get("error") ||
+      hash.get("error_code") ||
+      query.get("error") ||
+      query.get("error_code")
+    );
+  }
+
+  async function clearLocalSession() {
+    try {
+      const client = await window.RATE_DESK_AUTH.getClient();
+      await client.auth.signOut({ scope: "local" });
+    } catch (_error) {
+      // The page can still show a safe error when local cleanup fails.
+    }
   }
 
   async function boot() {
+    if (hasAuthLinkError() || !hasInvitationMarker()) {
+      await clearLocalSession();
+      showMessage(invalidInviteMessage);
+      return;
+    }
+
     try {
       const session = await window.RATE_DESK_AUTH.getSession();
-      if (!session?.access_token) {
-        showError(invalidInviteMessage);
-        disableForm();
-        return;
-      }
+      if (!session?.access_token) throw new Error("No invitation session");
       form.hidden = false;
     } catch (_error) {
-      showError(invalidInviteMessage);
-      disableForm();
+      await clearLocalSession();
+      showMessage(invalidInviteMessage);
     }
   }
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     alert.hidden = true;
+
     const password = passwordInput.value;
     if (password.length < 8) {
-      showError("Choose a password with at least 8 characters.");
+      showMessage("Use a password with at least 8 characters.");
       passwordInput.focus();
       return;
     }
     if (password !== confirmInput.value) {
-      showError("The passwords do not match.");
-      confirmInput.focus();
+      showMessage("The passwords do not match.");
+      confirmInput.select();
       return;
     }
 
@@ -72,20 +83,27 @@
       const client = await window.RATE_DESK_AUTH.getClient();
       const { error } = await client.auth.updateUser({ password });
       if (error) throw error;
-      form.reset();
-      if (!(await verifyMembership())) {
-        showError("Your password was set, but this account does not have Rate Desk access. Contact your Reudan administrator.");
-        disableForm();
+
+      try {
+        await window.RATE_DESK_AUTH.apiFetch("/api/me");
+      } catch (_membershipError) {
+        await clearLocalSession();
+        form.hidden = true;
+        showMessage("Your password was set, but this account has no organization access. Contact your Reudan administrator.");
         return;
       }
-      window.location.replace("/ui/");
+
+      form.reset();
+      form.hidden = true;
+      showMessage("Your password is set. Opening the Rate Desk…", true);
+      window.setTimeout(() => window.location.replace("/ui/"), 700);
     } catch (_error) {
-      showError(invalidInviteMessage);
+      showMessage("The password could not be set. Ask for a new invitation and try again.");
       passwordInput.value = "";
       confirmInput.value = "";
       passwordInput.focus();
     } finally {
-      if (!passwordInput.disabled) setBusy(false);
+      setBusy(false);
     }
   });
 

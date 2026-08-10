@@ -46,9 +46,15 @@ class CsvRateRepository(RateRepository):
         *,
         organization_id: OrganizationId,
         uploaded_by: str | None = None,
+        original_file_name: str | None = None,
     ) -> SourceDocument:
         del organization_id
-        return register_source(self.settings, source_path, uploaded_by=uploaded_by)
+        return register_source(
+            self.settings,
+            source_path,
+            uploaded_by=uploaded_by,
+            original_file_name=original_file_name,
+        )
 
     def add_import(
         self,

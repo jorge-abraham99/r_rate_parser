@@ -32,17 +32,29 @@ def find_source_by_checksum(settings: Settings, checksum: str) -> dict[str, str]
     return None
 
 
-def register_source(settings: Settings, source_path: Path, uploaded_by: str | None = None) -> SourceDocument:
+def register_source(
+    settings: Settings,
+    source_path: Path,
+    uploaded_by: str | None = None,
+    original_file_name: str | None = None,
+) -> SourceDocument:
     settings.ensure()
     copied_path = copy_to_raw(source_path, settings.raw_dir)
     checksum = compute_checksum(copied_path)
     existing = find_source_by_checksum(settings, checksum)
     if existing:
-        return SourceDocument(**deserialize_source_row(existing))
+        source = SourceDocument(**deserialize_source_row(existing))
+        if original_file_name:
+            return source.model_copy(
+                update={"file_name": Path(original_file_name).name}
+            )
+        return source
 
     source = SourceDocument(
         source_type=copied_path.suffix.replace(".", "").lower(),
-        file_name=copied_path.name,
+        file_name=(
+            Path(original_file_name).name if original_file_name else copied_path.name
+        ),
         source_path=str(copied_path),
         uploaded_by=uploaded_by,
         checksum=checksum,

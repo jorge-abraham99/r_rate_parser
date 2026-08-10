@@ -265,6 +265,18 @@ label:focus-within {
   font-size: 12.5px;
 }
 
+.login-alert.success {
+  border-color: #9fcdb3;
+  background: #edf8f1;
+  color: #205c3a;
+}
+
+.password-hint {
+  margin: -4px 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .login-form {
   display: flex;
   flex-direction: column;

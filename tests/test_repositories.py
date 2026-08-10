@@ -60,12 +60,16 @@ def test_csv_repository_preserves_entities_and_source_metadata(tmp_path: Path) -
         incoming,
         organization_id=LOCAL_CSV_ORGANIZATION_ID,
         uploaded_by="operator@example.com",
+        original_file_name="Original client rates.csv",
     )
     duplicate = repository.register_source_document(
         incoming,
         organization_id=LOCAL_CSV_ORGANIZATION_ID,
         uploaded_by="other@example.com",
+        original_file_name="Renamed client rates.csv",
     )
+    assert duplicate.id == source.id
+    assert duplicate.file_name == "Renamed client rates.csv"
     rate_import = RateImport(
         id="import_repository_test",
         source_document_id=source.id,
@@ -117,6 +121,7 @@ def test_csv_repository_preserves_entities_and_source_metadata(tmp_path: Path) -
     )
 
     assert duplicate.id == source.id
+    assert source.file_name == "Original client rates.csv"
     repository.save_import_bundle(
         rate_import,
         [card],

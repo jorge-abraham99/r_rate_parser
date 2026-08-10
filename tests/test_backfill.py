@@ -32,12 +32,21 @@ class CapturingPostgresRepository:
         self.registered = []
         self.saved = []
 
-    def register_source_document(self, source_path, *, organization_id, uploaded_by=None):
-        self.registered.append((source_path, organization_id, uploaded_by))
+    def register_source_document(
+        self,
+        source_path,
+        *,
+        organization_id,
+        uploaded_by=None,
+        original_file_name=None,
+    ):
+        self.registered.append(
+            (source_path, organization_id, uploaded_by, original_file_name)
+        )
         return SourceDocument(
             id="src_postgres",
             source_type=source_path.suffix.removeprefix("."),
-            file_name=source_path.name,
+            file_name=original_file_name or source_path.name,
             source_path=str(source_path),
             uploaded_by=uploaded_by,
             checksum="b" * 64,
@@ -107,6 +116,7 @@ def test_csv_backfill_copies_bundle_with_postgres_source_id(tmp_path: Path) -> N
 
     assert report.applied is True
     assert target.registered[0][1] == ORGANIZATION_ID
+    assert target.registered[0][3] == bundle.source.file_name
     saved_import, cards, offers, charges, notes, canonical_rates, saved_organization = target.saved[0]
     assert saved_import.source_document_id == "src_postgres"
     assert cards == [bundle.cards[0]]

@@ -2285,6 +2285,8 @@ Only:
 
 Stage 6
 
+Implementation status: complete on 9 August 2026. Import review, search, and Rate Desk reads now use the selected repository backend.
+
 Deliver:
 
 Postgres reads;
@@ -2302,6 +2304,8 @@ Agent session G
 Only:
 
 Stage 7
+
+Implementation status: code complete on 10 August 2026. Production configuration, deployment, and authenticated smoke-test evidence remain to be verified before the trial is complete.
 
 Deliver:
 

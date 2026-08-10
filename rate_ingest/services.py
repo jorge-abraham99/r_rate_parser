@@ -135,9 +135,8 @@ def import_source_file(
         source_path,
         organization_id=repository_org_id,
         uploaded_by=uploaded_by,
+        original_file_name=source_file_name or source_path.name,
     )
-    if source_file_name:
-        source.file_name = Path(source_file_name).name
     inspected, _ = classify_source(settings, source)
     scored = inspected.possible_templates
     if template:

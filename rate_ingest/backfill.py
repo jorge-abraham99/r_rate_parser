@@ -86,6 +86,7 @@ def backfill_csv_to_postgres(
                 Path(bundle.source.source_path),
                 organization_id=organization_id,
                 uploaded_by=bundle.source.uploaded_by,
+                original_file_name=bundle.source.file_name,
             )
             postgres_import = bundle.rate_import.model_copy(
                 update={"source_document_id": postgres_source.id}

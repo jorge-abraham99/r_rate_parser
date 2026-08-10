@@ -94,6 +94,7 @@ class PostgresRateRepository(RateRepository):
         *,
         organization_id: OrganizationId,
         uploaded_by: str | None = None,
+        original_file_name: str | None = None,
     ) -> SourceDocument:
         organization_uuid = require_organization_uuid(organization_id)
         self.settings.ensure()
@@ -101,7 +102,11 @@ class PostgresRateRepository(RateRepository):
         checksum = compute_checksum(copied_path)
         source = SourceDocument(
             source_type=copied_path.suffix.replace(".", "").lower(),
-            file_name=copied_path.name,
+            file_name=(
+                Path(original_file_name).name
+                if original_file_name
+                else copied_path.name
+            ),
             source_path=str(copied_path),
             uploaded_by=uploaded_by,
             checksum=checksum,
@@ -124,7 +129,7 @@ class PostgresRateRepository(RateRepository):
                     %(storage_path)s, %(uploaded_by)s, %(metadata)s, %(created_at)s
                 )
                 on conflict (organization_id, sha256) do update
-                set sha256 = excluded.sha256
+                set original_filename = excluded.original_filename
                 returning {SOURCE_COLUMNS}
                 """,
                 {**payload, "metadata": Jsonb(payload["metadata"])},
@@ -204,8 +209,10 @@ class PostgresRateRepository(RateRepository):
                 return None
             import_database_id = import_row["id"]
             source_row = connection.execute(
-                f"""
-                select {SOURCE_COLUMNS}
+                """
+                select s.id, s.application_id, s.organization_id,
+                       s.original_filename, s.source_type, s.sha256,
+                       s.storage_path, s.uploaded_by, s.metadata, s.created_at
                 from public.source_documents s
                 join public.rate_imports i
                   on i.organization_id = s.organization_id
@@ -243,21 +250,24 @@ class PostgresRateRepository(RateRepository):
                 """,
                 (organization_uuid, import_database_id),
             ).fetchall()
-            charge_rows = connection.execute(
-                """
-                select ch.id, ch.application_id, ch.charge_name, ch.amount,
-                       ch.currency, ch.basis, ch.charge_type, ch.is_included,
-                       ch.source_reference, ch.metadata, ch.created_at,
-                       o.application_id as offer_application_id
-                from public.rate_charge_lines ch
-                join public.rate_offers o
-                  on o.organization_id = ch.organization_id
-                 and o.id = ch.rate_offer_id
-                where ch.organization_id = %s and o.import_id = %s
-                order by ch.created_at, ch.application_id
-                """,
-                (organization_uuid, import_database_id),
-            ).fetchall()
+            offer_ids = [row["id"] for row in offer_rows]
+            charge_rows = (
+                connection.execute(
+                    """
+                    select ch.id, ch.application_id, ch.charge_name, ch.amount,
+                           ch.currency, ch.basis, ch.charge_type, ch.is_included,
+                           ch.source_reference, ch.metadata, ch.created_at,
+                           ch.rate_offer_id
+                    from public.rate_charge_lines ch
+                    where ch.organization_id = %s
+                      and ch.rate_offer_id = any(%s)
+                    order by ch.created_at, ch.application_id
+                    """,
+                    (organization_uuid, offer_ids),
+                ).fetchall()
+                if offer_ids
+                else []
+            )
             note_rows = connection.execute(
                 """
                 select n.id, n.application_id, n.note_type, n.note_text,
@@ -276,6 +286,13 @@ class PostgresRateRepository(RateRepository):
             ).fetchall()
         if source_row is None:
             raise RuntimeError(f"Source document missing for import {import_id}")
+        offer_application_ids = {
+            row["id"]: row["application_id"] for row in offer_rows
+        }
+        for row in charge_rows:
+            row["offer_application_id"] = offer_application_ids[
+                row["rate_offer_id"]
+            ]
         return ImportBundle(
             source=source_document_from_db(source_row),
             rate_import=rate_import_from_db(import_row),
@@ -596,21 +613,24 @@ class PostgresRateRepository(RateRepository):
                 """,
                 (organization_uuid, approved_import_ids),
             ).fetchall()
-            charge_rows = connection.execute(
-                """
-                select ch.id, ch.application_id, ch.charge_name, ch.amount,
-                       ch.currency, ch.basis, ch.charge_type, ch.is_included,
-                       ch.source_reference, ch.metadata, ch.created_at,
-                       o.application_id as offer_application_id
-                from public.rate_charge_lines ch
-                join public.rate_offers o
-                  on o.organization_id = ch.organization_id
-                 and o.id = ch.rate_offer_id
-                where ch.organization_id = %s and o.import_id = any(%s)
-                order by ch.created_at, ch.application_id
-                """,
-                (organization_uuid, approved_import_ids),
-            ).fetchall()
+            offer_ids = [row["id"] for row in offer_rows]
+            charge_rows = (
+                connection.execute(
+                    """
+                    select ch.id, ch.application_id, ch.charge_name, ch.amount,
+                           ch.currency, ch.basis, ch.charge_type, ch.is_included,
+                           ch.source_reference, ch.metadata, ch.created_at,
+                           ch.rate_offer_id
+                    from public.rate_charge_lines ch
+                    where ch.organization_id = %s
+                      and ch.rate_offer_id = any(%s)
+                    order by ch.created_at, ch.application_id
+                    """,
+                    (organization_uuid, offer_ids),
+                ).fetchall()
+                if offer_ids
+                else []
+            )
             note_rows = connection.execute(
                 """
                 select n.id, n.application_id, n.note_type, n.note_text,
@@ -642,6 +662,14 @@ class PostgresRateRepository(RateRepository):
                 """,
                 (organization_uuid, approved_import_ids),
             ).fetchall()
+
+        offer_application_ids = {
+            row["id"]: row["application_id"] for row in offer_rows
+        }
+        for row in charge_rows:
+            row["offer_application_id"] = offer_application_ids[
+                row["rate_offer_id"]
+            ]
 
         source_by_import: dict[str, dict[str, Any]] = {}
         for row in source_rows:
