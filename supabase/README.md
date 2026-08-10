@@ -94,6 +94,31 @@ The static browser UI uses pinned `@supabase/supabase-js` `2.112.2` with a SHA-3
 
 Before deployment, confirm that email/password login is enabled, public sign-up is disabled, the Site URL and redirect URLs are correct, and each invited user has an `organization_members` row.
 
+## Stage 6 and Stage 7 trial cutover
+
+Stage 6 makes Import review and Rate Desk reads use the selected repository backend. Stage 7 adds `UI/set-password.html`, which accepts a Supabase invitation session, updates the password through the browser client, checks `GET /api/me`, and only then sends an authorized user to the Rate Desk.
+
+For Dashboard-sent invitations, set the Site URL to the password page because the Dashboard does not supply a custom `redirectTo`. Allow both the normal application root and the exact password page:
+
+```text
+Site URL: https://rrateparser-production.up.railway.app/ui/set-password.html
+Redirect URL: https://rrateparser-production.up.railway.app/
+Redirect URL: https://rrateparser-production.up.railway.app/ui/set-password.html
+```
+
+Keep public sign-up disabled. Invite the user, add their resulting `auth.users.id` to the intended `organization_members` row, and assign `viewer`, `operator`, or `admin` deliberately. The browser page contains no service-role key or database credential.
+
+The current trial intentionally starts with an empty Postgres rate library. Do not run a backfill before changing Railway to `RATE_STORAGE_BACKEND=postgres`; CSV rates remain available only through a rollback to `RATE_STORAGE_BACKEND=csv`.
+
+The following optional command is retained for a later recovery/migration decision:
+
+```bash
+python -m rate_ingest backfill-postgres <organization-uuid>
+python -m rate_ingest backfill-postgres <organization-uuid> --apply
+```
+
+The dry run verifies that every CSV import has a source file and structured run bundle. The applied run upserts the same application IDs into the given organization and can be retried. It is not dual-write: imports created in Postgres after cutover are absent from the CSV rollback store.
+
 ## Credentials
 
 Copy `.env.example` to `.env` for local work. `.env` is ignored by Git.

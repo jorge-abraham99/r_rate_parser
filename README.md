@@ -31,9 +31,9 @@ Stages 1 and 2 add invite-only Supabase authentication. The backend validates us
 
 The browser restores Supabase sessions, adds the access token through one shared API helper, and sends logged-out users to `/ui/login.html`. Viewers can read imports and rates. Operators and admins can also upload, approve, reject, and delete. Health and public browser configuration stay public; all rate APIs require both a valid user and an organization membership.
 
-Stage 3 puts all rate persistence behind `RateRepository`. Stage 4 adds `PostgresRateRepository`, explicit model mappings, a small connection pool, organization-scoped queries, and batched writes. Stage 5 adds complete pre-review bundle persistence and transactional approval, replacement archive, rejection, and deletion behavior. `CsvRateRepository` stays active because `RATE_STORAGE_BACKEND` defaults to `csv`.
+Stage 3 puts all rate persistence behind `RateRepository`. Stage 4 adds `PostgresRateRepository`, explicit model mappings, a small connection pool, organization-scoped queries, and batched writes. Stage 5 adds complete pre-review bundle persistence and transactional approval, replacement archive, rejection, and deletion behavior. Stage 6 moves review and Rate Desk reads onto the selected repository backend.
 
-The Stage 4 `application_id` migration and Stage 5 signed-charge migration are applied to the hosted project. Guarded real-database tests cover the lifecycle and all nine parser families. Production still stays on `csv` until the Stage 6 read cutover is complete.
+Stage 7 adds the invitation password-setup page and an optional, idempotent CSV-to-Postgres backfill command. `RATE_STORAGE_BACKEND` deliberately still defaults to `csv` for local safety; this trial starts with an empty Postgres rate library, then Railway can switch to `postgres` after the trial smoke test in [DEPLOY_RAILWAY.md](DEPLOY_RAILWAY.md).
 
 ## Canonical Output
 
@@ -87,7 +87,7 @@ In practice this means a random unseen file will not magically work today.
 pip install -r requirements.txt
 ```
 
-The active storage setting is:
+The local default storage setting is:
 
 ```bash
 RATE_STORAGE_BACKEND=csv
@@ -99,7 +99,18 @@ For guarded Postgres lifecycle and parser parity testing, set the server-only `S
 RUN_POSTGRES_INTEGRATION_TESTS=true pytest -q tests/test_postgres_repository_integration.py
 ```
 
-The tests create unique temporary organizations and delete only those exact organizations when they finish. Keep production on `csv` until the Stage 6 read cutover is complete.
+The tests create unique temporary organizations and delete only those exact organizations when they finish.
+
+The current trial decision is to start Postgres with an empty rate library. Do not run a CSV backfill before switching Railway to `postgres`; the existing CSV rates will remain available only if the service is rolled back to `RATE_STORAGE_BACKEND=csv`.
+
+The optional recovery/migration command remains available if that decision changes later:
+
+```bash
+python -m rate_ingest backfill-postgres <organization-uuid>
+python -m rate_ingest backfill-postgres <organization-uuid> --apply
+```
+
+See [DEPLOY_RAILWAY.md](DEPLOY_RAILWAY.md) for the required Railway variables, invitation redirect, and smoke checklist.
 
 ## CLI Workflow
 

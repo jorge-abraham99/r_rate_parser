@@ -374,3 +374,21 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert "fetch(" not in rate_desk_js
     assert "RATE_DESK_AUTH.apiFetch" in app_js
     assert "RATE_DESK_AUTH.apiFetch" in rate_desk_js
+
+
+def test_frontend_has_safe_invitation_password_setup():
+    page = Path("UI/set-password.html").read_text(encoding="utf-8")
+    script = Path("UI/set-password.js").read_text(encoding="utf-8")
+
+    assert "@supabase/supabase-js@2.112.2" in page
+    assert 'autocomplete="new-password"' in page
+    assert 'minlength="8"' in page
+    assert "Create Account" not in page
+    assert "updateUser({ password })" in script
+    assert 'window.fetch("/api/me"' in script
+    assert "Authorization: `Bearer ${session.access_token}`" in script
+    assert "passwords do not match" in script
+    assert "invalid or has expired" in script
+    assert "does not have Rate Desk access" in script
+    assert "service_role" not in page
+    assert "service_role" not in script

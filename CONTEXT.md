@@ -227,7 +227,7 @@ Stage 0 of `SUPABASE_AUTH_AND_RATE_DB_MIGRATION_PLAN.md` has captured, but not a
 
 The remote migration ledger contains `20260807222346_initial_rate_library_schema`, `20260807222404_add_missing_fk_indexes`, `20260808150650_add_application_ids`, and `20260809210000_allow_signed_charge_amounts`. They must not be replayed against the existing project.
 
-Supabase rate persistence is not yet the deployed runtime path: imports, approvals, and searches still use the existing filesystem behavior. Stage 4 migration `20260808150650_add_application_ids.sql` is applied remotely. It adds organization-scoped `application_id` values to `source_documents`, `rate_imports`, `rate_cards`, `rate_offers`, `rate_charge_lines`, and `rate_notes`. UUIDs remain internal database keys while current string IDs remain authoritative in API payloads and artifacts.
+Supabase rate persistence is available as the selected runtime path: imports, approvals, searches, review detail, and Rate Desk reads all use the configured repository. Stage 4 migration `20260808150650_add_application_ids.sql` is applied remotely. It adds organization-scoped `application_id` values to `source_documents`, `rate_imports`, `rate_cards`, `rate_offers`, `rate_charge_lines`, and `rate_notes`. UUIDs remain internal database keys while current string IDs remain authoritative in API payloads and artifacts.
 
 Stage 1 added Supabase access-token validation through the public JWKS. Stage 2 added invite-only browser login and membership-aware API authorization. The server sends the verified user token to the Supabase Data API to read only that user's `organization_members` rows through RLS. It does not use `user_metadata`, a JWT secret, a database password, or a service-role key for authorization.
 
@@ -235,7 +235,7 @@ Stage 3 added the repository boundary with the CSV adapter still active. It did 
 
 Stage 4 adds the Postgres adapter and explicit mappings without a production cutover. API routes now pass the authenticated organization ID into repository-backed service calls. The Postgres bundle writer validates relationships and writes cards, offers, charges, and notes in one short transaction. The guarded integration test passed with the real Hapag source and two temporary organizations; cleanup left zero test organizations and zero test rate rows.
 
-Stage 5 persists complete parsed bundles before review. Approval locks the target and current same-carrier import rows, verifies status and validation, archives the old import, updates the approved card carrier, and marks the new import approved in one transaction. Archived and rejected parsed rows remain for history. Import deletion cascades through parsed children but leaves the source document. The signed-charge migration preserves discounts and signed freight adjustments already produced by existing parsers. Guarded parity tests cover all nine parser families with real files.
+Stage 5 persists complete parsed bundles before review. Approval locks the target and current same-carrier import rows, verifies status and validation, archives the old import, updates the approved card carrier, and marks the new import approved in one transaction. Archived and rejected parsed rows remain for history. Import deletion cascades through parsed children but leaves the source document. The signed-charge migration preserves discounts and signed freight adjustments already produced by existing parsers. Guarded parity tests cover all nine parser families with real files. Stage 7 adds the invitation password setup page and a guarded, retry-safe CSV-to-Postgres backfill command; the current trial intentionally starts with an empty Postgres library, so the command is not part of the cutover.
 
 `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_DB_URL`, `AUTH_REQUIRED`, and `RATE_STORAGE_BACKEND` are available through `Settings`. `AUTH_REQUIRED` defaults to `true`, and `RATE_STORAGE_BACKEND` defaults to `csv`. The public configuration endpoint returns only the URL, publishable key, and auth flag. The database URL remains server-only.
 
@@ -321,10 +321,10 @@ PyMuPDF is listed in both dependency manifests and is imported lazily by PDF-spe
 
 ## Current Constraints and Risks
 
-- Runtime rate storage is the repository-backed CSV/JSON adapter; the captured Supabase rate tables are not connected yet.
-- The Stage 5 Postgres lifecycle is verified, but Import UI and Rate Desk read cutover remain Stage 6 work.
+- Runtime rate storage is repository-backed and defaults to CSV/JSON locally; Supabase Postgres is selected explicitly through Railway configuration for the empty-library trial.
+- Import UI and Rate Desk reads are repository-backed. The operational Postgres cutover requires the Railway configuration change but no CSV backfill for this trial.
 - The filesystem runtime has no transaction boundaries, multi-process locks, or concurrent-writer protection. Database migrations now exist only as a captured baseline.
-- Authentication and membership role checks are active, but production still selects the shared CSV runtime warehouse. Organization-scoped Postgres persistence is ready for the Stage 6 read cutover.
+- Authentication and membership role checks are active. `RATE_STORAGE_BACKEND` still defaults to CSV locally as a safety measure; Railway may use the organization-scoped Postgres backend after cutover.
 - Parsing and large response construction happen synchronously in the API process.
 - No generic unknown-document parser or AI-assisted template drafting.
 - PDF support is limited to the known text-based COSCO layout; there is no OCR/scanned-PDF path.

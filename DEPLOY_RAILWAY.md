@@ -114,27 +114,56 @@ railway up
 
 Then attach the volume in Railway and generate the public domain from the dashboard.
 
-## Environment Notes
+## Stage 7 trial cutover
 
-This app does not currently require an AI API key.
+The application is ready to run its authenticated Postgres trial, but Railway must be switched deliberately. Set these variables in the Railway service, never in browser code:
 
-No extra application secrets are required for the current deterministic parser flow unless you add them later.
+```text
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_PUBLISHABLE_KEY=<publishable-key>
+SUPABASE_DB_URL=<server-only SSL PostgreSQL connection string>
+AUTH_REQUIRED=true
+RATE_STORAGE_BACKEND=postgres
+```
 
-If you later add LLM-assisted parsing, that will likely introduce one or more new environment variables.
+`SUPABASE_DB_URL` is a server secret. `/api/public-config` exposes only the URL and publishable key needed by the browser; it must never expose the database URL, a JWT secret, or a service-role key.
+
+This trial intentionally starts with an empty Postgres rate library. Do not run a CSV backfill before changing `RATE_STORAGE_BACKEND`; the existing CSV rates will not appear in Postgres. Keep the CSV configuration available as the short-term rollback path.
+
+The optional backfill command is retained only for a later recovery/migration decision:
+
+```bash
+python -m rate_ingest backfill-postgres <organization-uuid>
+python -m rate_ingest backfill-postgres <organization-uuid> --apply
+```
+
+The first command is read-only. The second copies every recoverable CSV import and its parsed entities into that organization. It fails before writing if any import lacks its source file or structured run bundle, and it is safe to retry.
+
+In Supabase Auth → URL Configuration, keep public sign-up disabled and use the password page as the Site URL. Dashboard-sent invitations do not supply a custom `redirectTo`, so they use the Site URL:
+
+```text
+Site URL:
+https://rrateparser-production.up.railway.app/ui/set-password.html
+
+Allowed Redirect URLs:
+https://rrateparser-production.up.railway.app/
+https://rrateparser-production.up.railway.app/ui/set-password.html
+```
+
+Add that same URL to Supabase's allowed redirect URLs. Invited users follow it to choose a password, then the app checks `/api/me`; an account without an `organization_members` row is denied Rate Desk access. Create the organization membership and deliberate `viewer`, `operator`, or `admin` role before sending the invitation.
 
 ## What To Test After Deploy
 
 Use one known file first.
 
-Recommended smoke test:
+Recommended Stage 7 smoke test:
 
-1. Open `/ui/import.html`
-2. Upload `rate_sheet_files/MSC - FAR EAST RATES JAN.xlsx`
-3. Confirm an import appears
-4. Open the import detail
-5. Approve it
-6. Open `/ui/`
-7. Confirm approved rates appear in the quote flow
+1. While logged out, confirm `/ui/` redirects to login and `/api/rate-desk` and `/api/imports` return `401`.
+2. Accept a fresh invitation at `/ui/set-password.html`; verify a mismatched password is rejected and an expired/reused link gives the safe generic message.
+3. Sign in as a viewer: Rate Desk and imports work, while upload and approval return `403`.
+4. Sign in as an operator: upload the MSC sample, review it, approve it, and search it from Rate Desk.
+5. Approve a replacement for the same carrier and verify the previous import becomes archived only when the new import is approved.
+6. Confirm the Rate Desk starts empty, then verify only the newly approved Postgres import appears before inviting the wider trial group.
 
 Then repeat with:
 
@@ -144,24 +173,26 @@ Then repeat with:
 
 ## Known Limits Of Railway Deployment Right Now
 
-This deployment is suitable for demo/internal use, but there are limits:
+This trial deployment has limits:
 
-- data is filesystem-backed, not database-backed
-- no auth layer yet
-- no concurrency protection around local file writes
+- original uploads and review artifacts still depend on the `/app/data` volume
+- rollback to `RATE_STORAGE_BACKEND=csv` does not include imports created only in Postgres after cutover
 - no background job system
 - no unknown-file fallback workflow yet
 
-So this is fine for showing the product and running internal demos, but it is not the final production architecture.
+Postgres owns import/rate data during the trial; filesystem artifacts remain for review/debugging.
 
 ## Recommended Summary
 
 Railway is a reasonable way to get a shareable live demo quickly.
 
-The minimum correct setup is:
+The minimum correct Stage 7 setup is:
 
 - deploy repo
 - attach volume to `/app/data`
 - generate Railway public domain
+- configure Supabase Auth and the exact invitation redirect
+- accept that the Postgres trial begins without the old CSV rates
+- set Railway to `RATE_STORAGE_BACKEND=postgres`
 
-Without the volume, the demo may appear to work but lose state on restart or redeploy.
+Without the volume, review artifacts and original uploaded files may disappear on restart or redeploy.

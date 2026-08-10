@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import UUID
 
 import typer
 from rich.console import Console
 
+from rate_ingest.backfill import backfill_csv_to_postgres
 from rate_ingest.config import Settings
 from rate_ingest.inspector import inspect_source
 from rate_ingest.search import run_search
@@ -130,4 +132,32 @@ def search(
         pod=pod,
         equipment_type=equipment_type,
         valid_on=valid_on,
+    )
+
+
+@app.command(
+    "backfill-postgres",
+    help="Check or copy all CSV import bundles into one Postgres organization for the production cutover.",
+)
+def backfill_postgres(
+    organization_id: UUID,
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Perform the copy. Without this flag the command only validates the CSV data.",
+    ),
+) -> None:
+    try:
+        report = backfill_csv_to_postgres(
+            Settings.load(), organization_id, apply=apply
+        )
+    except (RuntimeError, ValueError) as exc:
+        console.print(str(exc))
+        raise typer.Exit(code=1)
+
+    action = "Copied" if report.applied else "Validated"
+    console.print(
+        f"{action} {report.import_count} imports, {report.rate_card_count} cards, "
+        f"{report.rate_offer_count} offers, {report.charge_line_count} charge lines, "
+        f"and {report.note_count} notes."
     )
