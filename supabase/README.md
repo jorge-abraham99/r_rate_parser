@@ -119,6 +119,19 @@ python -m rate_ingest backfill-postgres <organization-uuid> --apply
 
 The dry run verifies that every CSV import has a source file and structured run bundle. The applied run upserts the same application IDs into the given organization and can be retried. It is not dual-write: imports created in Postgres after cutover are absent from the CSV rollback store.
 
+## Stage 8 private source storage
+
+The hosted project has a private `rate-sources` bucket with a 50 MiB object limit. Migration `20260810223319_add_private_rate_source_storage.sql` adds two policies on `storage.objects`:
+
+- organization members can select objects whose first path segment is their organization UUID;
+- organization operators and admins can insert objects under that organization prefix.
+
+There is no authenticated update or delete policy. Original objects are immutable and are retained when an import is rejected or deleted. The application uses the current user's access token and the publishable key for Storage RLS; it does not use a secret or service-role key at runtime.
+
+The parser continues to use the FastAPI temporary file. After a successful parse, the original is uploaded to `<organization_id>/<source_document_id>/<safe_original_filename>`, and `source_documents.storage_path` is updated to that object path. Set `SOURCE_STORAGE_BACKEND=supabase` and `SUPABASE_STORAGE_BUCKET=rate-sources` to enable the path. Filesystem source storage remains the default rollback.
+
+The guarded live test verified operator upload, member download, cross-organization denial, viewer upload denial, private-bucket denial, and complete cleanup. The current Security Advisor reports one unrelated Auth warning because leaked-password protection is disabled; it reports no Stage 8 Storage policy finding.
+
 ## Credentials
 
 Copy `.env.example` to `.env` for local work. `.env` is ignored by Git.
@@ -126,6 +139,7 @@ Copy `.env.example` to `.env` for local work. `.env` is ignored by Git.
 - `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` are used by the authenticated client and membership flow.
 - `SUPABASE_DB_URL` is server-only and must never be exposed to browser code.
 - `SUPABASE_DB_URL` must require SSL. Use a direct connection or the session pooler for this persistent FastAPI service.
+- `SOURCE_STORAGE_BACKEND=supabase` uses the publishable key plus the signed-in user's access token. No Storage secret is required by the application.
 - `SUPABASE_ACCESS_TOKEN` is local migration tooling only and must never be committed.
 
 Do not add a Supabase secret/service-role key to frontend configuration.

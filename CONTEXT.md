@@ -62,6 +62,7 @@ The application is currently a single Python web process. Supabase Auth and memb
 - `rate_ingest/models.py`: Pydantic models for source documents, imports, cards, offers, charge lines, notes, validation, templates, and canonical rates.
 - `rate_ingest/config.py`: resolves the data root and creates/seeds required directories.
 - `rate_ingest/source_registry.py`: copies uploaded sources into raw storage and deduplicates registrations by SHA-256 checksum.
+- `rate_ingest/source_storage.py`: uploads and downloads private Supabase Storage objects with the current user's access token.
 - `rate_ingest/inspector.py`: extracts structural signals from Excel, CSV, EML, and text-based PDF inputs.
 - `rate_ingest/template_matcher.py`: loads templates, enforces file-type compatibility, scores matches, and selects the best template at confidence `>= 0.55`.
 - `rate_ingest/parsers/`: carrier/document-specific deterministic parsers.
@@ -179,6 +180,8 @@ The canonical export intentionally contains the offer base amount only. It is no
 
 `RATE_STORAGE_BACKEND` defaults to `csv`. Selecting `postgres` requires `SUPABASE_DB_URL` and an explicit organization UUID for every repository operation. The adapter requires SSL, disables prepared statements for pooler compatibility, reuses a small connection pool, and uses batched child inserts. Pending and rejected parsed rows stay in Postgres but are not live. Approved reads first resolve approved import IDs and then use indexed child-table filters. Stage 6 moved Import UI and Rate Desk reads to this repository boundary; Stage 7 controls the production backend selection.
 
+`SOURCE_STORAGE_BACKEND` is independent and defaults to `filesystem`. When it is `supabase`, FastAPI keeps the upload in a local temporary path for inspection and parsing, then uploads the accepted original to the private `rate-sources` bucket with the signed-in operator's token. PostgreSQL stores the object path and SHA-256 checksum. The path begins with the organization UUID, and Storage RLS uses that prefix with `organization_members`. Members can read; operators and admins can insert. Objects cannot be updated or deleted through authenticated-user policies.
+
 The data root defaults to the current working directory and can be replaced with `RATE_INGEST_ROOT`. All mutable application state is under `<root>/data/`.
 
 ```text
@@ -225,7 +228,7 @@ Stage 0 of `SUPABASE_AUTH_AND_RATE_DB_MIGRATION_PLAN.md` has captured, but not a
 - membership-scoped authenticated policies and service-role grants;
 - zero Security Advisor findings at capture time.
 
-The remote migration ledger contains `20260807222346_initial_rate_library_schema`, `20260807222404_add_missing_fk_indexes`, `20260808150650_add_application_ids`, and `20260809210000_allow_signed_charge_amounts`. They must not be replayed against the existing project.
+The remote migration ledger contains `20260807222346_initial_rate_library_schema`, `20260807222404_add_missing_fk_indexes`, `20260808150650_add_application_ids`, `20260809210000_allow_signed_charge_amounts`, and `20260810223319_add_private_rate_source_storage`. They must not be replayed against the existing project.
 
 Supabase rate persistence is available as the selected runtime path: imports, approvals, searches, review detail, and Rate Desk reads all use the configured repository. Stage 4 migration `20260808150650_add_application_ids.sql` is applied remotely. It adds organization-scoped `application_id` values to `source_documents`, `rate_imports`, `rate_cards`, `rate_offers`, `rate_charge_lines`, and `rate_notes`. UUIDs remain internal database keys while current string IDs remain authoritative in API payloads and artifacts.
 
@@ -235,9 +238,9 @@ Stage 3 added the repository boundary with the CSV adapter still active. It did 
 
 Stage 4 adds the Postgres adapter and explicit mappings without a production cutover. API routes now pass the authenticated organization ID into repository-backed service calls. The Postgres bundle writer validates relationships and writes cards, offers, charges, and notes in one short transaction. The guarded integration test passed with the real Hapag source and two temporary organizations; cleanup left zero test organizations and zero test rate rows.
 
-Stage 5 persists complete parsed bundles before review. Approval locks the target and current same-carrier import rows, verifies status and validation, archives the old import, updates the approved card carrier, and marks the new import approved in one transaction. Archived and rejected parsed rows remain for history. Import deletion cascades through parsed children but leaves the source document. The signed-charge migration preserves discounts and signed freight adjustments already produced by existing parsers. Stage 6 makes Import review, search, and Rate Desk reads use the selected repository and includes guarded parity tests for all parser families with real files. Stage 7 adds the invitation password setup page and a guarded, retry-safe CSV-to-Postgres backfill command; the current trial intentionally starts with an empty Postgres library, so the command is not part of the cutover.
+Stage 5 persists complete parsed bundles before review. Approval locks the target and current same-carrier import rows, verifies status and validation, archives the old import, updates the approved card carrier, and marks the new import approved in one transaction. Archived and rejected parsed rows remain for history. Import deletion cascades through parsed children but leaves the source document. The signed-charge migration preserves discounts and signed freight adjustments already produced by existing parsers. Stage 6 makes Import review, search, and Rate Desk reads use the selected repository and includes guarded parity tests for all parser families with real files. Stage 7 adds the invitation password setup page and a guarded, retry-safe CSV-to-Postgres backfill command; the current trial intentionally starts with an empty Postgres library, so the command is not part of the cutover. Stage 8 adds the private source bucket without changing parser inputs or import deletion behavior.
 
-`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_DB_URL`, `AUTH_REQUIRED`, and `RATE_STORAGE_BACKEND` are available through `Settings`. `AUTH_REQUIRED` defaults to `true`, and `RATE_STORAGE_BACKEND` defaults to `csv`. The public configuration endpoint returns only the URL, publishable key, and auth flag. The database URL remains server-only.
+`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_DB_URL`, `AUTH_REQUIRED`, `RATE_STORAGE_BACKEND`, `SOURCE_STORAGE_BACKEND`, and `SUPABASE_STORAGE_BUCKET` are available through `Settings`. `AUTH_REQUIRED` defaults to `true`, `RATE_STORAGE_BACKEND` defaults to `csv`, and `SOURCE_STORAGE_BACKEND` defaults to `filesystem`. The public configuration endpoint returns only the URL, publishable key, and auth flag. The database URL remains server-only.
 
 ## API Surface
 
@@ -315,7 +318,7 @@ Railway starts:
 uvicorn rate_ingest.api:app --host 0.0.0.0 --port $PORT
 ```
 
-The service health check is `/api/health`. Attach a persistent volume at `/app/data`; without it, imported sources, review runs, approvals, and warehouse rows can disappear on restart or redeploy.
+The service health check is `/api/health`. Keep the persistent volume at `/app/data` for review artifacts and CSV rollback data. With Stage 8 enabled, original uploads survive independently in Supabase Storage.
 
 PyMuPDF is listed in both dependency manifests and is imported lazily by PDF-specific paths so a missing PDF dependency cannot prevent the API from starting.
 
@@ -331,7 +334,7 @@ PyMuPDF is listed in both dependency manifests and is imported lazily by PDF-spe
 - CSV can be inspected, but no active CSV template is selectable under current strict file-type matching.
 - EML support excludes arbitrary threads, attachments, and plain-text-only layouts.
 - Static FX and the unknown-currency fallback make USD ranking non-authoritative.
-- Import deletion leaves raw-source and source-registry records behind.
+- Import deletion leaves source documents and private Storage objects behind by design.
 - Rate Desk list payloads duplicate charge information and can become very large.
 - Validation is structural/commercially basic; approval remains essential.
 

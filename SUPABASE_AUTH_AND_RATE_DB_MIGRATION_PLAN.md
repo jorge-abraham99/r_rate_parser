@@ -1712,6 +1712,8 @@ Everything below is optional/post-trial hardening.
 
 STAGE 8 — Move raw uploaded sources to Supabase Storage
 
+Implementation status: complete on 10 August 2026. The private bucket and organization-scoped RLS policies are applied. The application keeps a temporary parser file, uploads the accepted immutable original with the signed-in user's token, and stores the object path in PostgreSQL. Live role and cross-organization acceptance tests pass.
+
 Objective
 
 Remove reliance on the Railway persistent volume for original uploaded carrier documents.

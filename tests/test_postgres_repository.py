@@ -79,6 +79,7 @@ def test_postgres_connection_requires_ssl() -> None:
 def test_repository_operations_require_explicit_organization_id() -> None:
     for method_name in (
         "register_source_document",
+        "persist_source_file",
         "add_import",
         "update_import",
         "get_import_record",

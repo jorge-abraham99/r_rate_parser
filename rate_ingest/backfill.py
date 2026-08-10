@@ -76,6 +76,12 @@ def backfill_csv_to_postgres(
     if not apply:
         return report
 
+    if settings.source_storage_backend == "supabase":
+        raise ValueError(
+            "CSV backfill cannot upload private sources without a signed-in "
+            "user token; use SOURCE_STORAGE_BACKEND=filesystem for this command"
+        )
+
     owns_target = target_repository is None
     target = target_repository or PostgresRateRepository(
         replace(settings, rate_storage_backend="postgres")

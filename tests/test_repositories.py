@@ -47,6 +47,36 @@ def test_invalid_rate_storage_backend_fails_at_startup(
         Settings.load(cwd=tmp_path)
 
 
+def test_source_storage_backend_defaults_to_filesystem(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("SOURCE_STORAGE_BACKEND", raising=False)
+
+    settings = Settings.load(cwd=tmp_path)
+
+    assert settings.source_storage_backend == "filesystem"
+    assert settings.supabase_storage_bucket == "rate-sources"
+
+
+def test_invalid_source_storage_backend_fails_at_startup(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("SOURCE_STORAGE_BACKEND", "s3")
+
+    with pytest.raises(ValueError, match="filesystem or supabase"):
+        Settings.load(cwd=tmp_path)
+
+
+def test_supabase_source_storage_requires_postgres_rate_storage(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("RATE_STORAGE_BACKEND", "csv")
+    monkeypatch.setenv("SOURCE_STORAGE_BACKEND", "supabase")
+
+    with pytest.raises(ValueError, match="requires RATE_STORAGE_BACKEND=postgres"):
+        Settings.load(cwd=tmp_path)
+
+
 def test_csv_repository_preserves_entities_and_source_metadata(tmp_path: Path) -> None:
     settings = replace(Settings.load(cwd=tmp_path), rate_storage_backend="csv")
     settings.ensure()

@@ -122,6 +122,7 @@ def import_source_file(
     template: str | None = None,
     uploaded_by: str | None = None,
     source_file_name: str | None = None,
+    source_storage_access_token: str | None = None,
     *,
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
@@ -137,7 +138,8 @@ def import_source_file(
         uploaded_by=uploaded_by,
         original_file_name=source_file_name or source_path.name,
     )
-    inspected, _ = classify_source(settings, source)
+    parser_source = source.model_copy(update={"source_path": str(source_path)})
+    inspected, _ = classify_source(settings, parser_source)
     scored = inspected.possible_templates
     if template:
         matched_template = next(
@@ -178,11 +180,10 @@ def import_source_file(
     )
     run_dir = settings.runs_dir / rate_import.id
     run_dir.mkdir(parents=True, exist_ok=True)
-    write_json(run_dir / "source_snapshot.json", source.model_dump(mode="json"))
     write_json(run_dir / "detected_structure.json", inspected.model_dump(mode="json"))
 
     card, offers, charges, notes = parse_source_by_family(
-        Path(source.source_path),
+        source_path,
         matched_template.parser_family,
         matched_template,
         rate_import,
@@ -203,8 +204,15 @@ def import_source_file(
     if matched_template.parser_family == "msc_zoned_inline":
         write_json(
             run_dir / "tier_rate_tables.json",
-            extract_tier_rate_tables(Path(source.source_path), matched_template),
+            extract_tier_rate_tables(source_path, matched_template),
         )
+    source = rate_repository.persist_source_file(
+        source,
+        source_path,
+        organization_id=repository_org_id,
+        access_token=source_storage_access_token,
+    )
+    write_json(run_dir / "source_snapshot.json", source.model_dump(mode="json"))
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
     write_csv_rows(run_dir / "parsed_rate_cards.csv", [card.model_dump(mode="json")])
     write_csv_rows(

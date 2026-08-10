@@ -28,6 +28,7 @@ from rate_ingest.services import (
     reject_import_by_id,
     search_approved_offers,
 )
+from rate_ingest.source_storage import SourceStorageError
 
 
 class ApproveRequest(BaseModel):
@@ -126,10 +127,16 @@ async def api_import_source(
             template=template,
             uploaded_by=uploaded_by,
             source_file_name=original_name,
+            source_storage_access_token=context.user.access_token,
             organization_id=context.organization_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SourceStorageError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Private source storage is unavailable",
+        ) from exc
     finally:
         temp_path.unlink(missing_ok=True)
 

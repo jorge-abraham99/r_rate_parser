@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
@@ -135,6 +136,28 @@ def test_csv_backfill_refuses_partial_copy_when_source_is_missing(tmp_path: Path
     with pytest.raises(ValueError, match="source file is missing"):
         backfill_csv_to_postgres(
             Settings.load(cwd=tmp_path),
+            ORGANIZATION_ID,
+            apply=True,
+            source_repository=CsvFixtureRepository(bundle),
+            target_repository=target,
+        )
+
+    assert target.registered == []
+
+
+def test_csv_backfill_refuses_supabase_source_storage_without_user_token(
+    tmp_path: Path,
+) -> None:
+    bundle = csv_bundle(tmp_path)
+    target = CapturingPostgresRepository()
+    settings = replace(
+        Settings.load(cwd=tmp_path),
+        source_storage_backend="supabase",
+    )
+
+    with pytest.raises(ValueError, match="without a signed-in user token"):
+        backfill_csv_to_postgres(
+            settings,
             ORGANIZATION_ID,
             apply=True,
             source_repository=CsvFixtureRepository(bundle),

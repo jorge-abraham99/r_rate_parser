@@ -39,6 +39,12 @@ from rate_ingest.repositories.postgres_mappings import (
     source_document_from_db,
     source_document_to_db,
 )
+from rate_ingest.source_storage import (
+    SourceStorageError,
+    SupabaseSourceStorage,
+    build_source_object_path,
+    is_source_object_path,
+)
 from rate_ingest.utils import compute_checksum, copy_to_raw
 
 
@@ -62,8 +68,26 @@ class PostgresRateRepository(RateRepository):
 
     backend_name = "postgres"
 
-    def __init__(self, settings: Settings, *, pool: Any | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        pool: Any | None = None,
+        source_storage: SupabaseSourceStorage | None = None,
+    ) -> None:
         self.settings = settings
+        self._source_storage = source_storage
+        if settings.source_storage_backend == "supabase" and source_storage is None:
+            if not settings.supabase_url or not settings.supabase_publishable_key:
+                raise SourceStorageError(
+                    "SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY are required "
+                    "when SOURCE_STORAGE_BACKEND=supabase"
+                )
+            self._source_storage = SupabaseSourceStorage(
+                settings.supabase_url,
+                settings.supabase_publishable_key,
+                settings.supabase_storage_bucket,
+            )
         if pool is not None:
             self._pool = pool
             return
@@ -87,6 +111,8 @@ class PostgresRateRepository(RateRepository):
 
     def close(self) -> None:
         self._pool.close()
+        if self._source_storage is not None:
+            self._source_storage.close()
 
     def register_source_document(
         self,
@@ -98,16 +124,19 @@ class PostgresRateRepository(RateRepository):
     ) -> SourceDocument:
         organization_uuid = require_organization_uuid(organization_id)
         self.settings.ensure()
-        copied_path = copy_to_raw(source_path, self.settings.raw_dir)
-        checksum = compute_checksum(copied_path)
+        if self.settings.source_storage_backend == "supabase":
+            stored_path = source_path
+        else:
+            stored_path = copy_to_raw(source_path, self.settings.raw_dir)
+        checksum = compute_checksum(stored_path)
         source = SourceDocument(
-            source_type=copied_path.suffix.replace(".", "").lower(),
+            source_type=stored_path.suffix.replace(".", "").lower(),
             file_name=(
                 Path(original_file_name).name
                 if original_file_name
-                else copied_path.name
+                else stored_path.name
             ),
-            source_path=str(copied_path),
+            source_path=str(stored_path),
             uploaded_by=uploaded_by,
             checksum=checksum,
             status="registered",
@@ -117,6 +146,8 @@ class PostgresRateRepository(RateRepository):
             organization_id=organization_uuid,
             database_id=uuid4(),
         )
+        if self.settings.source_storage_backend == "supabase":
+            payload["storage_path"] = None
         with self._pool.connection() as connection:
             row = connection.execute(
                 f"""
@@ -134,7 +165,61 @@ class PostgresRateRepository(RateRepository):
                 """,
                 {**payload, "metadata": Jsonb(payload["metadata"])},
             ).fetchone()
-        return source_document_from_db(row)
+        stored_source = source_document_from_db(row)
+        if not stored_source.source_path:
+            return stored_source.model_copy(
+                update={"source_path": str(source_path)}
+            )
+        return stored_source
+
+    def persist_source_file(
+        self,
+        source: SourceDocument,
+        local_source_path: Path,
+        *,
+        organization_id: OrganizationId,
+        access_token: str | None = None,
+    ) -> SourceDocument:
+        if self.settings.source_storage_backend != "supabase":
+            return source
+        if self._source_storage is None:
+            raise SourceStorageError("Supabase source storage is not configured")
+        organization_uuid = require_organization_uuid(organization_id)
+        with self._pool.connection() as connection:
+            row = connection.execute(
+                """
+                select storage_path
+                from public.source_documents
+                where organization_id = %s and application_id = %s
+                """,
+                (organization_uuid, source.id),
+            ).fetchone()
+        if row is None:
+            raise SourceStorageError("Source document is not registered")
+        current_path = row.get("storage_path") or ""
+        if is_source_object_path(current_path, organization_uuid):
+            return source.model_copy(update={"source_path": current_path})
+        if not access_token:
+            raise SourceStorageError(
+                "A signed-in user token is required for Supabase source storage"
+            )
+
+        object_path = build_source_object_path(organization_uuid, source)
+        self._source_storage.upload(
+            local_source_path,
+            object_path,
+            access_token=access_token,
+        )
+        with self._pool.connection() as connection:
+            connection.execute(
+                """
+                update public.source_documents
+                set storage_path = %s
+                where organization_id = %s and application_id = %s
+                """,
+                (object_path, organization_uuid, source.id),
+            )
+        return source.model_copy(update={"source_path": object_path})
 
     def add_import(
         self,

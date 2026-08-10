@@ -60,6 +60,18 @@ class RateRepository(ABC):
     ) -> SourceDocument:
         raise NotImplementedError
 
+    def persist_source_file(
+        self,
+        source: SourceDocument,
+        local_source_path: Path,
+        *,
+        organization_id: OrganizationId,
+        access_token: str | None = None,
+    ) -> SourceDocument:
+        """Move an accepted source to durable storage when configured."""
+        del local_source_path, organization_id, access_token
+        return source
+
     @abstractmethod
     def add_import(
         self,

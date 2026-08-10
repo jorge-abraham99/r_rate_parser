@@ -124,9 +124,13 @@ SUPABASE_PUBLISHABLE_KEY=<publishable-key>
 SUPABASE_DB_URL=<server-only SSL PostgreSQL connection string>
 AUTH_REQUIRED=true
 RATE_STORAGE_BACKEND=postgres
+SOURCE_STORAGE_BACKEND=supabase
+SUPABASE_STORAGE_BUCKET=rate-sources
 ```
 
 `SUPABASE_DB_URL` is a server secret. `/api/public-config` exposes only the URL and publishable key needed by the browser; it must never expose the database URL, a JWT secret, or a service-role key.
+
+Stage 8 source uploads use the publishable key and the signed-in operator's access token. Do not add a Storage secret or service-role key to Railway.
 
 This trial intentionally starts with an empty Postgres rate library. Do not run a CSV backfill before changing `RATE_STORAGE_BACKEND`; the existing CSV rates will not appear in Postgres. Keep the CSV configuration available as the short-term rollback path.
 
@@ -138,6 +142,8 @@ python -m rate_ingest backfill-postgres <organization-uuid> --apply
 ```
 
 The first command is read-only. The second copies every recoverable CSV import and its parsed entities into that organization. It fails before writing if any import lacks its source file or structured run bundle, and it is safe to retry.
+
+The optional backfill requires `SOURCE_STORAGE_BACKEND=filesystem`. Do not combine it with the Stage 8 Storage setting because the CLI has no signed-in user token.
 
 In Supabase Auth → URL Configuration, keep public sign-up disabled and use the password page as the Site URL. Dashboard-sent invitations do not supply a custom `redirectTo`, so they use the Site URL:
 
@@ -175,7 +181,8 @@ Then repeat with:
 
 This trial deployment has limits:
 
-- original uploads and review artifacts still depend on the `/app/data` volume
+- review artifacts and CSV rollback data still depend on the `/app/data` volume
+- original uploads use private Supabase Storage when `SOURCE_STORAGE_BACKEND=supabase`
 - rollback to `RATE_STORAGE_BACKEND=csv` does not include imports created only in Postgres after cutover
 - no background job system
 - no unknown-file fallback workflow yet
