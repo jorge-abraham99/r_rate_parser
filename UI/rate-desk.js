@@ -120,8 +120,16 @@ function populateDemoFilters() {
 
 function populateConnectedFilters() {
   const rates = deskState.connectedRates;
+  const currentRates = rates.filter((rate) => !isExpiredRate(rate));
   const nonDoorRates = rates.filter((rate) => !isDoorRate(rate));
-  const defaultRate = (nonDoorRates[0] || rates[0] || {});
+  const currentNonDoorRates = currentRates.filter((rate) => !isDoorRate(rate));
+  const defaultRate = (
+    currentNonDoorRates[0]
+    || currentRates[0]
+    || nonDoorRates[0]
+    || rates[0]
+    || {}
+  );
   // Door-to-quay sheets still have a POL. Include it here so inline MSC
   // rates are presented as Collection → POL → POD rather than collection-only.
   const origins = unique(
@@ -454,7 +462,7 @@ function buildConnectedRows(quantity) {
 
   return sortViewRows(collection
     ? [...doorRates, ...haulageRates]
-    : portRates);
+    : [...portRates, ...doorRates]);
 }
 
 function makeConnectedRow(rate, quantity) {

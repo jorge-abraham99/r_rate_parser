@@ -383,6 +383,9 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert 'carrier_label: "MSC · Quay-to-quay"' not in app_js
     assert 'carrier_label: "Hapag-Lloyd · Quay-to-quay"' not in app_js
     assert 'doorParams.set("collection", collection)' in rate_desk_js
+    assert "const currentRates = rates.filter((rate) => !isExpiredRate(rate));" in rate_desk_js
+    assert "currentNonDoorRates[0]" in rate_desk_js
+    assert ": [...portRates, ...doorRates]" in rate_desk_js
 
 
 def test_invitation_password_page_enforces_safe_acceptance_flow():
