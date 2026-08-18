@@ -1,9 +1,10 @@
 const IMPORT_DEMO_MODE = Boolean(window.RATE_DESK_CONFIG?.demoMode);
 const SOURCE_DEFINITIONS = [
-  { key: "maersk-contract", provider: "Maersk", service: "Quay-to-quay", cadence: "monthly" },
-  { key: "maersk-door", provider: "Maersk", service: "Door-to-quay", cadence: "monthly" },
+  { key: "maersk-sea", provider: "Maersk", service: "SEA rates", cadence: "monthly" },
+  { key: "maersk-india", provider: "Maersk", service: "India rates", cadence: "monthly" },
   { key: "msc-inline", provider: "MSC", service: "Door-to-quay", cadence: "monthly" },
-  { key: "hapag-door", provider: "Hapag-Lloyd", service: "Door-to-quay", cadence: "monthly" },
+  { key: "hapag-door", provider: "Hapag-Lloyd", service: "SEA · Door-to-quay", cadence: "monthly" },
+  { key: "hapag-india", provider: "Hapag-Lloyd", service: "India · Door-to-quay", cadence: "monthly" },
   { key: "cosco-door", provider: "COSCO", service: "India/Far East Door-to-quay", cadence: "monthly" },
   { key: "haulage-q2", provider: "UK Inland Haulage", service: "Export · all UK POLs", cadence: "quarterly" },
 ];
@@ -37,6 +38,10 @@ const elements = {
   newSourceName: document.getElementById("newSourceName"),
   contractTypeRow: document.getElementById("contractTypeRow"),
   contractTypeSelect: document.getElementById("contractTypeSelect"),
+  maerskRateTypeRow: document.getElementById("maerskRateTypeRow"),
+  maerskRateTypeSelect: document.getElementById("maerskRateTypeSelect"),
+  hapagRateTypeRow: document.getElementById("hapagRateTypeRow"),
+  hapagRateTypeSelect: document.getElementById("hapagRateTypeSelect"),
   parsedFacts: document.getElementById("parsedFacts"),
   previewValidity: document.getElementById("previewValidity"),
   previewLanes: document.getElementById("previewLanes"),
@@ -80,11 +85,23 @@ elements.sourceSelect.addEventListener("change", () => {
   if (!importState.preview) return;
   importState.preview.source = elements.sourceSelect.value;
   importState.preview.contractType = "";
+  importState.preview.maerskRateType = "";
+  importState.preview.hapagRateType = "";
   renderPreview();
 });
 elements.contractTypeSelect.addEventListener("change", () => {
   if (!importState.preview) return;
   importState.preview.contractType = elements.contractTypeSelect.value;
+  renderPreview();
+});
+elements.maerskRateTypeSelect.addEventListener("change", () => {
+  if (!importState.preview) return;
+  importState.preview.maerskRateType = elements.maerskRateTypeSelect.value;
+  renderPreview();
+});
+elements.hapagRateTypeSelect.addEventListener("change", () => {
+  if (!importState.preview) return;
+  importState.preview.hapagRateType = elements.hapagRateTypeSelect.value;
   renderPreview();
 });
 elements.newSourceName.addEventListener("input", () => {
@@ -265,7 +282,7 @@ async function receiveFile(file) {
   if (!importState.canMutate) return;
   hideAlert();
   if (IMPORT_DEMO_MODE) {
-    openReview({ fileName: file.name, source: "", contractType: "", newSourceName: "", detail: null, importId: null });
+    openReview({ fileName: file.name, source: "", contractType: "", maerskRateType: "", hapagRateType: "", newSourceName: "", detail: null, importId: null });
     return;
   }
 
@@ -284,6 +301,8 @@ async function receiveFile(file) {
       fileName: file.name,
       source: suggestedSource(detail),
       contractType: "",
+      maerskRateType: "",
+      hapagRateType: "",
       newSourceName: "",
       detail,
       importId: imported.import_id,
@@ -314,6 +333,8 @@ async function openSummary(sourceKey, fileId) {
       fileName: file.file,
       source: sourceChoiceForKey(sourceKey),
       contractType: sourceKey === "maersk-door" ? "d2k" : sourceKey === "maersk-contract" ? "k2k" : "",
+      maerskRateType: sourceKey === "maersk-india" ? "india" : sourceKey === "maersk-sea" ? "sea" : "",
+      hapagRateType: sourceKey === "hapag-india" ? "india" : sourceKey === "hapag-door" ? "sea" : "",
       newSourceName: "",
       summary: demoSummary(sourceKey),
       readOnly: true,
@@ -332,6 +353,8 @@ async function openSummary(sourceKey, fileId) {
       fileName: file.file,
       source: sourceChoiceForKey(sourceKey),
       contractType: sourceKey === "maersk-door" ? "d2k" : sourceKey === "maersk-contract" ? "k2k" : "",
+      maerskRateType: sourceKey === "maersk-india" ? "india" : sourceKey === "maersk-sea" ? "sea" : "",
+      hapagRateType: sourceKey === "hapag-india" ? "india" : sourceKey === "hapag-door" ? "sea" : "",
       newSourceName: "",
       summary: connectedSummary(detail, sourceKey),
       detail,
@@ -364,6 +387,7 @@ function renderPreview() {
     : null);
   const isNew = preview.source === "__new";
   const isMaersk = preview.source === "maersk";
+  const isHapag = preview.source === "hapag";
 
   elements.previewTitle.textContent = preview.readOnly ? "Parse summary" : "Review parsed sheet";
   elements.previewFile.textContent = preview.fileName;
@@ -371,8 +395,12 @@ function renderPreview() {
   elements.sourceSelect.value = preview.source;
   elements.newSourceName.hidden = !isNew || preview.readOnly;
   elements.newSourceName.value = preview.newSourceName || "";
-  elements.contractTypeRow.hidden = preview.readOnly || !isMaersk;
+  elements.contractTypeRow.hidden = preview.readOnly || isMaersk;
   elements.contractTypeSelect.value = preview.contractType || "";
+  elements.maerskRateTypeRow.hidden = preview.readOnly || !isMaersk;
+  elements.maerskRateTypeSelect.value = preview.maerskRateType || "";
+  elements.hapagRateTypeRow.hidden = preview.readOnly || !isHapag;
+  elements.hapagRateTypeSelect.value = preview.hapagRateType || "";
   elements.parsedFacts.hidden = !ready;
   elements.mapSection.hidden = !ready;
 
@@ -647,6 +675,24 @@ function sourcePayload(preview, sourceKey) {
       contract_tag: null,
     };
   }
+  if (sourceKey === "hapag-india") {
+    return {
+      approved_by: "Rate Desk operator",
+      carrier_name: "Hapag-Lloyd",
+      carrier_key: sourceKey,
+      carrier_label: "Hapag-Lloyd · India Door-to-quay",
+      contract_tag: null,
+    };
+  }
+  if (sourceKey === "maersk-sea" || sourceKey === "maersk-india") {
+    return {
+      approved_by: "Rate Desk operator",
+      carrier_name: "Maersk",
+      carrier_key: sourceKey,
+      carrier_label: sourceKey === "maersk-india" ? "Maersk · India rates" : "Maersk · SEA rates",
+      contract_tag: sourceKey === "maersk-india" ? "INDIA" : "SEA",
+    };
+  }
   if (sourceKey === "cosco-door") {
     return {
       approved_by: "Rate Desk operator",
@@ -688,6 +734,8 @@ function closePreviewImmediately() {
   document.body.classList.remove("modal-open");
   elements.sourceSelect.value = "";
   elements.contractTypeSelect.value = "";
+  elements.maerskRateTypeSelect.value = "";
+  elements.hapagRateTypeSelect.value = "";
   elements.newSourceName.value = "";
 }
 
@@ -717,9 +765,15 @@ async function deleteFile(sourceKey, fileId) {
 
 function selectedSourceKey(preview) {
   if (preview.source === "msc") return "msc-inline";
-  if (preview.source === "hapag") return "hapag-door";
+  if (preview.source === "hapag") {
+    if (preview.hapagRateType === "sea") return "hapag-door";
+    if (preview.hapagRateType === "india") return "hapag-india";
+    return "";
+  }
   if (preview.source === "cosco") return "cosco-door";
   if (preview.source === "maersk") {
+    if (preview.maerskRateType === "sea") return "maersk-sea";
+    if (preview.maerskRateType === "india") return "maersk-india";
     if (preview.contractType === "k2k") return "maersk-contract";
     if (preview.contractType === "d2k") return "maersk-door";
     return "";
@@ -733,20 +787,26 @@ function inferSourceKey(item) {
   if (item.parser_family === "cosco_pdf_quote") return "cosco-door";
   if (item.carrier_key) {
     const key = normalized(item.carrier_key);
+    if (key.includes("hapag") && key.includes("india")) return "hapag-india";
     if (key.includes("hapag")) return "hapag-door";
     if (key.includes("cosco") && key.includes("door")) return "cosco-door";
-    if (key.includes("door")) return "maersk-door";
+    if (key.includes("maersk") && key.includes("india")) return "maersk-india";
+    if (key.includes("maersk") && key.includes("sea")) return "maersk-sea";
+    if (key.includes("door")) return "maersk-sea";
     if (key.includes("haulage")) return "haulage-q2";
     if (key.includes("msc")) return "msc-inline";
-    if (key.includes("maersk")) return "maersk-contract";
+    if (key.includes("maersk")) return "maersk-sea";
     return item.carrier_key;
   }
   const text = normalized(`${item.carrier_label || ""} ${item.carrier_name || ""} ${item.file_name || ""} ${item.contract_tag || ""}`);
+  if (text.includes("hapag") && text.includes("india")) return "hapag-india";
   if (text.includes("hapag")) return "hapag-door";
   if (text.includes("haulage")) return "haulage-q2";
   if (text.includes("msc")) return "msc-inline";
-  if (text.includes("maersk") && text.includes("door")) return "maersk-door";
-  if (text.includes("maersk")) return "maersk-contract";
+  if (text.includes("maersk") && text.includes("india")) return "maersk-india";
+  if (text.includes("maersk") && text.includes("sea")) return "maersk-sea";
+  if (text.includes("maersk") && text.includes("door")) return "maersk-sea";
+  if (text.includes("maersk")) return "maersk-sea";
   return item.carrier_name ? `custom-${slugify(item.carrier_name)}` : "";
 }
 
@@ -760,13 +820,14 @@ function inferServiceLabel(item) {
 function suggestedSource(detail) {
   if (detail?.rate_import?.parser_family === "msc_zoned_inline") return "msc";
   if (detail?.rate_import?.parser_family === "hapag_door_matrix") return "hapag";
+  if (detail?.rate_import?.parser_family === "site_to_site_rows") return "maersk";
   if (detail?.rate_import?.parser_family === "cosco_pdf_quote") return "cosco";
   return "";
 }
 
 function sourceChoiceForKey(sourceKey) {
   if (sourceKey === "msc-inline") return "msc";
-  if (sourceKey === "hapag-door") return "hapag";
+  if (sourceKey === "hapag-door" || sourceKey === "hapag-india") return "hapag";
   if (sourceKey === "cosco-door") return "cosco";
   if (sourceKey === "haulage-q2") return "haulage";
   return "maersk";

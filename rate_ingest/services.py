@@ -26,6 +26,9 @@ from rate_ingest.parsers.cosco_pdf_quote import parse_pdf as parse_cosco_pdf_quo
 from rate_ingest.parsers.hapag_door_matrix import (
     parse_workbook as parse_hapag_door_matrix_workbook,
 )
+from rate_ingest.parsers.hapag_india_rows import (
+    parse_workbook as parse_hapag_india_rows_workbook,
+)
 from rate_ingest.parsers.haulage_matrix import (
     parse_workbook as parse_haulage_matrix_workbook,
 )
@@ -187,6 +190,7 @@ def import_source_file(
         matched_template.parser_family,
         matched_template,
         rate_import,
+        source_file_name=source.file_name,
     )
     validation = validate_import(
         rate_import.id,
@@ -585,16 +589,19 @@ def search_approved_offers(
 
         offer_charges = charges_by_offer.get(offer.id, [])
         note_bucket = notes_by_offer.get(offer.id) or notes_by_card.get(card.id, [])
+        total_charge_codes = offer_total_charge_codes(offer)
         charge_analysis = analyze_charge_collection(
             offer_charges,
             base_currency=offer.base_currency or card.currency_default,
             base_amount=offer.base_amount,
             base_label=base_charge_label(offer),
+            total_charge_codes=total_charge_codes,
         )
         additive_charges = [
             charge
             for charge in offer_charges
             if not is_base_charge(charge)
+            and charge_counts_toward_total(charge, total_charge_codes)
             and currencies_match(
                 charge.currency, offer.base_currency or card.currency_default
             )
@@ -753,6 +760,7 @@ def analyze_charge_collection(
     base_currency: str | None = None,
     base_amount: float | None = None,
     base_label: str = "Basic Ocean Freight",
+    total_charge_codes: set[str] | None = None,
 ) -> dict[str, Any]:
     grouped = {
         "origin": {
@@ -801,9 +809,11 @@ def analyze_charge_collection(
                 "bucket": bucket,
                 "matched_by": matched_by,
                 "zero_rated": (charge.amount or 0) == 0,
+                "counts_toward_total": charge_counts_toward_total(charge, total_charge_codes),
             }
             grouped[bucket]["lines"].append(line)
-            grouped[bucket]["subtotal_usd"] += usd_unit_amount
+            if line["counts_toward_total"]:
+                grouped[bucket]["subtotal_usd"] += usd_unit_amount
             if bucket == "unmatched":
                 unmatched_count += 1
             else:
@@ -822,6 +832,7 @@ def analyze_charge_collection(
                 "bucket": "freight",
                 "matched_by": "synthetic_base",
                 "zero_rated": (base_amount or 0) == 0,
+                "counts_toward_total": True,
             }
         )
         grouped["freight"]["subtotal_usd"] += usd_unit_amount
@@ -872,11 +883,37 @@ def summarize_charge_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def offer_total_charge_codes(offer: RateOffer) -> set[str] | None:
+    configured = offer.raw_row_json.get("total_charge_codes")
+    if not isinstance(configured, list):
+        return None
+    return {normalize_charge_key(value) for value in configured if normalize_charge_key(value)}
+
+
+def charge_counts_toward_total(
+    charge: RateChargeLine,
+    total_charge_codes: set[str] | None,
+) -> bool:
+    if total_charge_codes is None:
+        return True
+    candidates = {
+        normalize_charge_key(charge.source_label),
+        normalize_charge_key(charge.charge_name),
+    }
+    return bool(candidates & total_charge_codes)
+
+
+def normalize_charge_key(value: object) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
+
+
 def parse_source_by_family(
     source_path: Path,
     parser_family: str,
     matched_template,
     rate_import: RateImport,
+    *,
+    source_file_name: str | None = None,
 ):
     if parser_family == "tabular_lane":
         return parse_tabular_workbook(source_path, matched_template, rate_import)
@@ -892,12 +929,21 @@ def parse_source_by_family(
         return parse_hapag_door_matrix_workbook(
             source_path, matched_template, rate_import
         )
+    if parser_family == "hapag_india_rows":
+        return parse_hapag_india_rows_workbook(
+            source_path, matched_template, rate_import
+        )
     if parser_family == "cosco_pdf_quote":
         return parse_cosco_pdf_quote(source_path, matched_template, rate_import)
     if parser_family == "offer_block":
         return parse_offer_block_workbook(source_path, matched_template, rate_import)
     if parser_family == "site_to_site_rows":
-        return parse_site_to_site_workbook(source_path, matched_template, rate_import)
+        return parse_site_to_site_workbook(
+            source_path,
+            matched_template,
+            rate_import,
+            source_file_name=source_file_name,
+        )
     if parser_family == "email_table":
         return parse_email_table(source_path, matched_template, rate_import)
     raise ValueError(

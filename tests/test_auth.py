@@ -380,6 +380,14 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert "RATE_DESK_AUTH.apiFetch" in rate_desk_js
     assert 'carrier_label: "MSC · Door-to-quay"' in app_js
     assert 'carrier_label: "Hapag-Lloyd · Door-to-quay"' in app_js
+    assert 'value="sea">SEA rates' in import_html
+    assert 'value="india">India rates' in import_html
+    assert "hapagRateTypeSelect" in app_js
+    assert "maerskRateTypeSelect" in app_js
+    assert "Maersk · India rates" in app_js
+    assert "Maersk · SEA rates" in app_js
+    assert 'carrier_key: sourceKey' in app_js
+    assert 'carrier_label: "Hapag-Lloyd · India Door-to-quay"' in app_js
     assert 'carrier_label: "MSC · Quay-to-quay"' not in app_js
     assert 'carrier_label: "Hapag-Lloyd · Quay-to-quay"' not in app_js
     assert 'doorParams.set("collection", collection)' in rate_desk_js

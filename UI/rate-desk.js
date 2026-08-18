@@ -558,6 +558,7 @@ function connectedGroups(rate, quantity) {
         unit: numberValue(line.unit_amount) || 0,
         usdUnit: numberValue(line.usd_unit_amount),
         zeroRated: Boolean(line.zero_rated),
+        countsTowardTotal: line.counts_toward_total !== false,
       }, quantity, DEFAULT_FX, line.quantity_rule));
       return makeGroup(group.key, (group.label || group.key).replace(" charges", ""), lines);
     });
@@ -613,6 +614,8 @@ function makeLineView(line, quantity, fx, quantityRule = "") {
     ccy,
     unit,
     usdExact,
+    countsTowardTotal: line.countsTowardTotal !== false,
+    excludedFromTotal: line.countsTowardTotal === false,
     included: Boolean(line.included),
     poa: Boolean(line.poa),
     zeroRated: Boolean(line.zeroRated) || (!line.included && !line.poa && unit === 0),
@@ -627,7 +630,10 @@ function makeGroup(key, label, allLines) {
     label,
     lines,
     zeroLines,
-    subtotalUsd: allLines.reduce((sum, line) => sum + line.usdExact, 0),
+    subtotalUsd: allLines.reduce(
+      (sum, line) => sum + (line.countsTowardTotal === false ? 0 : line.usdExact),
+      0,
+    ),
     hasPoa: allLines.some((line) => line.poa),
   };
 }
@@ -724,6 +730,8 @@ function renderLine(line) {
   } else if (line.poa) {
     unit = `${line.ccy} POA`;
     usd = "—";
+  } else if (line.excludedFromTotal) {
+    usd = `${formatNumber(line.usdExact)} · excluded`;
   }
   return `
     <div class="breakdown-row">

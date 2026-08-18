@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from datetime import date, datetime
 from pathlib import Path
+import re
 from typing import Any
 
 from openpyxl import load_workbook
@@ -12,19 +13,50 @@ from rate_ingest.normalize import normalize_equipment, normalize_text, parse_amo
 
 
 def parse_workbook(
-    path: Path, template: ParserTemplate, rate_import: RateImport
+    path: Path,
+    template: ParserTemplate,
+    rate_import: RateImport,
+    source_file_name: str | None = None,
 ) -> tuple[RateCard, list[RateOffer], list[RateChargeLine], list[RateNote]]:
     workbook = load_workbook(path, data_only=True, read_only=True)
     rules = template.site_to_site_rules
     quote_sheet_name = select_sheet_name(workbook.sheetnames, rules.get("quote_sheet_name_contains", "AFLS Quote"))
     quote_sheet = workbook[quote_sheet_name]
-    header_row = int(rules.get("header_row", 7))
+    header_row = find_header_row(
+        quote_sheet,
+        list(template.field_map.values()),
+        int(rules.get("header_row", 7)),
+    )
     headers = [normalize_text(quote_sheet.cell(header_row, column).value) for column in range(1, quote_sheet.max_column + 1)]
     field_indexes = {field: find_header_index(headers, label) for field, label in template.field_map.items()}
     rate_basis_index = field_indexes.get("rate_basis")
     amount_columns = detect_amount_columns(headers, rate_basis_index)
     if not amount_columns:
         raise ValueError("No equipment amount columns were found in the AFLS Quote sheet.")
+    base_charge_codes = {
+        normalize_charge_code(value)
+        for value in rules.get("base_charge_codes", ["BAS", "BFS"])
+        if normalize_charge_code(value)
+    }
+    total_charge_codes = [
+        normalize_charge_code(value)
+        for value in rules.get("total_charge_codes", [])
+        if normalize_charge_code(value)
+    ]
+    india_filename_tokens = {
+        normalize_text(value).upper()
+        for value in rules.get("india_only_filename_contains", [])
+        if normalize_text(value)
+    }
+    india_only = any(
+        token in (source_file_name or path.name).upper()
+        for token in india_filename_tokens
+    )
+    india_country_codes = {
+        normalize_text(value).upper()
+        for value in rules.get("india_destination_country_codes", ["IN"])
+        if normalize_text(value)
+    }
 
     metadata = extract_top_metadata(quote_sheet, header_row)
     charge_name_map = load_charge_name_map(workbook, rules.get("abbreviation_sheet_name_contains", "Abbreviation"))
@@ -54,6 +86,8 @@ def parse_workbook(
         delivery = clean_nullable(normalize_text(value_at(row, field_indexes.get("final_destination"))))
         charge_code = clean_nullable(normalize_text(value_at(row, field_indexes.get("charge_code"))))
         if not receipt or not delivery or not charge_code:
+            continue
+        if india_only and country_code_from_location(delivery) not in india_country_codes:
             continue
 
         pol = clean_nullable(normalize_text(value_at(row, field_indexes.get("pol"))))
@@ -112,6 +146,7 @@ def parse_workbook(
                         "customer_name": metadata.get("Customer Name"),
                         "carrier": metadata.get("Carrier"),
                         "last_acceptance_date": metadata.get("Last Acceptance Date"),
+                        "total_charge_codes": total_charge_codes,
                     },
                 )
                 offers_by_key[offer_key] = offer
@@ -120,7 +155,8 @@ def parse_workbook(
                 row_bounds[offer_key][1] = row_number
 
             charge_name = charge_name_map.get(charge_code, charge_code)
-            if charge_code == "BAS":
+            is_base_charge = charge_code in base_charge_codes
+            if is_base_charge:
                 offer.base_amount = amount
                 offer.base_currency = charge_currency or offer.base_currency
 
@@ -128,7 +164,7 @@ def parse_workbook(
                 RateChargeLine(
                     rate_offer_id=offer.id,
                     charge_name=charge_name,
-                    charge_type=infer_charge_type(charge_name),
+                    charge_type="base" if is_base_charge else infer_charge_type(charge_name),
                     basis=normalize_basis(rate_basis),
                     amount=amount,
                     currency=charge_currency,
@@ -187,6 +223,30 @@ def find_header_index(headers: list[str], label: str) -> int | None:
         if needle and needle == normalize_text(header).upper():
             return index
     return None
+
+
+def find_header_row(sheet, labels: list[str], fallback: int) -> int:
+    required = {normalize_text(label).upper() for label in labels if normalize_text(label)}
+    if not required:
+        return fallback
+    scan_limit = min(sheet.max_row, max(fallback + 10, 25))
+    for row_number, row in enumerate(
+        sheet.iter_rows(min_row=1, max_row=scan_limit, values_only=True),
+        start=1,
+    ):
+        headers = {normalize_text(value).upper() for value in row if normalize_text(value)}
+        if required.issubset(headers):
+            return row_number
+    return fallback
+
+
+def normalize_charge_code(value: object) -> str:
+    return normalize_text(value).upper().replace(" ", "")
+
+
+def country_code_from_location(value: str) -> str | None:
+    match = re.search(r"(?:,|\s)([A-Z]{2})$", normalize_text(value).upper())
+    return match.group(1) if match else None
 
 
 def detect_amount_columns(headers: list[str], rate_basis_index: int | None) -> list[tuple[str, int]]:

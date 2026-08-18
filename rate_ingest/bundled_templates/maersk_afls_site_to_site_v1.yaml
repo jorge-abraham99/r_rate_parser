@@ -38,6 +38,20 @@ site_to_site_rules:
   quote_sheet_name_contains: "AFLS Quote"
   abbreviation_sheet_name_contains: "Abbreviation"
   header_row: 7
+  base_charge_codes:
+    - "BAS"
+    - "BFS"
+  # The September workbook labels basic freight BAS; BFS is retained as the
+  # equivalent code for sheets that use the user's BFS naming.
+  total_charge_codes:
+    - "BFS"
+    - "BAS"
+    - "EBS"
+    - "DTI"
+  india_only_filename_contains:
+    - "MAERSK INDIA"
+  india_destination_country_codes:
+    - "IN"
 
 defaults:
   carrier_name: MAERSK

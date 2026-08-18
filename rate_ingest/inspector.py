@@ -87,15 +87,24 @@ def inspect_source(source_document: SourceDocument) -> InspectResult:
             provider_guess=provider_from_name(source_document.file_name),
         )
 
-    workbook = load_workbook(source_path, data_only=True, read_only=False)
+    workbook = load_workbook(source_path, data_only=True, read_only=True)
+    # Some legacy Maersk workbooks use a layout that openpyxl's streaming
+    # reader reports as a 1x1 sheet. Fall back to the normal reader for those
+    # files while keeping large AFLS workbooks streaming-friendly.
+    if any(
+        sheet.max_row <= 1 and sheet.max_column <= 1
+        for sheet in workbook.worksheets
+    ):
+        workbook.close()
+        workbook = load_workbook(source_path, data_only=True, read_only=False)
     sheet_summaries = []
     for sheet_name in workbook.sheetnames:
         sheet = workbook[sheet_name]
         top_rows = []
-        for row in sheet.iter_rows(min_row=1, max_row=min(sheet.max_row, 10), values_only=True):
+        for row in sheet.iter_rows(min_row=1, max_row=min(sheet.max_row, 25), values_only=True):
             values = [normalize_cell(value) for value in row]
             if any(values):
-                top_rows.append(values[:12])
+                top_rows.append(values[:32])
         sheet_summaries.append(
             {
                 "sheet_name": sheet_name,
@@ -154,6 +163,15 @@ def guess_parser_family(sheet_summaries: list[dict[str, Any]], source_type: str 
         and "ALL IN RATE" in flattened
     ):
         return "msc_zoned_inline"
+    if (
+        "SRV ID" in flattened
+        and "CHARGE TYPE" in flattened
+        and "CHARGE CODE" in flattened
+        and "UNIT OF MEASURE" in flattened
+        and "PORT OF LOADING" in flattened
+        and "PORT OF DISCHARGE" in flattened
+    ):
+        return "hapag_india_rows"
     if (
         "GEO FROM STD LOCATION" in flattened
         and "PREFERRED POL" in flattened

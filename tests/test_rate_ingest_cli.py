@@ -375,6 +375,80 @@ def test_maersk_afls_site_to_site_import_creates_offers_and_charge_lines(tmp_pat
     assert offers[0]["commodity"] == "WASTEPAPER"
 
 
+def test_maersk_september_india_total_uses_basic_freight_ebs_and_dti(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    seed_templates(tmp_path)
+    source_bytes = Path("rate_sheet_files/september rates/MAERSK India.xlsx").read_bytes()
+
+    response = api_client.post(
+        "/api/imports",
+        data={"uploaded_by": "jorge"},
+        files={
+            "file": (
+                "MAERSK India.xlsx",
+                source_bytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert response.status_code == 200, response.text
+    import_id = response.json()["import_id"]
+    detail = api_client.get(f"/api/imports/{import_id}").json()
+    assert detail["rate_import"]["parser_family"] == "site_to_site_rows"
+    assert detail["summary"]["rate_offers"] > 100
+    assert all(
+        offer["final_destination"].endswith(", IN")
+        for offer in detail["offers_preview"]
+    )
+
+    first_offer = next(
+        offer
+        for offer in detail["offers_preview"]
+        if offer["place_of_receipt"] == "Alcester, GB"
+        and offer["final_destination"] == "Ennore Chennai, IN"
+        and offer["equipment_type"] == "40HDRY"
+    )
+    assert {"BFS", "BAS", "EBS", "DTI"}.issubset(
+        set(first_offer["raw_row_json"]["total_charge_codes"])
+    )
+
+    approve_response = api_client.post(
+        f"/api/imports/{import_id}/approve",
+        json={
+            "approved_by": "jorge",
+            "carrier_name": "Maersk",
+            "carrier_key": "maersk-india",
+            "carrier_label": "Maersk · India rates",
+            "contract_tag": "INDIA",
+        },
+    )
+    assert approve_response.status_code == 200, approve_response.text
+
+    desk = api_client.get("/api/rate-desk", params={"limit": 5000}).json()
+    rate = next(
+        item
+        for item in desk["rates"]
+        if item["source_file_name"] == "MAERSK India.xlsx"
+        and item["place_of_receipt"] == "Alcester, GB"
+        and item["final_destination"] == "Ennore Chennai, IN"
+        and item["equipment_type"] == "40HDRY"
+    )
+    assert rate["all_in_usd"] == 910.0
+    assert rate["all_in_usd"] == rate["charge_analysis"]["total_usd"]
+    assert {charge["source_label"] for charge in rate["charges"]} >= {
+        "BAS",
+        "CFD",
+        "EBS",
+        "DTI",
+    }
+    analysis_lines = [
+        line
+        for group in rate["charge_analysis"]["groups"]
+        for line in group["lines"]
+    ]
+    assert any(line["counts_toward_total"] is False for line in analysis_lines)
+
+
 def test_maersk_afls_rate_desk_preserves_service_mode(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
     seed_templates(tmp_path)
@@ -645,6 +719,70 @@ def test_hapag_door_matrix_import_adds_conditional_container_charges(tmp_path: P
     assert desk["haulage_tariffs"] == {}
     assert desk["filters"]["door_pickups"] == []
     assert "Dartford" in desk["filters"]["collection_places"]
+
+
+def test_hapag_india_rows_preserve_all_charges_but_total_only_selected_codes(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    raw_dir = tmp_path / "incoming"
+    raw_dir.mkdir()
+    source = raw_dir / "HAPAG India.xlsx"
+    source.write_bytes(Path("rate_sheet_files/september rates/HAPAG India.xlsx").read_bytes())
+    seed_templates(tmp_path)
+
+    result = runner.invoke(app, ["import", str(source)])
+    assert result.exit_code == 0
+    assert "Parser family: hapag_india_rows" in result.stdout
+    assert "Template used: hapag_india_rows_v1" in result.stdout
+    import_id = next(
+        line.split(": ", 1)[1]
+        for line in result.stdout.splitlines()
+        if line.startswith("Import created:")
+    )
+    run_dir = tmp_path / "data" / "runs" / import_id
+    offers = detail_rows(run_dir / "parsed_rate_offers.csv")
+    charges = detail_rows(run_dir / "parsed_rate_charge_lines.csv")
+    assert len(offers) == 35
+    assert len(charges) == 315
+    assert offers[0]["place_of_receipt"] == "Norwich"
+    assert offers[1]["place_of_receipt"] == "Leatherhead"
+    assert offers[0]["transit_time_days"] == "45"
+    assert {offer["valid_from"] for offer in offers} == {"2026-09-01"}
+    assert {offer["valid_to"] for offer in offers} == {"2026-09-30"}
+
+    first_offer_charges = [charge for charge in charges if charge["rate_offer_id"] == offers[0]["id"]]
+    assert [charge["source_label"] for charge in first_offer_charges] == [
+        "LUMPSUM", "LPC", "EOD", "THD", "ISF", "WHD", "DDF", "EMF", "MTD"
+    ]
+
+    approve_response = api_client.post(
+        f"/api/imports/{import_id}/approve",
+        json={
+            "approved_by": "jorge",
+            "carrier_name": "Hapag-Lloyd",
+            "carrier_key": "hapag-india",
+            "carrier_label": "Hapag-Lloyd · India Door-to-quay",
+        },
+    )
+    assert approve_response.status_code == 200
+
+    search_response = api_client.get(
+        "/api/search",
+        params={"collection": "Norwich", "pod": "Tuticorin", "limit": 20},
+    )
+    assert search_response.status_code == 200
+    rows = search_response.json()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["base_amount"] == 600.0
+    assert row["charge_total"] == 85.0
+    assert row["all_in_amount"] == 685.0
+    assert row["all_in_usd"] == 685.0
+    assert row["carrier_key"] == "hapag-india"
+    analysis_lines = [line for group in row["charge_analysis"]["groups"] for line in group["lines"]]
+    assert {line["name"] for line in analysis_lines} == {
+        "Lumpsum", "LPC", "EOD", "THD", "ISF", "WHD", "DDF", "EMF", "MTD"
+    }
+    assert next(line for line in analysis_lines if line["name"] == "THD")["counts_toward_total"] is False
 
 
 def test_api_import_approve_and_search_flow(tmp_path: Path, monkeypatch):

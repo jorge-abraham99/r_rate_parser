@@ -1,0 +1,79 @@
+template_id: hapag_india_rows_v1
+template_name: Hapag-Lloyd India Row Charges v1
+provider_name: HAPAG-LLOYD
+parser_family: hapag_india_rows
+document_type: ocean_export
+file_type: xlsx
+active: true
+
+match_rules:
+  strong_filename_match: true
+  filename_contains:
+    - "HAPAG INDIA"
+  sheet_name_contains_any:
+    - "Detail"
+  required_header_labels:
+    - "Srv ID"
+    - "Charge Type"
+    - "Charge Code"
+    - "Unit of Measure"
+    - "Port of Loading"
+    - "Port of Discharge"
+
+hapag_india_rules:
+  detail_sheet_name: "Detail"
+  terms_sheet_name: "Terms"
+  header_row: 18
+  data_start_row: 19
+  validity_row: 3
+  valid_from_column: 18
+  valid_to_column: 19
+  quote_number_row: 10
+  quote_number_column: 18
+  columns:
+    service_id: 2
+    charge_type: 3
+    equipment: 4
+    export_haulage: 5
+    import_haulage: 6
+    origin: 7
+    pol: 10
+    via: 13
+    pod: 14
+    transit_time: 17
+    commodity: 18
+    charge_code: 19
+    currency: 20
+    amount: 21
+    unit: 22
+  charge_codes:
+    - "Lumpsum"
+    - "LPC"
+    - "EOD"
+    - "THD"
+    - "ISF"
+    - "WHD"
+    - "DDF"
+    - "EMF"
+    - "MTD"
+  total_charge_codes:
+    - "Lumpsum"
+    - "LPC"
+    - "EOD"
+
+defaults:
+  carrier_name: Hapag-Lloyd
+  currency_default: USD
+  commodity: WASTE
+  forty_default: 40HC
+  feu_default: 40HC
+
+validation:
+  required_fields:
+    - origin
+    - pol
+    - pod
+    - equipment_type
+    - base_amount
+  amount_min: 0
+  amount_max: 1000000
