@@ -28,6 +28,20 @@ def _boolean_env(name: str, *, default: bool) -> bool:
     raise ValueError(f"{name} must be true or false")
 
 
+def _storage_backend_env() -> str:
+    value = os.getenv("RATE_STORAGE_BACKEND", "csv").strip().lower()
+    if value not in {"csv", "postgres"}:
+        raise ValueError("RATE_STORAGE_BACKEND must be csv or postgres")
+    return value
+
+
+def _source_storage_backend_env() -> str:
+    value = os.getenv("SOURCE_STORAGE_BACKEND", "filesystem").strip().lower()
+    if value not in {"filesystem", "supabase"}:
+        raise ValueError("SOURCE_STORAGE_BACKEND must be filesystem or supabase")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     root_dir: Path
@@ -41,11 +55,24 @@ class Settings:
     supabase_publishable_key: str | None = None
     supabase_db_url: str | None = None
     auth_required: bool = False
+    rate_storage_backend: str = "csv"
+    source_storage_backend: str = "filesystem"
+    supabase_storage_bucket: str = "rate-sources"
 
     @classmethod
     def load(cls, cwd: Path | None = None) -> "Settings":
         root_dir = Path(os.getenv("RATE_INGEST_ROOT", cwd or Path.cwd())).resolve()
         data_dir = root_dir / "data"
+        rate_storage_backend = _storage_backend_env()
+        source_storage_backend = _source_storage_backend_env()
+        if (
+            source_storage_backend == "supabase"
+            and rate_storage_backend != "postgres"
+        ):
+            raise ValueError(
+                "SOURCE_STORAGE_BACKEND=supabase requires "
+                "RATE_STORAGE_BACKEND=postgres"
+            )
         return cls(
             root_dir=root_dir,
             data_dir=data_dir,
@@ -58,6 +85,11 @@ class Settings:
             supabase_publishable_key=_optional_env("SUPABASE_PUBLISHABLE_KEY"),
             supabase_db_url=_optional_env("SUPABASE_DB_URL"),
             auth_required=_boolean_env("AUTH_REQUIRED", default=True),
+            rate_storage_backend=rate_storage_backend,
+            source_storage_backend=source_storage_backend,
+            supabase_storage_bucket=(
+                _optional_env("SUPABASE_STORAGE_BUCKET") or "rate-sources"
+            ),
         )
 
     def ensure(self) -> None:

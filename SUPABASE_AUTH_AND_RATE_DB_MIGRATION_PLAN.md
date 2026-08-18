@@ -1001,6 +1001,8 @@ This is an intentional stable checkpoint.
 
 STAGE 3 — Introduce a persistence/repository abstraction with CSV still active
 
+Implementation status: complete on 8 August 2026. `RateRepository` and `CsvRateRepository` now cover source registration, import records, approval publication, removal, and approved-library reads. `RATE_STORAGE_BACKEND=csv` remains the default. At this checkpoint, the `postgres` value was reserved until Stage 4. Existing run artifacts and API/UI contracts were unchanged.
+
 Objective
 
 Separate business logic in services.py from the implementation details in warehouse.py.
@@ -1105,6 +1107,8 @@ Stop here
 Do not add Postgres writes until the CSV adapter is proven.
 
 STAGE 4 — Implement PostgresRateRepository without production cutover
+
+Implementation status: complete on 9 August 2026. The Postgres adapter, explicit mappings, SSL connection pool, organization-scoped operations, bulk writes, and application-ID migration are present. Migration `20260808150650_add_application_ids` is applied remotely. The guarded real Hapag test passed its entity-count, application-ID, checksum, cleanup, and organization-isolation checks. Post-migration advisors found no warning- or error-level issues. Production remains on CSV.
 
 Objective
 
@@ -1253,6 +1257,8 @@ Stop here
 Do not change the Rate Desk read path yet.
 
 STAGE 5 — Move import persistence + approval lifecycle to Postgres
+
+Implementation status: complete on 9 August 2026. Production remains on the CSV backend until Stage 6.
 
 Objective
 
@@ -1606,6 +1612,49 @@ client power users -> operator
 client search-only users -> viewer
 internal owner/admin -> admin
 
+Invitation acceptance and password setup
+
+This is required before inviting the full client trial group.
+
+The current Stage 2 login screen supports email/password sign-in, but it does not let a newly invited user choose a password. Do not assume that Supabase supplies this application screen automatically.
+
+Add a dedicated invitation-acceptance page, for example:
+
+UI/set-password.html
+UI/set-password.js
+
+The page must:
+
+accept the Supabase invitation session from the email link;
+
+show new-password and confirm-password fields;
+
+validate that the two values match and meet the configured password rules;
+
+set the password with the authenticated Supabase client;
+
+verify organization membership through GET /api/me;
+
+redirect an authorized user to the Rate Desk;
+
+show a clear expired/invalid-link message without exposing internal details;
+
+deny application access when no organization_members row exists.
+
+Configure the Supabase invite redirect to this page and add the exact URL to the allowed redirect URLs. Keep public signup disabled. Never put a Supabase secret or service-role key in this page.
+
+Add automated and manual checks for:
+
+new invited user can choose a password and sign in again later;
+
+password confirmation mismatch is rejected;
+
+expired or reused invitation link is handled safely;
+
+invited user without an organization membership cannot access rate data;
+
+existing email/password login and logout still work.
+
 Smoke test
 
 Logged out:
@@ -1662,6 +1711,8 @@ This is a suitable end state for next week's full client trial.
 Everything below is optional/post-trial hardening.
 
 STAGE 8 — Move raw uploaded sources to Supabase Storage
+
+Implementation status: complete on 10 August 2026. The private bucket and organization-scoped RLS policies are applied. The application keeps a temporary parser file, uploads the accepted immutable original with the signed-in user's token, and stores the object path in PostgreSQL. Live role and cross-organization acceptance tests pass.
 
 Objective
 
@@ -2236,6 +2287,8 @@ Only:
 
 Stage 6
 
+Implementation status: complete on 9 August 2026. Import review, search, and Rate Desk reads now use the selected repository backend.
+
 Deliver:
 
 Postgres reads;
@@ -2253,6 +2306,8 @@ Agent session G
 Only:
 
 Stage 7
+
+Implementation status: code complete on 10 August 2026. Production configuration, deployment, and authenticated smoke-test evidence remain to be verified before the trial is complete.
 
 Deliver:
 

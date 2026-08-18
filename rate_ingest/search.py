@@ -4,16 +4,27 @@ from rich.console import Console
 from rich.table import Table
 
 from rate_ingest.config import Settings
-from rate_ingest.warehouse import search_offers
+from rate_ingest.repositories import RateRepository
+from rate_ingest.services import search_approved_offers
 
 
-def run_search(settings: Settings, **filters) -> int:
-    frame = search_offers(settings, **filters)
+def run_search(
+    settings: Settings,
+    *,
+    repository: RateRepository | None = None,
+    **filters,
+) -> int:
+    rows = search_approved_offers(
+        settings,
+        limit=5000,
+        repository=repository,
+        **filters,
+    )
     console = Console()
-    if frame.empty:
+    if not rows:
         console.print("No approved offers found.")
         return 0
-    table = Table(title=f"Approved Offers ({len(frame)})")
+    table = Table(title=f"Approved Offers ({len(rows)})")
     columns = []
     for column in [
         "provider_name",
@@ -24,12 +35,12 @@ def run_search(settings: Settings, **filters) -> int:
         "equipment_type",
         "base_amount",
         "base_currency",
-        "file_name",
+        "source_file_name",
     ]:
-        if column in frame.columns:
+        if any(column in row for row in rows):
             table.add_column(column)
             columns.append(column)
-    for _, row in frame.head(50).iterrows():
+    for row in rows[:50]:
         table.add_row(*(str(row.get(column, "")) for column in columns))
     console.print(table)
-    return len(frame)
+    return len(rows)

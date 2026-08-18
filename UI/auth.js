@@ -2,6 +2,7 @@
   "use strict";
 
   const LOGIN_PATH = "/ui/login.html";
+  const SET_PASSWORD_PATH = "/ui/set-password.html";
   let clientPromise = null;
 
   function safeReturnTo(value, fallback = "/ui/") {
@@ -48,7 +49,12 @@
       },
     );
     client.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT") redirectToLogin();
+      if (
+        event === "SIGNED_OUT" &&
+        window.location.pathname !== SET_PASSWORD_PATH
+      ) {
+        redirectToLogin();
+      }
     });
     return client;
   }

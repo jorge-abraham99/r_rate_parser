@@ -361,9 +361,17 @@ def extract_validity(text: str):
         r"(\d{2}-[A-Za-z]{3}-\d{4})\s+to\s+(\d{2}-[A-Za-z]{3}-\d{4})",
         text,
     )
-    if not match:
+    if match:
+        return parse_date_value(match.group(1)), parse_date_value(match.group(2))
+
+    period_start = text.lower().find("rate effective period")
+    if period_start < 0:
         return None, None
-    return parse_date_value(match.group(1)), parse_date_value(match.group(2))
+    period_text = text[period_start : period_start + 1500]
+    dates = re.findall(r"\d{2}-[A-Za-z]{3}-\d{4}", period_text)
+    if len(dates) < 2:
+        return None, None
+    return parse_date_value(dates[0]), parse_date_value(dates[1])
 
 
 def extract_document_reference(text: str) -> str | None:

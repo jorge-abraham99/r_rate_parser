@@ -23,13 +23,19 @@ For a concise architecture and maintenance guide, see [CONTEXT.md](CONTEXT.md).
 
 ## Supabase migration status
 
-Stage 0 of the auth and rate-database migration is captured in `supabase/`. The hosted `carrier-quotes` project already has eight RLS-protected tables and two applied migrations; their authoritative SQL is now versioned locally. The running application still uses filesystem CSV/JSON storage.
+Stage 0 of the auth and rate-database migration is captured in `supabase/`. The hosted `carrier-quotes` project has eight RLS-protected application tables, a private `rate-sources` Storage bucket, and five applied migrations; their SQL is versioned locally.
 
-See [supabase/README.md](supabase/README.md) for the project reference, applied migration versions, security baseline, credential handling, and the required future `application_id` reconciliation.
+See [supabase/README.md](supabase/README.md) for the project reference, applied migration versions, security baseline, credential handling, and database reconciliation notes.
 
 Stages 1 and 2 add invite-only Supabase authentication. The backend validates user tokens against the project's public asymmetric JWKS. It then reads `organization_members` through RLS with the same user token. It does not use the JWT secret or a service-role key.
 
-The browser restores Supabase sessions, adds the access token through one shared API helper, and sends logged-out users to `/ui/login.html`. Viewers can read imports and rates. Operators and admins can also upload, approve, reject, and delete. Health and public browser configuration stay public; all rate APIs require both a valid user and an organization membership. The runtime still uses CSV/JSON storage.
+The browser restores Supabase sessions, adds the access token through one shared API helper, and sends logged-out users to `/ui/login.html`. Viewers can read imports and rates. Operators and admins can also upload, approve, reject, and delete. Health and public browser configuration stay public; all rate APIs require both a valid user and an organization membership.
+
+Stage 3 puts all rate persistence behind `RateRepository`. Stage 4 adds `PostgresRateRepository`, explicit model mappings, a small connection pool, organization-scoped queries, and batched writes. Stage 5 adds complete pre-review bundle persistence and transactional approval, replacement archive, rejection, and deletion behavior. Stage 6 moves review and Rate Desk reads onto the selected repository backend.
+
+Stage 7 adds the invitation password-setup page and an optional, idempotent CSV-to-Postgres backfill command. `RATE_STORAGE_BACKEND` deliberately still defaults to `csv` for local safety; this trial starts with an empty Postgres rate library, then Railway can switch to `postgres` after the trial smoke test in [DEPLOY_RAILWAY.md](DEPLOY_RAILWAY.md).
+
+Stage 8 adds optional private Supabase Storage for original uploads. The parser still reads the FastAPI temporary file, then the accepted original is uploaded to `<organization_id>/<source_document_id>/<original_filename>`. Organization members can read their objects; only operators and admins can create them. There is no object update or delete policy. `SOURCE_STORAGE_BACKEND` defaults to `filesystem` and must be set to `supabase` explicitly.
 
 ## Canonical Output
 
@@ -82,6 +88,42 @@ In practice this means a random unseen file will not magically work today.
 ```bash
 pip install -r requirements.txt
 ```
+
+The local default storage setting is:
+
+```bash
+RATE_STORAGE_BACKEND=csv
+SOURCE_STORAGE_BACKEND=filesystem
+```
+
+For the Stage 8 source-storage path, also set `SOURCE_STORAGE_BACKEND=supabase` and `SUPABASE_STORAGE_BUCKET=rate-sources`. The server uses the signed-in user's token and the publishable key. It does not require a service-role key.
+
+For guarded Postgres lifecycle and parser parity testing, set the server-only `SUPABASE_DB_URL` and run:
+
+```bash
+RUN_POSTGRES_INTEGRATION_TESTS=true pytest -q tests/test_postgres_repository_integration.py
+```
+
+The tests create unique temporary organizations and delete only those exact organizations when they finish.
+
+The guarded Storage acceptance test creates temporary users, organizations, and objects, then removes them:
+
+```bash
+RUN_SUPABASE_STORAGE_INTEGRATION_TESTS=true pytest -q tests/test_source_storage_integration.py
+```
+
+The current trial decision is to start Postgres with an empty rate library. Do not run a CSV backfill before switching Railway to `postgres`; the existing CSV rates will remain available only if the service is rolled back to `RATE_STORAGE_BACKEND=csv`.
+
+The optional recovery/migration command remains available if that decision changes later:
+
+```bash
+python -m rate_ingest backfill-postgres <organization-uuid>
+python -m rate_ingest backfill-postgres <organization-uuid> --apply
+```
+
+Run the optional backfill only with `SOURCE_STORAGE_BACKEND=filesystem`. The CLI does not have a signed-in user token for organization-scoped Storage uploads.
+
+See [DEPLOY_RAILWAY.md](DEPLOY_RAILWAY.md) for the required Railway variables, invitation redirect, and smoke checklist.
 
 ## CLI Workflow
 

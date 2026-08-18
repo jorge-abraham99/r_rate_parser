@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
@@ -15,6 +17,7 @@ from rate_ingest.auth import (
     require_organization_member,
 )
 from rate_ingest.config import Settings
+from rate_ingest.repositories import close_rate_repositories
 from rate_ingest.services import (
     approve_import_by_id,
     delete_import_by_id,
@@ -25,6 +28,7 @@ from rate_ingest.services import (
     reject_import_by_id,
     search_approved_offers,
 )
+from rate_ingest.source_storage import SourceStorageError
 
 
 class ApproveRequest(BaseModel):
@@ -39,7 +43,15 @@ class RejectRequest(BaseModel):
     reason: str
 
 
-app = FastAPI(title="Freight Rate Ingest API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    try:
+        yield
+    finally:
+        close_rate_repositories()
+
+
+app = FastAPI(title="Freight Rate Ingest API", version="0.1.0", lifespan=lifespan)
 
 
 def settings() -> Settings:
@@ -86,15 +98,17 @@ def api_me(
 
 @app.get("/api/imports")
 def api_list_imports(
-    _context: Annotated[RequestContext, Depends(require_organization_member)],
+    context: Annotated[RequestContext, Depends(require_organization_member)],
     limit: int = 50,
 ) -> list[dict]:
-    return list_imports(settings(), limit=limit)
+    return list_imports(
+        settings(), limit=limit, organization_id=context.organization_id
+    )
 
 
 @app.post("/api/imports")
 async def api_import_source(
-    _context: Annotated[RequestContext, Depends(require_operator)],
+    context: Annotated[RequestContext, Depends(require_operator)],
     file: UploadFile = File(...),
     template: str | None = Form(default=None),
     uploaded_by: str | None = Form(default=None),
@@ -113,9 +127,16 @@ async def api_import_source(
             template=template,
             uploaded_by=uploaded_by,
             source_file_name=original_name,
+            source_storage_access_token=context.user.access_token,
+            organization_id=context.organization_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SourceStorageError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Private source storage is unavailable",
+        ) from exc
     finally:
         temp_path.unlink(missing_ok=True)
 
@@ -123,10 +144,12 @@ async def api_import_source(
 @app.get("/api/imports/{import_id}")
 def api_get_import(
     import_id: str,
-    _context: Annotated[RequestContext, Depends(require_organization_member)],
+    context: Annotated[RequestContext, Depends(require_organization_member)],
 ) -> dict:
     try:
-        return get_import_detail(settings(), import_id)
+        return get_import_detail(
+            settings(), import_id, organization_id=context.organization_id
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -135,7 +158,7 @@ def api_get_import(
 def api_approve_import(
     import_id: str,
     payload: ApproveRequest,
-    _context: Annotated[RequestContext, Depends(require_operator)],
+    context: Annotated[RequestContext, Depends(require_operator)],
 ) -> dict:
     try:
         return approve_import_by_id(
@@ -146,6 +169,8 @@ def api_approve_import(
             carrier_key=payload.carrier_key,
             carrier_label=payload.carrier_label,
             contract_tag=payload.contract_tag,
+            organization_id=context.organization_id,
+            approved_by_user_id=str(context.user.user_id),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -155,10 +180,16 @@ def api_approve_import(
 def api_reject_import(
     import_id: str,
     payload: RejectRequest,
-    _context: Annotated[RequestContext, Depends(require_operator)],
+    context: Annotated[RequestContext, Depends(require_operator)],
 ) -> dict:
     try:
-        return reject_import_by_id(settings(), import_id, payload.reason)
+        return reject_import_by_id(
+            settings(),
+            import_id,
+            payload.reason,
+            organization_id=context.organization_id,
+            rejected_by_user_id=str(context.user.user_id),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -166,17 +197,21 @@ def api_reject_import(
 @app.delete("/api/imports/{import_id}")
 def api_delete_import(
     import_id: str,
-    _context: Annotated[RequestContext, Depends(require_operator)],
+    context: Annotated[RequestContext, Depends(require_operator)],
 ) -> dict:
     try:
-        return delete_import_by_id(settings(), import_id)
+        return delete_import_by_id(
+            settings(),
+            import_id,
+            organization_id=context.organization_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/api/search")
 def api_search(
-    _context: Annotated[RequestContext, Depends(require_organization_member)],
+    context: Annotated[RequestContext, Depends(require_organization_member)],
     provider_name: str | None = None,
     carrier_name: str | None = None,
     collection: str | None = None,
@@ -196,15 +231,20 @@ def api_search(
         equipment_type=equipment_type,
         valid_on=valid_on,
         limit=limit,
+        organization_id=context.organization_id,
     )
 
 
 @app.get("/api/rate-desk")
 def api_rate_desk(
-    _context: Annotated[RequestContext, Depends(require_organization_member)],
+    context: Annotated[RequestContext, Depends(require_organization_member)],
     limit: int = 2000,
 ) -> dict:
-    return get_rate_desk_data(settings(), limit=min(max(limit, 1), 5000))
+    return get_rate_desk_data(
+        settings(),
+        limit=min(max(limit, 1), 5000),
+        organization_id=context.organization_id,
+    )
 
 
 ui_dir = Path(__file__).resolve().parents[1] / "UI"

@@ -383,3 +383,24 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert 'carrier_label: "MSC · Quay-to-quay"' not in app_js
     assert 'carrier_label: "Hapag-Lloyd · Quay-to-quay"' not in app_js
     assert 'doorParams.set("collection", collection)' in rate_desk_js
+
+
+def test_invitation_password_page_enforces_safe_acceptance_flow():
+    password_html = Path("UI/set-password.html").read_text(encoding="utf-8")
+    password_js = Path("UI/set-password.js").read_text(encoding="utf-8")
+    auth_js = Path("UI/auth.js").read_text(encoding="utf-8")
+
+    assert "@supabase/supabase-js@2.112.2" in password_html
+    assert 'minlength="8"' in password_html
+    assert "signUp" not in password_html
+    assert "signUp" not in password_js
+    assert 'hash.get("type") === "invite"' in password_js
+    assert "invalid or has expired" in password_js
+    assert "password !== confirmInput.value" in password_js
+    assert "updateUser({ password })" in password_js
+    assert 'RATE_DESK_AUTH.apiFetch("/api/me")' in password_js
+    assert "has no organization access" in password_js
+    assert 'signOut({ scope: "local" })' in password_js
+    assert 'SET_PASSWORD_PATH = "/ui/set-password.html"' in auth_js
+    assert "service_role" not in password_html
+    assert "service_role" not in password_js
