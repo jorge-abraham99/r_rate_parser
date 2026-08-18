@@ -401,6 +401,7 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert "deskState.totalMatches" in rate_desk_js
     assert "deskState.pageSize" in rate_desk_js
     assert ": [...portRates, ...doorRates]" in rate_desk_js
+    assert rate_desk_js.count("countsTowardTotal: line.counts_toward_total !== false") >= 2
 
 
 def test_invitation_password_page_enforces_safe_acceptance_flow():

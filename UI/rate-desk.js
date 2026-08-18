@@ -635,6 +635,7 @@ function connectedGroups(rate, quantity) {
         unit: numberValue(line.unit_amount) || 0,
         usdUnit: numberValue(line.usd_unit_amount),
         zeroRated: Boolean(line.zero_rated),
+        countsTowardTotal: line.counts_toward_total !== false,
       }, quantity, DEFAULT_FX, line.quantity_rule));
       groups.push(makeGroup("unmatched", "Unmapped", lines));
     }
