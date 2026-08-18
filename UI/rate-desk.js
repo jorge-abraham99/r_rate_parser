@@ -16,6 +16,15 @@ const deskState = {
   haulageTariffs: {},
   haulageCurrency: "USD",
   sort: null,
+  pageOffset: 0,
+  pageSize: 50,
+  totalMatches: 0,
+  hasMore: false,
+  searchTimer: null,
+  searchController: null,
+  detailCache: new Map(),
+  detailLoading: new Set(),
+  detailErrors: new Map(),
 };
 
 const elements = {
@@ -37,12 +46,18 @@ const elements = {
   deskAlert: document.getElementById("deskAlert"),
   figuresNote: document.getElementById("figuresNote"),
   sortButtons: [...document.querySelectorAll("[data-sort-key]")],
+  paginationControls: document.getElementById("paginationControls"),
+  previousPageButton: document.getElementById("previousPageButton"),
+  nextPageButton: document.getElementById("nextPageButton"),
+  paginationSummary: document.getElementById("paginationSummary"),
 };
 
 [elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.equipmentSelect, elements.materialSelect]
   .forEach((element) => element.addEventListener("change", resetAndRender));
-elements.showExpiredToggle.addEventListener("change", resetAndRender);
+elements.showExpiredToggle.addEventListener("change", renderDesk);
 elements.showAllQuotesButton.addEventListener("click", showAllQuotes);
+elements.previousPageButton.addEventListener("click", () => changePage(-1));
+elements.nextPageButton.addEventListener("click", () => changePage(1));
 elements.sortButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const key = button.dataset.sortKey;
@@ -58,10 +73,14 @@ elements.sortButtons.forEach((button) => {
 });
 elements.qtyInput.addEventListener("change", () => {
   elements.qtyInput.value = clampQuantity(elements.qtyInput.value);
-  resetAndRender();
+  deskState.expandedId = null;
+  renderDesk();
 });
 elements.qtyInput.addEventListener("input", () => {
-  if (elements.qtyInput.value !== "") resetAndRender();
+  if (elements.qtyInput.value !== "") {
+    deskState.expandedId = null;
+    renderDesk();
+  }
 });
 
 bootRateDesk();
@@ -84,20 +103,18 @@ async function bootRateDesk() {
   }
 
   try {
-    const response = await window.RATE_DESK_AUTH.apiFetch("/api/rate-desk?limit=5000");
-    if (!response.ok) throw new Error("The approved-rate service did not respond.");
-    const payload = await response.json();
-    deskState.connectedRates = (Array.isArray(payload.rates) ? payload.rates : []).filter((rate) => !isSpotRate(rate));
-    deskState.initialConnectedRates = deskState.connectedRates;
-    deskState.filters = payload.filters || {};
-    deskState.haulageTariffs = payload.haulage_tariffs || {};
-    deskState.haulageCurrency = payload.haulage_currency || "USD";
+    const metaResponse = await window.RATE_DESK_AUTH.apiFetch("/api/rate-desk/meta");
+    if (!metaResponse.ok) throw new Error("The approved-rate service did not respond.");
+    const metadata = await metaResponse.json();
+    deskState.filters = metadata.filters || {};
+    deskState.haulageTariffs = metadata.haulage_tariffs || {};
+    deskState.haulageCurrency = metadata.haulage_currency || "USD";
     deskState.loaded = true;
     populateConnectedFilters();
-    elements.refreshText.textContent = payload.last_refreshed
-      ? `Rates refreshed ${shortDateTime(payload.last_refreshed)}`
+    elements.refreshText.textContent = metadata.last_refreshed
+      ? `Rates refreshed ${shortDateTime(metadata.last_refreshed)}`
       : "Rates refreshed from approved data";
-    renderDesk();
+    await refreshConnectedRates(true);
   } catch (error) {
     deskState.loaded = true;
     showAlert(`Could not load approved rates: ${error.message}`);
@@ -120,26 +137,13 @@ function populateDemoFilters() {
 
 function populateConnectedFilters() {
   const rates = deskState.connectedRates;
-  const currentRates = rates.filter((rate) => !isExpiredRate(rate));
-  const nonDoorRates = rates.filter((rate) => !isDoorRate(rate));
-  const currentNonDoorRates = currentRates.filter((rate) => !isDoorRate(rate));
-  const defaultRate = (
-    currentNonDoorRates[0]
-    || currentRates[0]
-    || nonDoorRates[0]
-    || rates[0]
-    || {}
-  );
+  const metadata = deskState.filters || {};
   // Door-to-quay sheets still have a POL. Include it here so inline MSC
   // rates are presented as Collection → POL → POD rather than collection-only.
-  const origins = unique(
-    rates
-      .map((rate) => firstPresent(rate.pol, ""))
-      .filter(Boolean)
-  );
-  const destinations = unique(deskState.filters.destinations || rates.map(rateDestination));
-  const equipment = unique(deskState.filters.equipment_types || nonDoorRates.map((rate) => rate.equipment_type));
-  const materials = unique(deskState.filters.materials || rates.flatMap((rate) => rate.materials || []));
+  const origins = unique(metadata.origins || rates.map((rate) => firstPresent(rate.pol, "")));
+  const destinations = unique(metadata.destinations || rates.map(rateDestination));
+  const equipment = unique(metadata.equipment_types || rates.map((rate) => rate.equipment_type));
+  const materials = unique(metadata.materials || rates.flatMap((rate) => rate.materials || []));
   const pickups = Array.isArray(deskState.filters.door_pickups) ? deskState.filters.door_pickups : [];
   const doorCollections = uniqueLocations(
     rates
@@ -148,9 +152,9 @@ function populateConnectedFilters() {
       .filter(Boolean)
   );
 
-  populateSelect(elements.originSelect, origins, "Any origin", firstPresent(defaultRate.pol, "") || origins[0] || "", true);
-  populateSelect(elements.destinationSelect, destinations, "Any destination", rateDestination(defaultRate) || destinations[0] || "", true);
-  populateEquipment(canonicalEquipment(defaultRate.equipment_type || equipment[0] || "40HC"));
+  populateSelect(elements.originSelect, origins, "Any origin", origins[0] || "", true);
+  populateSelect(elements.destinationSelect, destinations, "Any destination", destinations[0] || "", true);
+  populateEquipment(canonicalEquipment(equipment[0] || "40HC"));
   populateSelect(
     elements.materialSelect,
     ["All materials", ...(materials.length ? materials : MATERIAL_OPTIONS.slice(1))],
@@ -209,55 +213,73 @@ function setCollectionVisibility(visible) {
 
 function resetAndRender() {
   deskState.expandedId = null;
+  deskState.pageOffset = 0;
   if (RATE_DESK_DEMO_MODE) {
     renderDesk();
     return;
   }
-  refreshConnectedRates();
+  scheduleRefresh();
 }
 
-async function refreshConnectedRates() {
+function scheduleRefresh() {
+  if (deskState.searchTimer) clearTimeout(deskState.searchTimer);
+  deskState.searchTimer = setTimeout(() => refreshConnectedRates(), 220);
+}
+
+async function refreshConnectedRates(initial = false) {
   const collection = elements.collectionSelect.value;
   const origin = elements.originSelect.value;
   const destination = elements.destinationSelect.value;
   const equipment = elements.equipmentSelect.value;
-  const portParams = new URLSearchParams({ limit: "5000" });
-  if (origin) portParams.set("pol", origin);
-  if (destination) portParams.set("pod", destination);
-  if (equipment) portParams.set("equipment_type", equipment);
-
-  const queries = [portParams];
-  if (collection) {
-    const doorParams = new URLSearchParams(portParams);
-    doorParams.set("collection", collection);
-    queries.push(doorParams);
+  const params = new URLSearchParams({
+    limit: String(deskState.pageSize),
+    offset: String(deskState.pageOffset),
+  });
+  if (collection) params.set("collection", collection);
+  if (origin) params.set("pol", origin);
+  if (destination) params.set("pod", destination);
+  if (equipment) params.set("equipment_type", equipment);
+  if (elements.materialSelect.value && elements.materialSelect.value !== "All materials") {
+    params.set("material", elements.materialSelect.value);
   }
+
+  if (deskState.searchController) deskState.searchController.abort();
+  const controller = new AbortController();
+  deskState.searchController = controller;
 
   try {
-    const responses = await Promise.all(queries.map((params) =>
-      window.RATE_DESK_AUTH.apiFetch(`/api/search?${params.toString()}`)));
-    if (responses.some((response) => !response.ok)) {
-      throw new Error("The approved-rate service did not respond.");
-    }
-    const resultSets = await Promise.all(responses.map((response) => response.json()));
-    const ratesById = new Map();
-    resultSets.flat().forEach((rate) => {
-      const key = rate.offer_id || `${rate.source_file_name || "rate"}-${rate.raw_row_reference || ratesById.size}`;
-      ratesById.set(key, rate);
-    });
-    deskState.connectedRates = [...ratesById.values()];
+    const response = await window.RATE_DESK_AUTH.apiFetch(`/api/rate-desk/search?${params.toString()}`, { signal: controller.signal });
+    if (!response.ok) throw new Error("The approved-rate service did not respond.");
+    const payload = await response.json();
+    if (controller.signal.aborted) return;
+    deskState.connectedRates = (Array.isArray(payload.rates) ? payload.rates : []).filter((rate) => !isSpotRate(rate));
+    deskState.initialConnectedRates = deskState.connectedRates;
+    deskState.totalMatches = Number(payload.pagination?.total || deskState.connectedRates.length);
+    deskState.hasMore = Boolean(payload.pagination?.has_more);
     renderDesk();
   } catch (error) {
+    if (error.name === "AbortError" || controller.signal.aborted) return;
     showAlert(`Could not update quotes: ${error.message}`);
-    deskState.connectedRates = deskState.initialConnectedRates;
+    if (!initial) deskState.connectedRates = deskState.initialConnectedRates;
     renderDesk();
+  } finally {
+    if (deskState.searchController === controller) deskState.searchController = null;
   }
+}
+
+function changePage(direction) {
+  const nextOffset = deskState.pageOffset + direction * deskState.pageSize;
+  if (nextOffset < 0 || (direction > 0 && !deskState.hasMore)) return;
+  deskState.pageOffset = nextOffset;
+  deskState.expandedId = null;
+  refreshConnectedRates();
 }
 
 function renderDesk() {
   if (!deskState.loaded) return;
   hideAlert();
   updateSortHeaders();
+  updatePagination();
 
   const quantity = clampQuantity(elements.qtyInput.value);
   elements.qtyInput.value = quantity;
@@ -293,7 +315,8 @@ function renderDesk() {
   const expiredCount = rows.filter((row) => row.expired).length;
   const hiddenExpiredCount = !elements.showExpiredToggle.checked ? countHiddenExpiredMatches() : 0;
   const scopeLabel = collection ? "routing option" : "contract rate";
-  const countLabel = `${rows.length} ${scopeLabel}${rows.length === 1 ? "" : "s"}`;
+  const visibleCount = RATE_DESK_DEMO_MODE ? rows.length : deskState.totalMatches || rows.length;
+  const countLabel = `${visibleCount} ${scopeLabel}${visibleCount === 1 ? "" : "s"}`;
   const bestLabel = best ? ` · best ${formatUsd(best.totalUsd)} all-in` : "";
   const expiredLabel = expiredCount ? ` · ${expiredCount} expired` : "";
   const hiddenLabel = hiddenExpiredCount ? ` · ${hiddenExpiredCount} expired hidden` : "";
@@ -303,10 +326,45 @@ function renderDesk() {
   elements.rateRows.innerHTML = rows.map((row, index) => renderRate(row, index, showBest && row.id === best?.id)).join("");
   elements.rateRows.querySelectorAll("button[data-rate-id]").forEach((button) => {
     button.addEventListener("click", () => {
-      deskState.expandedId = deskState.expandedId === button.dataset.rateId ? null : button.dataset.rateId;
+      const rateId = button.dataset.rateId;
+      deskState.expandedId = deskState.expandedId === rateId ? null : rateId;
       renderDesk();
+      if (deskState.expandedId && !deskState.detailCache.has(rateId)) loadOfferDetail(rateId);
     });
   });
+}
+
+function updatePagination() {
+  if (RATE_DESK_DEMO_MODE || deskState.totalMatches <= deskState.pageSize) {
+    elements.paginationControls.hidden = true;
+    return;
+  }
+  const start = deskState.pageOffset + 1;
+  const end = Math.min(deskState.pageOffset + deskState.connectedRates.length, deskState.totalMatches);
+  elements.paginationControls.hidden = false;
+  elements.previousPageButton.disabled = deskState.pageOffset <= 0;
+  elements.nextPageButton.disabled = !deskState.hasMore;
+  elements.paginationSummary.textContent = `${start}–${end} of ${deskState.totalMatches}`;
+}
+
+async function loadOfferDetail(offerId) {
+  if (deskState.detailLoading.has(offerId)) return;
+  deskState.detailLoading.add(offerId);
+  deskState.detailErrors.delete(offerId);
+  renderDesk();
+  try {
+    const response = await window.RATE_DESK_AUTH.apiFetch(`/api/rate-desk/offers/${encodeURIComponent(offerId)}`);
+    if (!response.ok) throw new Error("The quote detail could not be loaded.");
+    deskState.detailCache.set(offerId, await response.json());
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      deskState.detailErrors.set(offerId, error.message);
+      showAlert(error.message);
+    }
+  } finally {
+    deskState.detailLoading.delete(offerId);
+    renderDesk();
+  }
 }
 
 function buildDemoRows(quantity) {
@@ -466,8 +524,11 @@ function buildConnectedRows(quantity) {
 }
 
 function makeConnectedRow(rate, quantity) {
-  const groups = connectedGroups(rate, quantity);
-  const totalUsd = sumGroups(groups);
+  const detail = deskState.detailCache.get(rate.offer_id);
+  const groups = detail ? connectedGroups({ ...rate, ...detail }, quantity) : [];
+  const totalUsd = detail
+    ? sumGroups(groups)
+    : (numberValue(rate.all_in_usd) || 0) * quantity;
   const sourceFile = rate.source_file_name || rate.raw_sheet_name || "Approved rate";
   const expired = isExpiredRate(rate);
   const carrier = carrierLabel(rate);
@@ -485,17 +546,21 @@ function makeConnectedRow(rate, quantity) {
     sailing: rate.routing_note || "",
     freetime: extractFreetime(rate),
     groups,
-    inlandUsd: groupTotal(groups, "inland"),
-    originUsd: groupTotal(groups, "origin"),
-    freightUsd: groupTotal(groups, "freight"),
-    destinationUsd: groupTotal(groups, "destination"),
+    inlandUsd: detail ? groupTotal(groups, "inland") : 0,
+    originUsd: detail ? groupTotal(groups, "origin") : (numberValue(rate.origin_usd) || 0) * quantity,
+    freightUsd: detail ? groupTotal(groups, "freight") : (numberValue(rate.freight_usd) || 0) * quantity,
+    destinationUsd: detail ? groupTotal(groups, "destination") : (numberValue(rate.destination_usd) || 0) * quantity,
     totalUsd,
     poa: false,
     expired,
-    zeroChargeCount: groups.reduce((sum, group) => sum + group.zeroLines.length, 0),
+    zeroChargeCount: detail
+      ? groups.reduce((sum, group) => sum + group.zeroLines.length, 0)
+      : Number(rate.zero_charge_count || 0),
     fineprint: "",
     quantity,
     equipment: rate.equipment_type,
+    detailLoaded: Boolean(detail),
+    detailLoading: deskState.detailLoading.has(rate.offer_id),
   };
 }
 
@@ -687,6 +752,15 @@ function renderInland(row) {
 }
 
 function renderBreakdown(row) {
+  if (deskState.detailErrors.has(row.id)) {
+    return `<div class="rate-breakdown"><div class="breakdown-panel"><div class="rate-empty">${escapeHtml(deskState.detailErrors.get(row.id))}</div></div></div>`;
+  }
+  if (row.detailLoading || (deskState.expandedId === row.id && !row.detailLoaded)) {
+    return '<div class="rate-breakdown"><div class="breakdown-panel"><div class="rate-empty">Loading charge breakdown…</div></div></div>';
+  }
+  if (!row.detailLoaded) {
+    return '<div class="rate-breakdown"><div class="breakdown-panel"><div class="rate-empty">Charge breakdown unavailable.</div></div></div>';
+  }
   const totalLabel = row.quantity > 1
     ? `Total per booking (${row.quantity} × ${formatEquipment(row.equipment)})`
     : `Total per ${formatEquipment(row.equipment)}`;

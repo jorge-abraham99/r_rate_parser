@@ -22,11 +22,14 @@ from rate_ingest.services import (
     approve_import_by_id,
     delete_import_by_id,
     get_rate_desk_data,
+    get_rate_desk_metadata,
+    get_rate_offer_detail,
     get_import_detail,
     import_source_file,
     list_imports,
     reject_import_by_id,
     search_approved_offers,
+    search_rate_summaries,
 )
 from rate_ingest.source_storage import SourceStorageError
 
@@ -218,6 +221,7 @@ def api_search(
     pol: str | None = None,
     pod: str | None = None,
     equipment_type: str | None = None,
+    material: str | None = None,
     valid_on: str | None = None,
     limit: int = 200,
 ) -> list[dict]:
@@ -229,10 +233,66 @@ def api_search(
         pol=pol,
         pod=pod,
         equipment_type=equipment_type,
+        material=material,
         valid_on=valid_on,
         limit=limit,
         organization_id=context.organization_id,
     )
+
+
+@app.get("/api/rate-desk/meta")
+def api_rate_desk_metadata(
+    context: Annotated[RequestContext, Depends(require_organization_member)],
+) -> dict:
+    return get_rate_desk_metadata(
+        settings(),
+        organization_id=context.organization_id,
+    )
+
+
+@app.get("/api/rate-desk/search")
+def api_rate_desk_search(
+    context: Annotated[RequestContext, Depends(require_organization_member)],
+    provider_name: str | None = None,
+    carrier_name: str | None = None,
+    collection: str | None = None,
+    pol: str | None = None,
+    pod: str | None = None,
+    equipment_type: str | None = None,
+    material: str | None = None,
+    valid_on: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    return search_rate_summaries(
+        settings(),
+        provider_name=provider_name,
+        carrier_name=carrier_name,
+        collection=collection,
+        pol=pol,
+        pod=pod,
+        equipment_type=equipment_type,
+        material=material,
+        valid_on=valid_on,
+        limit=min(max(limit, 1), 50),
+        offset=max(offset, 0),
+        organization_id=context.organization_id,
+    )
+
+
+@app.get("/api/rate-desk/offers/{offer_id}")
+def api_rate_offer_detail(
+    offer_id: str,
+    context: Annotated[RequestContext, Depends(require_organization_member)],
+) -> dict:
+    detail = get_rate_offer_detail(
+        settings(),
+        offer_id,
+        organization_id=context.organization_id,
+    )
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Approved rate offer not found")
+    return detail
 
 
 @app.get("/api/rate-desk")

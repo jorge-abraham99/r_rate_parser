@@ -530,10 +530,13 @@ def search_approved_offers(
     pod: str | None = None,
     equipment_type: str | None = None,
     valid_on: str | None = None,
-    limit: int = 200,
+    material: str | None = None,
+    offer_id: str | None = None,
+    limit: int | None = 200,
     *,
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
+    include_details: bool = True,
 ) -> list[dict[str, Any]]:
     rate_repository = (
         repository if repository is not None else get_rate_repository(settings)
@@ -564,6 +567,8 @@ def search_approved_offers(
     for offer in offers:
         card = cards_by_id.get(offer.rate_card_id)
         if not card:
+            continue
+        if offer_id and offer.id != offer_id:
             continue
         if provider_name and not contains_text(card.provider_name, provider_name):
             continue
@@ -596,6 +601,7 @@ def search_approved_offers(
             base_amount=offer.base_amount,
             base_label=base_charge_label(offer),
             total_charge_codes=total_charge_codes,
+            include_lines=include_details,
         )
         additive_charges = [
             charge
@@ -621,47 +627,68 @@ def search_approved_offers(
             source_payload.get("file_name"),
             offer.raw_sheet_name,
         )
-        results.append(
-            {
-                "offer_id": offer.id,
-                "rate_card_id": offer.rate_card_id,
-                "provider_name": card.provider_name,
-                "carrier_name": card.carrier_name,
-                "document_type": card.document_type,
-                "commodity": offer_commodity,
-                "origin": offer.origin,
-                "place_of_receipt": offer.place_of_receipt,
-                "pol": offer.pol,
-                "pod": offer.pod,
-                "final_destination": offer.final_destination,
-                "equipment_type": offer.equipment_type,
-                "service_mode": offer.service_mode,
-                "transit_time_days": offer.transit_time_days,
-                "base_amount": offer.base_amount,
-                "base_currency": offer.base_currency or card.currency_default,
-                "all_in_amount": all_in_amount,
-                "all_in_usd": charge_analysis["total_usd"],
-                "all_in_flag": offer.all_in_flag,
-                "charge_total": charge_total if offer_charges else None,
-                "valid_from": serialize_date(offer.valid_from or card.valid_from),
-                "valid_to": serialize_date(offer.valid_to or card.valid_to),
-                "raw_sheet_name": offer.raw_sheet_name,
-                "source_file_name": source_payload.get("file_name"),
-                "carrier_key": source_payload.get("operator_carrier_key"),
-                "carrier_label": source_payload.get("operator_carrier_label"),
-                "contract_tag": source_payload.get("contract_tag"),
-                "materials": materials,
-                "offer_reference": offer.offer_reference,
-                "raw_row_reference": offer.raw_row_reference,
-                "routing_note": offer.routing_note,
-                "charge_analysis": charge_analysis,
-                "notes_summary": note_bucket[0].note_text
-                if note_bucket
-                else card.notes_summary,
-                "charges": [charge.model_dump(mode="json") for charge in offer_charges],
-                "notes": [note.model_dump(mode="json") for note in note_bucket[:10]],
-            }
-        )
+        if material and material.lower() not in {"all", "all materials"}:
+            if not any(item.lower() == material.lower() for item in materials):
+                continue
+        result = {
+            "offer_id": offer.id,
+            "rate_card_id": offer.rate_card_id,
+            "provider_name": card.provider_name,
+            "carrier_name": card.carrier_name,
+            "document_type": card.document_type,
+            "commodity": offer_commodity,
+            "origin": offer.origin,
+            "place_of_receipt": offer.place_of_receipt,
+            "pol": offer.pol,
+            "pod": offer.pod,
+            "final_destination": offer.final_destination,
+            "equipment_type": offer.equipment_type,
+            "service_mode": offer.service_mode,
+            "transit_time_days": offer.transit_time_days,
+            "base_amount": offer.base_amount,
+            "base_currency": offer.base_currency or card.currency_default,
+            "all_in_amount": all_in_amount,
+            "all_in_usd": charge_analysis["total_usd"],
+            "all_in_flag": offer.all_in_flag,
+            "charge_total": charge_total if offer_charges else None,
+            "origin_usd": group_subtotal(charge_analysis, "origin"),
+            "freight_usd": group_subtotal(charge_analysis, "freight"),
+            "destination_usd": group_subtotal(charge_analysis, "destination"),
+            "unmatched_usd": charge_analysis["unmatched_subtotal_usd"],
+            "charge_count": sum(
+                group["line_count"] for group in charge_analysis["groups"]
+            ) + charge_analysis["unmatched_charge_count"],
+            "zero_charge_count": sum(
+                group["zero_line_count"] for group in charge_analysis["groups"]
+            ),
+            "valid_from": serialize_date(offer.valid_from or card.valid_from),
+            "valid_to": serialize_date(offer.valid_to or card.valid_to),
+            "raw_sheet_name": offer.raw_sheet_name,
+            "source_file_name": source_payload.get("file_name"),
+            "carrier_key": source_payload.get("operator_carrier_key"),
+            "carrier_label": source_payload.get("operator_carrier_label"),
+            "contract_tag": source_payload.get("contract_tag"),
+            "materials": materials,
+            "offer_reference": offer.offer_reference,
+            "raw_row_reference": offer.raw_row_reference,
+            "routing_note": offer.routing_note,
+        }
+        if include_details:
+            result.update(
+                {
+                    "charge_analysis": charge_analysis,
+                    "notes_summary": note_bucket[0].note_text
+                    if note_bucket
+                    else card.notes_summary,
+                    "charges": [
+                        charge.model_dump(mode="json") for charge in offer_charges
+                    ],
+                    "notes": [
+                        note.model_dump(mode="json") for note in note_bucket[:10]
+                    ],
+                }
+            )
+        results.append(result)
     results.sort(
         key=lambda item: (
             item["all_in_usd"] is None,
@@ -669,7 +696,174 @@ def search_approved_offers(
             item["carrier_name"] or "",
         )
     )
-    return results[:limit]
+    return results if limit is None else results[:limit]
+
+
+def search_rate_summaries(
+    settings: Settings,
+    *,
+    provider_name: str | None = None,
+    carrier_name: str | None = None,
+    collection: str | None = None,
+    pol: str | None = None,
+    pod: str | None = None,
+    equipment_type: str | None = None,
+    material: str | None = None,
+    valid_on: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
+) -> dict[str, Any]:
+    common = {
+        "provider_name": provider_name,
+        "carrier_name": carrier_name,
+        "pol": pol,
+        "pod": pod,
+        "equipment_type": equipment_type,
+        "material": material,
+        "valid_on": valid_on,
+        "limit": None,
+        "repository": repository,
+        "organization_id": organization_id,
+        "include_details": False,
+    }
+    if collection:
+        base_rates = [
+            rate
+            for rate in search_approved_offers(settings, **common)
+            if not is_haulage_rate(rate) and not is_spot_rate_result(rate)
+        ]
+        collection_rates = [
+            rate
+            for rate in search_approved_offers(
+                settings,
+                collection=collection,
+                **common,
+            )
+            if not is_haulage_rate(rate) and not is_spot_rate_result(rate)
+        ]
+        by_id = {
+            rate["offer_id"]: rate
+            for rate in base_rates
+            if not is_door_rate_result(rate)
+        }
+        by_id.update({rate["offer_id"]: rate for rate in collection_rates})
+        results = list(by_id.values())
+        results.sort(key=summary_sort_key)
+    else:
+        results = [
+            rate
+            for rate in search_approved_offers(settings, **common)
+            if not is_haulage_rate(rate) and not is_spot_rate_result(rate)
+        ]
+
+    total = len(results)
+    page_limit = min(max(limit, 1), 50)
+    page_offset = max(offset, 0)
+    page = results[page_offset : page_offset + page_limit]
+    return {
+        "rates": [compact_rate_summary(rate) for rate in page],
+        "pagination": {
+            "limit": page_limit,
+            "offset": page_offset,
+            "total": total,
+            "has_more": page_offset + page_limit < total,
+        },
+    }
+
+
+def get_rate_offer_detail(
+    settings: Settings,
+    offer_id: str,
+    *,
+    repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
+) -> dict[str, Any] | None:
+    matches = search_approved_offers(
+        settings,
+        offer_id=offer_id,
+        limit=1,
+        repository=repository,
+        organization_id=organization_id,
+    )
+    return matches[0] if matches else None
+
+
+def compact_rate_summary(rate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: rate.get(key)
+        for key in (
+            "offer_id",
+            "rate_card_id",
+            "provider_name",
+            "carrier_name",
+            "document_type",
+            "commodity",
+            "origin",
+            "place_of_receipt",
+            "pol",
+            "pod",
+            "final_destination",
+            "equipment_type",
+            "service_mode",
+            "transit_time_days",
+            "base_amount",
+            "base_currency",
+            "all_in_amount",
+            "all_in_usd",
+            "all_in_flag",
+            "charge_total",
+            "origin_usd",
+            "freight_usd",
+            "destination_usd",
+            "unmatched_usd",
+            "charge_count",
+            "zero_charge_count",
+            "valid_from",
+            "valid_to",
+            "raw_sheet_name",
+            "source_file_name",
+            "carrier_key",
+            "carrier_label",
+            "contract_tag",
+            "materials",
+            "offer_reference",
+            "raw_row_reference",
+            "routing_note",
+        )
+    }
+
+
+def summary_sort_key(rate: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        rate.get("all_in_usd") is None,
+        rate.get("all_in_usd")
+        if rate.get("all_in_usd") is not None
+        else float("inf"),
+        rate.get("carrier_name") or "",
+    )
+
+
+def is_door_rate_result(rate: dict[str, Any]) -> bool:
+    text = " ".join(
+        str(rate.get(key) or "")
+        for key in ("contract_tag", "carrier_key", "carrier_label", "service_mode")
+    ).lower()
+    normalized_mode = (rate.get("service_mode") or "").strip().lower().replace("-", "/")
+    return (
+        "door" in text
+        or normalized_mode in {"sd / cy", "sd/cy"}
+        or normalized_mode.startswith("sd ")
+    )
+
+
+def is_spot_rate_result(rate: dict[str, Any]) -> bool:
+    text = " ".join(
+        str(rate.get(key) or "")
+        for key in ("contract_tag", "carrier_label", "offer_reference", "source_file_name")
+    ).lower()
+    return "spot" in text
 
 
 def get_rate_desk_data(
@@ -754,6 +948,109 @@ def get_rate_desk_data(
     }
 
 
+def get_rate_desk_metadata(
+    settings: Settings,
+    *,
+    repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
+) -> dict[str, Any]:
+    rate_repository = (
+        repository if repository is not None else get_rate_repository(settings)
+    )
+    repository_org_id = resolve_repository_organization_id(settings, organization_id)
+    library = rate_repository.load_approved_rate_library(
+        organization_id=repository_org_id,
+    )
+    cards_by_id = {card.id: card for card in library.cards}
+    quote_rates: list[dict[str, Any]] = []
+    haulage_rates: list[dict[str, Any]] = []
+    source_by_import = library.source_by_import
+    for offer in library.offers:
+        card = cards_by_id.get(offer.rate_card_id)
+        if not card:
+            continue
+        source_payload = source_by_import.get(card.rate_import_id, {})
+        rate = {
+            "document_type": card.document_type,
+            "provider_name": card.provider_name,
+            "carrier_name": card.carrier_name,
+            "place_of_receipt": offer.place_of_receipt,
+            "origin": offer.origin,
+            "pol": offer.pol,
+            "pod": offer.pod,
+            "final_destination": offer.final_destination,
+            "equipment_type": offer.equipment_type,
+            "base_amount": offer.base_amount,
+            "base_currency": offer.base_currency or card.currency_default,
+            "carrier_key": source_payload.get("operator_carrier_key"),
+            "carrier_label": source_payload.get("operator_carrier_label"),
+            "contract_tag": source_payload.get("contract_tag"),
+            "source_file_name": source_payload.get("file_name"),
+            "offer_reference": offer.offer_reference,
+            "materials": infer_materials(
+                offer.commodity or card.commodity,
+                source_payload.get("operator_carrier_key"),
+                source_payload.get("file_name"),
+                offer.raw_sheet_name,
+            ),
+        }
+        if is_spot_rate_result(rate):
+            continue
+        (haulage_rates if is_haulage_rate(rate) else quote_rates).append(rate)
+
+    origin_map: dict[str, str] = {}
+    destination_map: dict[str, str] = {}
+    collection_map: dict[str, str] = {}
+    for rate in quote_rates:
+        value = rate.get("pol")
+        if value:
+            origin_map.setdefault(normalize_location_key(value), value)
+        value = first_present(rate.get("final_destination"), rate.get("pod"))
+        if value:
+            destination_map.setdefault(normalize_location_key(value), value)
+        value = first_present(rate.get("place_of_receipt"), rate.get("origin"))
+        if value:
+            collection_map.setdefault(normalize_location_key(value), value)
+
+    tariffs, pickups, haulage_currency = build_haulage_lookup(haulage_rates)
+    approved_at = [
+        serialize_date(item.approved_at)
+        for item in rate_repository.list_import_records(
+            organization_id=repository_org_id
+        )
+        if item.approved_at
+    ]
+    last_refreshed = max(approved_at, key=parse_datetime_sort_key) if approved_at else None
+    return {
+        "last_refreshed": last_refreshed,
+        "haulage_tariffs": tariffs,
+        "haulage_currency": haulage_currency,
+        "filters": {
+            "origins": sorted(origin_map.values()),
+            "destinations": sorted(destination_map.values()),
+            "collection_places": sorted(collection_map.values()),
+            "equipment_types": sorted(
+                {rate["equipment_type"] for rate in quote_rates if rate.get("equipment_type")}
+            ),
+            "carriers": sorted(
+                {
+                    first_present(rate.get("carrier_name"), rate.get("provider_name"))
+                    for rate in quote_rates
+                    if first_present(rate.get("carrier_name"), rate.get("provider_name"))
+                }
+            ),
+            "materials": sorted(
+                {
+                    material
+                    for rate in quote_rates
+                    for material in rate.get("materials", [])
+                }
+            ),
+            "door_pickups": pickups,
+        },
+    }
+
+
 def analyze_charge_collection(
     charges: list[RateChargeLine],
     *,
@@ -761,30 +1058,39 @@ def analyze_charge_collection(
     base_amount: float | None = None,
     base_label: str = "Basic Ocean Freight",
     total_charge_codes: set[str] | None = None,
+    include_lines: bool = True,
 ) -> dict[str, Any]:
     grouped = {
         "origin": {
             "key": "origin",
             "label": "Origin charges",
             "lines": [],
+            "line_count": 0,
+            "zero_line_count": 0,
             "subtotal_usd": 0.0,
         },
         "freight": {
             "key": "freight",
             "label": "Freight charges",
             "lines": [],
+            "line_count": 0,
+            "zero_line_count": 0,
             "subtotal_usd": 0.0,
         },
         "destination": {
             "key": "destination",
             "label": "Destination charges",
             "lines": [],
+            "line_count": 0,
+            "zero_line_count": 0,
             "subtotal_usd": 0.0,
         },
         "unmatched": {
             "key": "unmatched",
             "label": "Unmatched charges",
             "lines": [],
+            "line_count": 0,
+            "zero_line_count": 0,
             "subtotal_usd": 0.0,
         },
     }
@@ -811,7 +1117,11 @@ def analyze_charge_collection(
                 "zero_rated": (charge.amount or 0) == 0,
                 "counts_toward_total": charge_counts_toward_total(charge, total_charge_codes),
             }
-            grouped[bucket]["lines"].append(line)
+            grouped[bucket]["line_count"] += 1
+            if line["zero_rated"]:
+                grouped[bucket]["zero_line_count"] += 1
+            if include_lines:
+                grouped[bucket]["lines"].append(line)
             if line["counts_toward_total"]:
                 grouped[bucket]["subtotal_usd"] += usd_unit_amount
             if bucket == "unmatched":
@@ -820,21 +1130,24 @@ def analyze_charge_collection(
                 matched_count += 1
     if base_amount is not None and not has_base_line:
         usd_unit_amount = convert_to_usd(base_amount, base_currency)
-        grouped["freight"]["lines"].append(
-            {
-                "name": base_label,
-                "basis": "Container",
-                "quantity_rule": "per_container",
-                "currency": (base_currency or "USD").upper(),
-                "unit_amount": base_amount,
-                "usd_unit_amount": usd_unit_amount,
-                "charge_type": "freight",
-                "bucket": "freight",
-                "matched_by": "synthetic_base",
-                "zero_rated": (base_amount or 0) == 0,
-                "counts_toward_total": True,
-            }
-        )
+        synthetic_line = {
+            "name": base_label,
+            "basis": "Container",
+            "quantity_rule": "per_container",
+            "currency": (base_currency or "USD").upper(),
+            "unit_amount": base_amount,
+            "usd_unit_amount": usd_unit_amount,
+            "charge_type": "freight",
+            "bucket": "freight",
+            "matched_by": "synthetic_base",
+            "zero_rated": (base_amount or 0) == 0,
+            "counts_toward_total": True,
+        }
+        grouped["freight"]["line_count"] += 1
+        if synthetic_line["zero_rated"]:
+            grouped["freight"]["zero_line_count"] += 1
+        if include_lines:
+            grouped["freight"]["lines"].append(synthetic_line)
         grouped["freight"]["subtotal_usd"] += usd_unit_amount
         matched_count += 1
 
@@ -848,10 +1161,8 @@ def analyze_charge_collection(
                 "key": key,
                 "label": group["label"],
                 "lines": group["lines"],
-                "line_count": len(group["lines"]),
-                "zero_line_count": sum(
-                    1 for line in group["lines"] if line["zero_rated"]
-                ),
+                "line_count": group["line_count"],
+                "zero_line_count": group["zero_line_count"],
                 "subtotal_usd": subtotal,
             }
         )
@@ -881,6 +1192,17 @@ def summarize_charge_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
             for group in analysis.get("groups", [])
         ],
     }
+
+
+def group_subtotal(analysis: dict[str, Any], key: str) -> float:
+    return next(
+        (
+            float(group.get("subtotal_usd") or 0)
+            for group in analysis.get("groups", [])
+            if group.get("key") == key
+        ),
+        0.0,
+    )
 
 
 def offer_total_charge_codes(offer: RateOffer) -> set[str] | None:

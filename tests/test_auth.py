@@ -227,6 +227,9 @@ def test_public_endpoints_do_not_require_auth(monkeypatch):
         ("post", "/api/imports/missing/reject", {"json": {"reason": "test"}}),
         ("delete", "/api/imports/missing", {}),
         ("get", "/api/search", {}),
+        ("get", "/api/rate-desk/meta", {}),
+        ("get", "/api/rate-desk/search", {}),
+        ("get", "/api/rate-desk/offers/missing", {}),
         ("get", "/api/rate-desk", {}),
     ],
 )
@@ -309,6 +312,8 @@ def test_all_membership_roles_can_read(role, token_tools, monkeypatch, tmp_path)
 
     assert client.get("/api/imports", headers=bearer(make_token())).status_code == 200
     assert client.get("/api/search", headers=bearer(make_token())).status_code == 200
+    assert client.get("/api/rate-desk/meta", headers=bearer(make_token())).status_code == 200
+    assert client.get("/api/rate-desk/search", headers=bearer(make_token())).status_code == 200
     assert client.get("/api/rate-desk", headers=bearer(make_token())).status_code == 200
 
 
@@ -390,9 +395,11 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert 'carrier_label: "Hapag-Lloyd · India Door-to-quay"' in app_js
     assert 'carrier_label: "MSC · Quay-to-quay"' not in app_js
     assert 'carrier_label: "Hapag-Lloyd · Quay-to-quay"' not in app_js
-    assert 'doorParams.set("collection", collection)' in rate_desk_js
-    assert "const currentRates = rates.filter((rate) => !isExpiredRate(rate));" in rate_desk_js
-    assert "currentNonDoorRates[0]" in rate_desk_js
+    assert '"/api/rate-desk/meta"' in rate_desk_js
+    assert "/api/rate-desk/search?" in rate_desk_js
+    assert "/api/rate-desk/offers/${encodeURIComponent(offerId)}" in rate_desk_js
+    assert "deskState.totalMatches" in rate_desk_js
+    assert "deskState.pageSize" in rate_desk_js
     assert ": [...portRates, ...doorRates]" in rate_desk_js
 
 

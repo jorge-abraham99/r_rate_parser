@@ -348,6 +348,65 @@ def test_maersk_rate_desk_exposes_charge_analysis(tmp_path: Path, monkeypatch):
     assert maersk_rate["all_in_usd"] == analysis["total_usd"]
 
 
+def test_rate_desk_summary_paginates_and_loads_offer_detail_on_demand(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    seed_templates(tmp_path)
+    source_bytes = Path("rate_sheet_files/MSC - FAR EAST RATES JAN.xlsx").read_bytes()
+
+    response = api_client.post(
+        "/api/imports",
+        data={"uploaded_by": "jorge"},
+        files={
+            "file": (
+                "MSC - FAR EAST RATES JAN.xlsx",
+                source_bytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert response.status_code == 200, response.text
+    import_id = response.json()["import_id"]
+    approve_response = api_client.post(
+        f"/api/imports/{import_id}/approve",
+        json={
+            "approved_by": "jorge",
+            "carrier_name": "MSC",
+            "carrier_key": "msc-inline",
+            "carrier_label": "MSC · Door-to-quay",
+        },
+    )
+    assert approve_response.status_code == 200, approve_response.text
+
+    metadata_response = api_client.get("/api/rate-desk/meta")
+    assert metadata_response.status_code == 200
+    metadata = metadata_response.json()
+    assert "rates" not in metadata
+    assert metadata["filters"]["destinations"]
+
+    page_response = api_client.get(
+        "/api/rate-desk/search",
+        params={"limit": 1, "offset": 0},
+    )
+    assert page_response.status_code == 200
+    page = page_response.json()
+    assert len(page["rates"]) == 1
+    assert page["pagination"]["total"] > 1
+    summary = page["rates"][0]
+    assert "charges" not in summary
+    assert "charge_analysis" not in summary
+    assert "notes" not in summary
+    assert summary["all_in_usd"] is not None
+
+    detail_response = api_client.get(
+        f"/api/rate-desk/offers/{summary['offer_id']}"
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["offer_id"] == summary["offer_id"]
+    assert detail["charges"]
+    assert detail["charge_analysis"]["groups"]
+
+
 def test_maersk_afls_site_to_site_import_creates_offers_and_charge_lines(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
     raw_dir = tmp_path / "incoming"
