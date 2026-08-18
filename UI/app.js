@@ -1,11 +1,11 @@
 const IMPORT_DEMO_MODE = Boolean(window.RATE_DESK_CONFIG?.demoMode);
 const SOURCE_DEFINITIONS = [
-  { key: "msc-inline", name: "MSC Door-to-quay", cadence: "monthly" },
-  { key: "hapag-door", name: "Hapag-Lloyd Door-to-quay", cadence: "monthly" },
-  { key: "cosco-door", name: "COSCO India/Far East Door-to-quay", cadence: "monthly" },
-  { key: "maersk-contract", name: "Maersk Quay-to-quay", cadence: "monthly" },
-  { key: "maersk-door", name: "Maersk Door-to-quay", cadence: "monthly" },
-  { key: "haulage-q2", name: "UK Inland Haulage", cadence: "quarterly" },
+  { key: "maersk-contract", provider: "Maersk", service: "Quay-to-quay", cadence: "monthly" },
+  { key: "maersk-door", provider: "Maersk", service: "Door-to-quay", cadence: "monthly" },
+  { key: "msc-inline", provider: "MSC", service: "Door-to-quay", cadence: "monthly" },
+  { key: "hapag-door", provider: "Hapag-Lloyd", service: "Door-to-quay", cadence: "monthly" },
+  { key: "cosco-door", provider: "COSCO", service: "India/Far East Door-to-quay", cadence: "monthly" },
+  { key: "haulage-q2", provider: "UK Inland Haulage", service: "Export · all UK POLs", cadence: "quarterly" },
 ];
 
 const importState = {
@@ -161,10 +161,11 @@ function adaptConnectedSources(imports) {
     ...known,
     ...customKeys.map((key) => {
       const matching = imports.filter((item) => inferSourceKey(item) === key);
-      const name = matching.find((item) => item.carrier_label || item.carrier_name)?.carrier_label
-        || matching.find((item) => item.carrier_name)?.carrier_name
-        || "Another source";
-      return buildConnectedSource({ key, name, cadence: "—" }, imports);
+      const provider = matching.find((item) => item.carrier_name)?.carrier_name
+        || matching.find((item) => item.carrier_label)?.carrier_label
+        || "Another provider";
+      const service = inferServiceLabel(matching[0]);
+      return buildConnectedSource({ key, provider, service, cadence: "—" }, imports);
     }),
   ];
 }
@@ -197,9 +198,13 @@ function connectedFileView(item, archived) {
 
 function renderSources() {
   const rows = [];
+  let lastProvider = "";
   importState.sources.forEach((source) => {
-    rows.push(renderSourceRow(source, source.current, false));
+    const provider = source.provider || source.name || "Another provider";
+    const startsProviderGroup = normalized(provider) !== normalized(lastProvider);
+    rows.push(renderSourceRow(source, source.current, false, startsProviderGroup));
     (source.archived || []).forEach((file) => rows.push(renderSourceRow(source, file, true)));
+    lastProvider = provider;
   });
   elements.sourceRows.innerHTML = rows.join("") || '<div class="sources-empty">No sources configured.</div>';
   elements.coverageRisk.hidden = !importState.sources.some((source) => source.current?.status === "overdue");
@@ -225,15 +230,18 @@ function renderSources() {
   });
 }
 
-function renderSourceRow(source, file, archived) {
+function renderSourceRow(source, file, archived, startsProviderGroup = false) {
   const rowId = file?.id || `${source.key}-expected`;
   const status = archived ? "archived" : file?.status || "expected";
   const validity = file ? formatValidity(file.validFrom, file.validTo, status === "overdue") : "—";
   const menuOpen = importState.menuId === rowId;
+  const provider = source.provider || source.name || "Another provider";
+  const service = source.service || "—";
   const hasActions = file && (!archived || importState.canMutate);
   return `
-    <div class="sources-grid source-row${archived ? " archived-row" : ""}">
-      <span class="source-name">${archived ? "↳ previous" : escapeHtml(source.name)}</span>
+    <div class="sources-grid source-row${archived ? " archived-row" : ""}${startsProviderGroup ? " provider-group" : " service-group"}">
+      <span class="provider-name" title="${escapeAttr(provider)}">${archived || !startsProviderGroup ? "" : escapeHtml(provider)}</span>
+      <span class="service-name" title="${escapeAttr(archived ? "Previous sheet" : service)}">${archived ? "↳ previous" : escapeHtml(service)}</span>
       <span class="source-file mono">${file ? escapeHtml(file.file) : "—"}</span>
       <span>${file ? escapeHtml(file.uploaded) : "—"}</span>
       <span>${escapeHtml(source.cadence || "—")}</span>
@@ -573,7 +581,8 @@ function publishDemo(preview, sourceKey, summary) {
   if (!source) {
     source = {
       key: sourceKey,
-      name: preview.newSourceName.trim(),
+      provider: preview.newSourceName.trim(),
+      service: "—",
       cadence: "ad hoc",
       current: null,
       archived: [],
@@ -596,8 +605,8 @@ function publishDemo(preview, sourceKey, summary) {
   closePreviewImmediately();
   renderSources();
   showToast(preview.source === "__new"
-    ? `${source.name} saved — charges need mapping before rates go live`
-    : `${source.name} published — ${summary.lanes} lanes live in Quote`);
+    ? `${source.provider} saved — charges need mapping before rates go live`
+    : `${source.provider} ${source.service} published — ${summary.lanes} lanes live in Quote`);
 }
 
 function sourcePayload(preview, sourceKey) {
@@ -734,11 +743,18 @@ function inferSourceKey(item) {
   }
   const text = normalized(`${item.carrier_label || ""} ${item.carrier_name || ""} ${item.file_name || ""} ${item.contract_tag || ""}`);
   if (text.includes("hapag")) return "hapag-door";
-  if (text.includes("door")) return "maersk-door";
   if (text.includes("haulage")) return "haulage-q2";
   if (text.includes("msc")) return "msc-inline";
-  if (text.includes("maersk") || text.includes("key-to-key")) return "maersk-contract";
+  if (text.includes("maersk") && text.includes("door")) return "maersk-door";
+  if (text.includes("maersk")) return "maersk-contract";
   return item.carrier_name ? `custom-${slugify(item.carrier_name)}` : "";
+}
+
+function inferServiceLabel(item) {
+  const text = normalized(`${item?.carrier_label || ""} ${item?.service_mode || ""} ${item?.contract_tag || ""}`);
+  if (text.includes("door") || text.includes("sd / cy") || text.includes("sd/cy")) return "Door-to-quay";
+  if (text.includes("haulage")) return "Export · all UK POLs";
+  return "Quay-to-quay";
 }
 
 function suggestedSource(detail) {

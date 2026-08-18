@@ -278,7 +278,7 @@ Standalone haulage is identified only by `document_type=inland_export`, `carrier
 
 The Import screen loads up to 500 imports and currently also requests up to 5,000 Rate Desk rows to build source comparisons. It recognizes dedicated source keys for MSC door-to-quay, Hapag-Lloyd door-to-quay, COSCO India/Far East door-to-quay, Maersk contract/door products, and standalone UK haulage.
 
-The Quote screen initially requests `/api/rate-desk?limit=5000`, then uses `/api/search` for filtered server searches. It supports collection, POL, destination, equipment, material, routing mode, quantity, expiry visibility, and sorting. Merchant-haulage options combine a standalone inland tariff with compatible port-to-port carrier rates in the browser.
+The Quote screen initially requests `/api/rate-desk?limit=5000`, then uses `/api/search` for filtered server searches. It supports collection, POL, destination, equipment, material, quantity, expiry visibility, and sorting. Results show separate carrier and service columns. When a collection is selected, the browser compares published door-to-quay rates with compatible quay-to-quay rates plus the standalone UK inland tariff. Door-to-quay rates are never combined with that separate tariff.
 
 The current large-payload problem is architectural: Rate Desk rows include raw charges, notes, and a second expanded charge-analysis representation. With thousands of offers this creates multi-megabyte responses and expensive DOM rendering. GitHub issue `#13` tracks pagination, slim list rows, lazy detail loading, separate filter metadata, cancellation, and eventually database-backed queries.
 

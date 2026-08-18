@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/ui/styles.css?v=16">
+  <link rel="stylesheet" href="/ui/styles.css?v=17">
 </head>
 <body>
   <div class="app-shell">
@@ -40,7 +40,8 @@
 
       <section class="sources-card" aria-label="Rate sources">
         <div class="sources-grid sources-grid-header" aria-hidden="true">
-          <span>Source</span>
+          <span>Provider</span>
+          <span>Service</span>
           <span>Current file</span>
           <span>Uploaded</span>
           <span>Cadence</span>
@@ -79,25 +80,25 @@
           <strong id="previewFile" class="mono"></strong>
         </div>
         <div id="sourceChoiceRow" class="fact-row choice-fact">
-          <label for="sourceSelect">Source</label>
+          <label for="sourceSelect">Provider</label>
           <div class="source-choice">
             <select id="sourceSelect">
               <option value="">Select…</option>
-              <option value="msc">MSC door-to-quay</option>
-              <option value="hapag">Hapag-Lloyd door-to-quay</option>
-              <option value="cosco">COSCO India/Far East door-to-quay</option>
+              <option value="msc">MSC</option>
+              <option value="hapag">Hapag-Lloyd</option>
+              <option value="cosco">COSCO</option>
               <option value="maersk">Maersk</option>
               <option value="haulage">UK Inland Haulage</option>
-              <option value="__new">Another source…</option>
+              <option value="__new">Another provider…</option>
             </select>
-            <input id="newSourceName" type="text" placeholder="Source name" hidden>
+            <input id="newSourceName" type="text" placeholder="Provider name" hidden>
           </div>
         </div>
         <div id="contractTypeRow" class="fact-row choice-fact" hidden>
-          <label for="contractTypeSelect">Contract type</label>
+          <label for="contractTypeSelect">Service</label>
           <select id="contractTypeSelect">
             <option value="">Select…</option>
-            <option value="k2k">Quay-to-quay (port-to-port)</option>
+            <option value="k2k">Quay-to-quay</option>
             <option value="d2k">Door-to-quay</option>
           </select>
         </div>
@@ -151,7 +152,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2/dist/umd/supabase.min.js" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
   <script src="/ui/auth.js?v=1"></script>
   <script src="/ui/config.js?v=4"></script>
-  <script src="/ui/demo-data.js?v=1"></script>
-  <script src="/ui/app.js?v=6"></script>
+  <script src="/ui/demo-data.js?v=2"></script>
+  <script src="/ui/app.js?v=7"></script>
 </body>
 </html>

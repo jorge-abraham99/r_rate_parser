@@ -360,12 +360,16 @@ def test_same_origin_app_has_no_wildcard_cors():
 
 def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     login_html = Path("UI/login.html").read_text(encoding="utf-8")
+    import_html = Path("UI/import.html").read_text(encoding="utf-8")
+    quote_html = Path("UI/index.html").read_text(encoding="utf-8")
     auth_js = Path("UI/auth.js").read_text(encoding="utf-8")
     app_js = Path("UI/app.js").read_text(encoding="utf-8")
     rate_desk_js = Path("UI/rate-desk.js").read_text(encoding="utf-8")
 
     assert "@supabase/supabase-js@2.112.2" in login_html
     assert "Create Account" not in login_html
+    assert "/ui/auth.js" in import_html
+    assert "/ui/auth.js" in quote_html
     assert "signInWithPassword" in auth_js
     assert "getSession" in auth_js
     assert "signOut" in auth_js
@@ -374,6 +378,11 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert "fetch(" not in rate_desk_js
     assert "RATE_DESK_AUTH.apiFetch" in app_js
     assert "RATE_DESK_AUTH.apiFetch" in rate_desk_js
+    assert 'carrier_label: "MSC · Door-to-quay"' in app_js
+    assert 'carrier_label: "Hapag-Lloyd · Door-to-quay"' in app_js
+    assert 'carrier_label: "MSC · Quay-to-quay"' not in app_js
+    assert 'carrier_label: "Hapag-Lloyd · Quay-to-quay"' not in app_js
+    assert 'doorParams.set("collection", collection)' in rate_desk_js
 
 
 def test_invitation_password_page_enforces_safe_acceptance_flow():

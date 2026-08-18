@@ -711,6 +711,9 @@ def test_api_import_approve_and_search_flow(tmp_path: Path, monkeypatch):
     assert "Origin port (POL)" in ui_response.text
     assert "Material" in ui_response.text
     assert "Collection place" in ui_response.text
+    assert "Carrier" in ui_response.text
+    assert "Service" in ui_response.text
+    assert "Routing mode" not in ui_response.text
     assert "Query API" not in ui_response.text
     assert "Import Rate File" not in ui_response.text
 
@@ -719,7 +722,8 @@ def test_api_import_approve_and_search_flow(tmp_path: Path, monkeypatch):
     assert "Drop rate sheets here" in import_ui_response.text
     assert "Review parsed sheet" in import_ui_response.text
     assert "Current file" in import_ui_response.text
-    assert "Contract type" in import_ui_response.text
+    assert "Provider" in import_ui_response.text
+    assert "Service" in import_ui_response.text
     assert "Query API" not in import_ui_response.text
 
     removed_query_ui_response = api_client.get("/ui/query-api.html")

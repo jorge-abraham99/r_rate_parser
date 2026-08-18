@@ -128,7 +128,7 @@
     </div>
 
     <div style="display:flex;gap:16px;margin-top:10px;font-size:11px;color:#8798ac;flex-wrap:wrap">
-      <span>Figures = USD per 40′HC, all-in port-to-port as parsed from carrier sheets.</span>
+      <span>Figures = USD per 40′HC, all-in quay-to-quay as parsed from carrier sheets.</span>
       <span>Click a row for the surcharge breakdown.</span>
     </div>
   </div>
@@ -166,7 +166,7 @@ class Component extends DCLogic {
       carrier: 'Maersk', sheet: 'MAERSK Q-3, INDIA AND FAR-EAST.xlsx · QT-MAEU-50410626-9', kind: 'spot quote',
       origins: ['Felixstowe'], dest, allIn: 285,
       validity: 'to 31 Jul', vTone: 'ok', freetime: '—',
-      note: 'Transit ' + transit + 'd · CY/CY · FAK · confirm UK POL (quote issued ex-Rotterdam)',
+      note: 'Transit ' + transit + 'd · Quay to quay · FAK · confirm UK POL (quote issued ex-Rotterdam)',
       breakdown: [{ k: 'Basic ocean (fixed)', v: '98' }, { k: 'Emission surcharge', v: '152' }, { k: 'Docs origin (EUR 30)', v: '35' }],
       fineprint: 'Destination charges (INR): Container Protect 3,800 · docs 6,710 · THC 9,893–17,722 — for consignee account. Quote issued ex-Rotterdam; UK loading to be confirmed with Maersk.',
     });
