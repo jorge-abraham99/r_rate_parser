@@ -25,7 +25,11 @@ from rate_ingest.repositories import (
     RateRepository,
     get_rate_repository,
 )
-from rate_ingest.services import search_approved_offers
+from rate_ingest.services import (
+    invalidate_rate_desk_cache,
+    search_approved_offers,
+    search_rate_summaries,
+)
 from rate_ingest.utils import write_json
 
 
@@ -278,6 +282,64 @@ def test_search_service_uses_injected_repository(tmp_path: Path) -> None:
         organization_id=LOCAL_CSV_ORGANIZATION_ID,
     )
     assert [row["offer_id"] for row in rows] == [offer.id]
+
+
+def test_postgres_rate_desk_reuses_snapshot_until_invalidated(tmp_path: Path) -> None:
+    settings = replace(Settings.load(cwd=tmp_path), rate_storage_backend="postgres")
+    organization_id = "organization-service-test"
+    card = RateCard(
+        id="card_snapshot_test",
+        rate_import_id="import_snapshot_test",
+        provider_name="Test Provider",
+        carrier_name="Test Carrier",
+        document_type="ocean_export",
+        currency_default="USD",
+    )
+    offer = RateOffer(
+        id="offer_snapshot_test",
+        rate_card_id=card.id,
+        pol="Felixstowe",
+        pod="Singapore",
+        equipment_type="40HC",
+        base_amount=500,
+        base_currency="USD",
+    )
+    repository = Mock(spec=RateRepository)
+    repository.backend_name = "postgres"
+    repository.list_import_records.return_value = ()
+    repository.load_approved_rate_library.return_value = ApprovedRateLibrary(
+        cards=(card,),
+        offers=(offer,),
+        charges=(),
+        notes=(),
+        source_by_import={},
+    )
+
+    search_rate_summaries(
+        settings,
+        pod="Singapore",
+        repository=repository,
+        organization_id=organization_id,
+    )
+    search_rate_summaries(
+        settings,
+        pod="Singapore",
+        repository=repository,
+        organization_id=organization_id,
+    )
+
+    repository.load_approved_rate_library.assert_called_once_with(
+        organization_id=organization_id,
+    )
+
+    invalidate_rate_desk_cache(settings, organization_id)
+    search_rate_summaries(
+        settings,
+        pod="Singapore",
+        repository=repository,
+        organization_id=organization_id,
+    )
+    assert repository.load_approved_rate_library.call_count == 2
 
 
 def test_service_entry_points_do_not_bypass_rate_repository() -> None:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import shutil
+from threading import Lock
+from time import monotonic
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -62,6 +64,10 @@ FX_RATES = {
 }
 
 BILL_OF_LADING_BASES = {"bill of lading", "b/l", "bl", "booking"}
+
+_RATE_DESK_CACHE: dict[tuple[str, str, str], dict[str, Any]] = {}
+_RATE_DESK_CACHE_LOCK = Lock()
+_POSTGRES_RATE_DESK_CACHE_TTL_SECONDS = 30.0
 
 
 def resolve_repository_organization_id(
@@ -459,6 +465,7 @@ def approve_import_by_id(
         source_snapshot["contract_tag"] = contract_tag
         write_json(run_dir / "source_snapshot.json", source_snapshot)
     write_json(run_dir / "rate_import.json", rate_import.model_dump(mode="json"))
+    invalidate_rate_desk_cache(settings, repository_org_id)
     return get_import_detail(
         settings,
         import_id,
@@ -518,6 +525,7 @@ def delete_import_by_id(
         remove_import_record=True,
     )
     shutil.rmtree(run_dir)
+    invalidate_rate_desk_cache(settings, repository_org_id)
     return {"deleted": True, "import_id": import_id}
 
 
@@ -537,12 +545,13 @@ def search_approved_offers(
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
     include_details: bool = True,
+    rate_library: Any | None = None,
 ) -> list[dict[str, Any]]:
     rate_repository = (
         repository if repository is not None else get_rate_repository(settings)
     )
     repository_org_id = resolve_repository_organization_id(settings, organization_id)
-    library = rate_repository.load_approved_rate_library(
+    library = rate_library or rate_repository.load_approved_rate_library(
         organization_id=repository_org_id,
     )
     cards = library.cards
@@ -715,31 +724,40 @@ def search_rate_summaries(
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
 ) -> dict[str, Any]:
-    common = {
-        "provider_name": provider_name,
-        "carrier_name": carrier_name,
-        "pol": pol,
-        "pod": pod,
-        "equipment_type": equipment_type,
-        "material": material,
-        "valid_on": valid_on,
-        "limit": None,
-        "repository": repository,
-        "organization_id": organization_id,
-        "include_details": False,
-    }
+    snapshot = get_cached_rate_desk_snapshot(
+        settings,
+        repository=repository,
+        organization_id=organization_id,
+    )
+    all_rates = filter_rate_summaries(
+        snapshot["summaries"],
+        provider_name=provider_name,
+        carrier_name=carrier_name,
+        collection=None,
+        pol=pol,
+        pod=pod,
+        equipment_type=equipment_type,
+        material=material,
+        valid_on=valid_on,
+    )
     if collection:
         base_rates = [
             rate
-            for rate in search_approved_offers(settings, **common)
+            for rate in all_rates
             if not is_haulage_rate(rate) and not is_spot_rate_result(rate)
         ]
         collection_rates = [
             rate
-            for rate in search_approved_offers(
-                settings,
+            for rate in filter_rate_summaries(
+                snapshot["summaries"],
+                provider_name=provider_name,
+                carrier_name=carrier_name,
                 collection=collection,
-                **common,
+                pol=pol,
+                pod=pod,
+                equipment_type=equipment_type,
+                material=material,
+                valid_on=valid_on,
             )
             if not is_haulage_rate(rate) and not is_spot_rate_result(rate)
         ]
@@ -754,7 +772,7 @@ def search_rate_summaries(
     else:
         results = [
             rate
-            for rate in search_approved_offers(settings, **common)
+            for rate in all_rates
             if not is_haulage_rate(rate) and not is_spot_rate_result(rate)
         ]
 
@@ -780,12 +798,18 @@ def get_rate_offer_detail(
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
 ) -> dict[str, Any] | None:
+    snapshot = get_cached_rate_desk_snapshot(
+        settings,
+        repository=repository,
+        organization_id=organization_id,
+    )
     matches = search_approved_offers(
         settings,
         offer_id=offer_id,
         limit=1,
         repository=repository,
         organization_id=organization_id,
+        rate_library=snapshot.get("library"),
     )
     return matches[0] if matches else None
 
@@ -954,50 +978,173 @@ def get_rate_desk_metadata(
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
 ) -> dict[str, Any]:
+    snapshot = get_cached_rate_desk_snapshot(
+        settings,
+        repository=repository,
+        organization_id=organization_id,
+    )
+    return build_rate_desk_metadata(
+        snapshot["summaries"],
+        snapshot["last_refreshed"],
+    )
+
+
+def get_cached_rate_desk_snapshot(
+    settings: Settings,
+    *,
+    repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
+) -> dict[str, Any]:
     rate_repository = (
         repository if repository is not None else get_rate_repository(settings)
     )
     repository_org_id = resolve_repository_organization_id(settings, organization_id)
+    cache_key = (
+        str(settings.root_dir),
+        str(repository_org_id),
+        rate_repository.backend_name,
+    )
+    fingerprint: tuple[Any, ...] | None = None
+    if rate_repository.backend_name == "csv":
+        paths = {
+            "imports": settings.warehouse_dir / "rate_imports.csv",
+            "cards": settings.warehouse_dir / "approved_rate_cards.csv",
+            "offers": settings.warehouse_dir / "approved_rate_offers.csv",
+            "charges": settings.warehouse_dir / "approved_rate_charge_lines.csv",
+            "notes": settings.warehouse_dir / "approved_rate_notes.csv",
+            "canonical_rates": settings.warehouse_dir / "approved_rates.csv",
+        }
+        fingerprint = tuple(
+            (
+                key,
+                path.stat().st_mtime_ns if path.exists() else 0,
+                path.stat().st_size if path.exists() else 0,
+            )
+            for key, path in sorted(paths.items())
+        )
+    with _RATE_DESK_CACHE_LOCK:
+        cached = _RATE_DESK_CACHE.get(cache_key)
+        if cached:
+            if rate_repository.backend_name == "csv":
+                if cached["fingerprint"] == fingerprint:
+                    return cached["snapshot"]
+            elif (
+                monotonic() - cached["cached_at"]
+                < _POSTGRES_RATE_DESK_CACHE_TTL_SECONDS
+            ):
+                return cached["snapshot"]
+
     library = rate_repository.load_approved_rate_library(
         organization_id=repository_org_id,
     )
-    cards_by_id = {card.id: card for card in library.cards}
-    quote_rates: list[dict[str, Any]] = []
-    haulage_rates: list[dict[str, Any]] = []
-    source_by_import = library.source_by_import
-    for offer in library.offers:
-        card = cards_by_id.get(offer.rate_card_id)
-        if not card:
-            continue
-        source_payload = source_by_import.get(card.rate_import_id, {})
-        rate = {
-            "document_type": card.document_type,
-            "provider_name": card.provider_name,
-            "carrier_name": card.carrier_name,
-            "place_of_receipt": offer.place_of_receipt,
-            "origin": offer.origin,
-            "pol": offer.pol,
-            "pod": offer.pod,
-            "final_destination": offer.final_destination,
-            "equipment_type": offer.equipment_type,
-            "base_amount": offer.base_amount,
-            "base_currency": offer.base_currency or card.currency_default,
-            "carrier_key": source_payload.get("operator_carrier_key"),
-            "carrier_label": source_payload.get("operator_carrier_label"),
-            "contract_tag": source_payload.get("contract_tag"),
-            "source_file_name": source_payload.get("file_name"),
-            "offer_reference": offer.offer_reference,
-            "materials": infer_materials(
-                offer.commodity or card.commodity,
-                source_payload.get("operator_carrier_key"),
-                source_payload.get("file_name"),
-                offer.raw_sheet_name,
-            ),
+    snapshot = {
+        "summaries": search_approved_offers(
+            settings,
+            limit=None,
+            repository=rate_repository,
+            organization_id=repository_org_id,
+            include_details=False,
+            rate_library=library,
+        ),
+        "library": library,
+        "last_refreshed": latest_approved_timestamp(
+            rate_repository, repository_org_id
+        ),
+    }
+    with _RATE_DESK_CACHE_LOCK:
+        _RATE_DESK_CACHE[cache_key] = {
+            "fingerprint": fingerprint,
+            "cached_at": monotonic(),
+            "snapshot": snapshot,
         }
-        if is_spot_rate_result(rate):
-            continue
-        (haulage_rates if is_haulage_rate(rate) else quote_rates).append(rate)
+    return snapshot
 
+
+def invalidate_rate_desk_cache(
+    settings: Settings,
+    organization_id: OrganizationId,
+) -> None:
+    """Drop the in-process quote snapshot after approved data changes."""
+    cache_prefix = (str(settings.root_dir), str(organization_id))
+    with _RATE_DESK_CACHE_LOCK:
+        for key in tuple(_RATE_DESK_CACHE):
+            if key[:2] == cache_prefix:
+                _RATE_DESK_CACHE.pop(key, None)
+
+
+def latest_approved_timestamp(
+    repository: RateRepository,
+    organization_id: OrganizationId,
+) -> str | None:
+    approved_at = [
+        serialize_date(item.approved_at)
+        for item in repository.list_import_records(organization_id=organization_id)
+        if item.approved_at
+    ]
+    return max(approved_at, key=parse_datetime_sort_key) if approved_at else None
+
+
+def filter_rate_summaries(
+    rates: list[dict[str, Any]],
+    *,
+    provider_name: str | None = None,
+    carrier_name: str | None = None,
+    collection: str | None = None,
+    pol: str | None = None,
+    pod: str | None = None,
+    equipment_type: str | None = None,
+    material: str | None = None,
+    valid_on: str | None = None,
+) -> list[dict[str, Any]]:
+    valid_on_date = parse_iso_date(valid_on) if valid_on else None
+    material_key = material.lower() if material else None
+    results: list[dict[str, Any]] = []
+    for rate in rates:
+        if provider_name and not contains_text(rate.get("provider_name"), provider_name):
+            continue
+        if carrier_name and not contains_text(rate.get("carrier_name"), carrier_name):
+            continue
+        if collection and not contains_text(
+            first_present(rate.get("place_of_receipt"), rate.get("origin")),
+            collection,
+        ):
+            continue
+        if pol and not contains_text(rate.get("pol"), pol):
+            continue
+        if pod and not contains_text(
+            first_present(rate.get("pod"), rate.get("final_destination")),
+            pod,
+        ):
+            continue
+        if equipment_type and (rate.get("equipment_type") or "").upper() != equipment_type.upper():
+            continue
+        if material_key and material_key not in {item.lower() for item in rate.get("materials", [])}:
+            continue
+        if valid_on_date:
+            start = parse_iso_date(rate.get("valid_from")) if rate.get("valid_from") else None
+            end = parse_iso_date(rate.get("valid_to")) if rate.get("valid_to") else None
+            if start and start > valid_on_date:
+                continue
+            if end and end < valid_on_date:
+                continue
+        results.append(rate)
+    return results
+
+
+def build_rate_desk_metadata(
+    summaries: list[dict[str, Any]],
+    last_refreshed: str | None,
+) -> dict[str, Any]:
+    quote_rates = [
+        rate
+        for rate in summaries
+        if not is_haulage_rate(rate) and not is_spot_rate_result(rate)
+    ]
+    haulage_rates = [
+        rate
+        for rate in summaries
+        if is_haulage_rate(rate) and not is_spot_rate_result(rate)
+    ]
     origin_map: dict[str, str] = {}
     destination_map: dict[str, str] = {}
     collection_map: dict[str, str] = {}
@@ -1011,16 +1158,7 @@ def get_rate_desk_metadata(
         value = first_present(rate.get("place_of_receipt"), rate.get("origin"))
         if value:
             collection_map.setdefault(normalize_location_key(value), value)
-
     tariffs, pickups, haulage_currency = build_haulage_lookup(haulage_rates)
-    approved_at = [
-        serialize_date(item.approved_at)
-        for item in rate_repository.list_import_records(
-            organization_id=repository_org_id
-        )
-        if item.approved_at
-    ]
-    last_refreshed = max(approved_at, key=parse_datetime_sort_key) if approved_at else None
     return {
         "last_refreshed": last_refreshed,
         "haulage_tariffs": tariffs,
