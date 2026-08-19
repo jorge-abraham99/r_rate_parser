@@ -14,6 +14,8 @@ This is not a generic AI parser. The current system is deterministic:
 
 There is no AI API key in the current path. A file only parses if it matches a known template and parser family.
 
+Maersk and Hapag imports also pass through a strict canonical location catalogue. The Rate Desk searches and displays canonical collection/destination names while each offer retains the carrier's raw collection, origin, POD, and final-destination wording. Matching ignores case and harmless spacing only; unknown aliases are blocking validation errors.
+
 The repo now has two operator surfaces over the same parser logic:
 
 - CLI
@@ -122,6 +124,15 @@ python -m rate_ingest backfill-postgres <organization-uuid> --apply
 ```
 
 Run the optional backfill only with `SOURCE_STORAGE_BACKEND=filesystem`. The CLI does not have a signed-in user token for organization-scoped Storage uploads.
+
+After applying the canonical-location database migration, existing approved Postgres imports can be linked without re-uploading their files:
+
+```bash
+python -m rate_ingest backfill-locations --organization-id <organization-uuid>
+python -m rate_ingest backfill-locations --organization-id <organization-uuid> --apply
+```
+
+The first command is a dry run and the second refuses to write if any collection or destination is still unmapped.
 
 See [DEPLOY_RAILWAY.md](DEPLOY_RAILWAY.md) for the required Railway variables, invitation redirect, and smoke checklist.
 

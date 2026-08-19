@@ -192,3 +192,14 @@ class RateRepository(ABC):
         organization_id: OrganizationId,
     ) -> ApprovedRateLibrary:
         raise NotImplementedError
+
+    def persist_offer_locations(
+        self,
+        offers: list[RateOffer],
+        *,
+        organization_id: OrganizationId,
+    ) -> None:
+        """Persist canonical links for existing approved offers during backfill."""
+        raise NotImplementedError(
+            f"Location backfill is not implemented for {self.backend_name}"
+        )

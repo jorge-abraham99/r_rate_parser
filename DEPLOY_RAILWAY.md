@@ -145,6 +145,28 @@ The first command is read-only. The second copies every recoverable CSV import a
 
 The optional backfill requires `SOURCE_STORAGE_BACKEND=filesystem`. Do not combine it with the Stage 8 Storage setting because the CLI has no signed-in user token.
 
+### Canonical location catalogue rollout
+
+Apply the location migration before deploying code that writes canonical links:
+
+```bash
+supabase db push
+```
+
+After the new code is deployed, validate the existing approved imports without changing them:
+
+```bash
+python -m rate_ingest backfill-locations --organization-id <organization-uuid>
+```
+
+The check must report zero unresolved rows. Then persist the links:
+
+```bash
+python -m rate_ingest backfill-locations --organization-id <organization-uuid> --apply
+```
+
+This updates existing offers in place; carrier files do not need to be uploaded again. If an alias is missing, the apply command stops before writing and prints the source location and row that must be added to the developer-maintained catalogue.
+
 In Supabase Auth → URL Configuration, keep public sign-up disabled and use the password page as the Site URL. Dashboard-sent invitations do not supply a custom `redirectTo`, so they use the Site URL:
 
 ```text

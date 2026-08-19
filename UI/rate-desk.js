@@ -148,7 +148,7 @@ function populateConnectedFilters() {
   const doorCollections = uniqueLocations(
     rates
       .filter((rate) => isDoorRate(rate))
-      .map((rate) => firstPresent(rate.place_of_receipt, rate.origin))
+      .map(rateCollection)
       .filter(Boolean)
   );
 
@@ -569,7 +569,7 @@ function makeConnectedDoorRow(rate, quantity) {
     ...makeConnectedRow(rate, quantity),
     type: "CONTRACT",
     routeLane: formatRouteLane(
-      firstPresent(rate.place_of_receipt, rate.origin),
+      rateCollection(rate),
       rate.pol,
       rateDestination(rate),
     ),
@@ -958,12 +958,20 @@ function serviceLabel(rate) {
 
 function laneDetail(rate) {
   if (isDoorRate(rate)) {
-    const receipt = firstPresent(rate.place_of_receipt, rate.origin);
-    const delivery = firstPresent(rate.final_destination, rate.pod);
-    return [receipt, delivery].filter(Boolean).join(" → ") || formatRouting(rate);
+    const receipt = rateCollection(rate);
+    const delivery = rateDestination(rate);
+    const canonicalLane = [receipt, delivery].filter(Boolean).join(" → ");
+    const rawLane = [
+      firstPresent(rate.place_of_receipt, rate.origin),
+      firstPresent(rate.final_destination, rate.pod),
+    ].filter(Boolean).join(" → ");
+    if (canonicalLane && rawLane && !sameValue(canonicalLane, rawLane)) {
+      return `${canonicalLane} · Carrier wording: ${rawLane}`;
+    }
+    return canonicalLane || formatRouting(rate);
   }
   const origin = firstPresent(rate.pol, rate.place_of_receipt, rate.origin);
-  const destination = firstPresent(rate.final_destination, rate.pod);
+  const destination = rateDestination(rate);
   return [origin, destination].filter(Boolean).join(" → ") || formatRouting(rate);
 }
 
@@ -1047,8 +1055,20 @@ function rateOrigin(rate) {
   return firstPresent(rate.pol, rate.place_of_receipt, rate.origin);
 }
 
+function rateCollection(rate) {
+  return firstPresent(
+    rate.collection_location_name,
+    rate.place_of_receipt,
+    rate.origin,
+  );
+}
+
 function rateDestination(rate) {
-  return firstPresent(rate.final_destination, rate.pod);
+  return firstPresent(
+    rate.destination_location_name,
+    rate.final_destination,
+    rate.pod,
+  );
 }
 
 function merchantHaulagePort(rate) {
@@ -1202,7 +1222,7 @@ function filterConnectedRates({ includeExpired, kind }) {
       if (equipment && canonicalEquipment(rate.equipment_type) !== equipment) return false;
       if (!(material === "All materials" || (rate.materials || []).some((item) => sameValue(item, material)))) return false;
       if (doorRate) {
-        if (collection && !locationsMatch(firstPresent(rate.place_of_receipt, rate.origin), collection)) return false;
+        if (collection && !locationsMatch(rateCollection(rate), collection)) return false;
         const explicitPort = rate.pol || "";
         if (origin && explicitPort && !matchesFilter(explicitPort, origin)) return false;
         return true;

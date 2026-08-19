@@ -407,18 +407,23 @@ function renderPreview() {
   if (summary) {
     elements.previewValidity.textContent = summary.validity || "—";
     elements.previewLanes.innerHTML = `<b>${escapeHtml(String(summary.lanes ?? "—"))}</b> · <span>${escapeHtml(summary.skipped || "")}</span>`;
-    elements.mappedSummary.textContent = summary.unmatchedCount
-      ? `${summary.unmatchedCount} charge${summary.unmatchedCount === 1 ? "" : "s"} unmatched`
-      : `✓ All ${summary.mappedCount || 0} charges mapped`;
-    elements.mappedSummary.className = `mapped-summary${summary.unmatchedCount ? " warning" : ""}`;
-    elements.mapBuckets.hidden = !summary.unmatchedCount;
-    elements.mapBuckets.innerHTML = summary.unmatchedCount
+    elements.mappedSummary.textContent = summary.blockingErrorCount
+      ? `${summary.blockingErrorCount} blocking issue${summary.blockingErrorCount === 1 ? "" : "s"}`
+      : summary.unmatchedCount
+        ? `${summary.unmatchedCount} charge${summary.unmatchedCount === 1 ? "" : "s"} unmatched`
+        : `✓ All ${summary.mappedCount || 0} charges mapped`;
+    elements.mappedSummary.className = `mapped-summary${summary.blockingErrorCount || summary.unmatchedCount ? " warning" : ""}`;
+    elements.mapBuckets.hidden = !summary.unmatchedCount && !summary.blockingErrorCount;
+    elements.mapBuckets.innerHTML = summary.unmatchedCount || summary.blockingErrorCount
       ? [
           ...(summary.buckets || []).map((bucket) => `<span class="map-chip"><b>${bucket.count}</b> ${escapeHtml(bucket.label)}</span>`),
-          `<span class="map-chip warn"><b>${summary.unmatchedCount}</b> unmatched</span>`,
+          ...(summary.blockingErrorCount ? [`<span class="map-chip warn"><b>${summary.blockingErrorCount}</b> blocking</span>`] : []),
+          ...(summary.unmatchedCount ? [`<span class="map-chip warn"><b>${summary.unmatchedCount}</b> unmatched</span>`] : []),
         ].join("")
       : "";
-    elements.previewMapNote.textContent = summary.note || "";
+    elements.previewMapNote.innerHTML = summary.blockingMessages?.length
+      ? summary.blockingMessages.slice(0, 12).map((message) => `<div>${escapeHtml(message)}</div>`).join("")
+      : escapeHtml(summary.note || "");
     renderDifferences(summary);
   } else {
     elements.diffSection.hidden = true;
@@ -433,7 +438,11 @@ function renderPreview() {
     : "First sheet from this source — nothing to compare against yet.";
 
   elements.publishButton.hidden = preview.readOnly;
-  elements.publishButton.disabled = preview.readOnly || !importState.canMutate || !ready || importState.busy;
+  elements.publishButton.disabled = preview.readOnly
+    || !importState.canMutate
+    || !ready
+    || Boolean(summary?.blockingErrorCount)
+    || importState.busy;
   elements.cancelPreviewButton.textContent = preview.readOnly ? "Close" : "Cancel";
 }
 
@@ -534,6 +543,8 @@ function demoSummary(sourceKey) {
 
 function connectedSummary(detail, sourceKey) {
   const validation = detail?.validation_report?.summary || {};
+  const blockingItems = (detail?.validation_report?.items || [])
+    .filter((item) => item.severity === "ERROR");
   const classification = detail?.charge_bucket_summary || {};
   const groups = Array.isArray(classification.groups) ? classification.groups : [];
   const buckets = groups.map((group) => ({ label: group.key, count: Number(group.line_count || group.lines?.length || 0) }));
@@ -546,6 +557,8 @@ function connectedSummary(detail, sourceKey) {
     validity: formatValidity(validFrom, validTo),
     lanes: sourceKey === "msc-inline" ? Number(detail?.summary?.rate_offers || 0) : uniqueLaneCount(rates),
     skipped: validation.errors ? `${validation.errors} validation error${validation.errors === 1 ? "" : "s"}` : "no blocking validation errors",
+    blockingErrorCount: blockingItems.length || Number(validation.errors || 0),
+    blockingMessages: blockingItems.map((item) => item.message),
     mappedCount,
     unmatchedCount,
     buckets,

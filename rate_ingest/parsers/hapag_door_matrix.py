@@ -68,6 +68,7 @@ def parse_workbook(
         if not collection_raw or not pol:
             continue
         collection = clean_collection(collection_raw)
+        collection_source_code = extract_collection_source_code(collection_raw)
         for column, destination in destinations.items():
             pod = destination["pod"]
             amount, trailing_note = parse_amount(sheet.cell(row_number, column).value)
@@ -95,6 +96,7 @@ def parse_workbook(
                 raw_row_reference=f"{sheet_name}!R{row_number}C{column}",
                 raw_row_json={
                     "collection_raw": collection_raw,
+                    "collection_source_code": collection_source_code,
                     "preferred_pol": pol,
                     "destination": pod,
                     "applicable_routing": destination["routing"],
@@ -169,6 +171,11 @@ def extract_contract_reference(terms: list[tuple[int, str]]) -> str | None:
 def clean_collection(raw: str) -> str:
     location = raw.split("/", 1)[-1].strip()
     return location.title()
+
+
+def extract_collection_source_code(raw: str) -> str | None:
+    match = re.match(r"^\s*([A-Za-z]{2}[A-Za-z0-9]{3})\s*/", raw)
+    return match.group(1).upper() if match else None
 
 
 def normalize_key(value: Any) -> str:
