@@ -73,7 +73,7 @@ BILL_OF_LADING_BASES = {"bill of lading", "b/l", "bl", "booking"}
 
 _RATE_DESK_CACHE: dict[tuple[str, str, str], dict[str, Any]] = {}
 _RATE_DESK_CACHE_LOCK = Lock()
-_POSTGRES_RATE_DESK_CACHE_TTL_SECONDS = 30.0
+_POSTGRES_RATE_DESK_CACHE_TTL_SECONDS = 60.0 * 60.0
 
 
 def resolve_repository_organization_id(
