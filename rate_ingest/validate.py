@@ -1,11 +1,23 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 
+from rate_ingest.locations import LocationIssue
 from rate_ingest.models import RateCard, RateChargeLine, RateOffer, ValidationItem, ValidationReport
 
 
-def validate_import(rate_import_id: str, card: RateCard, offers: list[RateOffer], charges: list[RateChargeLine], amount_min: float | None = None, amount_max: float | None = None) -> ValidationReport:
+def validate_import(
+    rate_import_id: str,
+    card: RateCard,
+    offers: list[RateOffer],
+    charges: list[RateChargeLine],
+    amount_min: float | None = None,
+    amount_max: float | None = None,
+    *,
+    location_issues: Sequence[LocationIssue] = (),
+    source_file_name: str | None = None,
+) -> ValidationReport:
     items: list[ValidationItem] = []
     if not offers:
         items.append(
@@ -15,6 +27,26 @@ def validate_import(rate_import_id: str, card: RateCard, offers: list[RateOffer]
                 entity_type="rate_import",
                 entity_id=rate_import_id,
                 message="Parser produced no usable rate offers.",
+            )
+        )
+
+    for issue in location_issues:
+        location_label = issue.raw_name or "(missing)"
+        source_code_label = (
+            f" with source code {issue.source_code!r}" if issue.source_code else ""
+        )
+        position = issue.source_reference or issue.sheet_name or "unknown row"
+        file_label = source_file_name or "uploaded file"
+        items.append(
+            ValidationItem(
+                severity="ERROR",
+                rule_id=f"unknown_{issue.role}_location",
+                entity_type="rate_offer",
+                message=(
+                    f"Location catalogue has no {issue.role} mapping for "
+                    f"{location_label!r}{source_code_label} in {file_label}, {position}."
+                ),
+                source_reference=issue.source_reference,
             )
         )
 

@@ -68,9 +68,13 @@ class RateOffer(BaseModel):
     commodity: str | None = None
     origin: str | None = None
     place_of_receipt: str | None = None
+    collection_location_code: str | None = None
+    collection_location_name: str | None = None
     pol: str | None = None
     pod: str | None = None
     final_destination: str | None = None
+    destination_location_code: str | None = None
+    destination_location_name: str | None = None
     zone: str | None = None
     equipment_type: str
     service_mode: str | None = None

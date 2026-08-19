@@ -10,6 +10,10 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from rate_ingest.config import Settings
+from rate_ingest.locations import (
+    extract_collection_source_code,
+    location_match_key,
+)
 from rate_ingest.models import (
     CanonicalRate,
     RateCard,
@@ -322,8 +326,10 @@ class PostgresRateRepository(RateRepository):
             ).fetchall()
             offer_rows = connection.execute(
                 """
-                select o.id, o.application_id, o.collection, o.origin, o.pol,
-                       o.pod, o.destination, o.equipment, o.service_mode,
+                select o.id, o.application_id, o.collection,
+                       o.collection_location_code, o.origin, o.pol,
+                       o.pod, o.destination, o.destination_location_code,
+                       o.equipment, o.service_mode,
                        o.base_amount, o.currency, o.routing, o.valid_from,
                        o.valid_to, o.source_reference, o.metadata, o.created_at,
                        c.application_id as card_application_id
@@ -683,8 +689,10 @@ class PostgresRateRepository(RateRepository):
             ).fetchall()
             offer_rows = connection.execute(
                 """
-                select o.id, o.application_id, o.collection, o.origin, o.pol,
-                       o.pod, o.destination, o.equipment, o.service_mode,
+                select o.id, o.application_id, o.collection,
+                       o.collection_location_code, o.origin, o.pol,
+                       o.pod, o.destination, o.destination_location_code,
+                       o.equipment, o.service_mode,
                        o.base_amount, o.currency, o.routing, o.valid_from,
                        o.valid_to, o.source_reference, o.metadata, o.created_at,
                        c.application_id as card_application_id
@@ -769,6 +777,42 @@ class PostgresRateRepository(RateRepository):
             notes=tuple(rate_note_from_db(row) for row in note_rows),
             source_by_import=source_by_import,
         )
+
+    def persist_offer_locations(
+        self,
+        offers: list[RateOffer],
+        *,
+        organization_id: OrganizationId,
+    ) -> None:
+        organization_uuid = require_organization_uuid(organization_id)
+        with self._pool.connection() as connection:
+            self._upsert_offer_locations(connection, offers)
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    """
+                    update public.rate_offers
+                    set collection_location_code = %(collection_location_code)s,
+                        destination_location_code = %(destination_location_code)s,
+                        metadata = metadata || %(location_metadata)s
+                    where organization_id = %(organization_id)s
+                      and application_id = %(application_id)s
+                    """,
+                    [
+                        {
+                            "collection_location_code": offer.collection_location_code,
+                            "destination_location_code": offer.destination_location_code,
+                            "location_metadata": Jsonb(
+                                {
+                                    "collection_location_name": offer.collection_location_name,
+                                    "destination_location_name": offer.destination_location_name,
+                                }
+                            ),
+                            "organization_id": organization_uuid,
+                            "application_id": offer.id,
+                        }
+                        for offer in offers
+                    ],
+                )
 
     def _upsert_import(
         self,
@@ -909,6 +953,7 @@ class PostgresRateRepository(RateRepository):
         ]
 
         self._insert_cards(connection, card_payloads)
+        self._upsert_offer_locations(connection, offers)
         self._insert_offers(connection, offer_payloads)
         self._insert_charges(connection, charge_payloads)
         self._insert_notes(connection, note_payloads)
@@ -1021,19 +1066,114 @@ class PostgresRateRepository(RateRepository):
             """
             insert into public.rate_offers (
                 id, application_id, organization_id, import_id, rate_card_id,
-                collection, origin, pol, pod, destination, equipment,
-                service_mode, base_amount, currency, routing, valid_from,
+                collection, collection_location_code, origin, pol, pod,
+                destination, destination_location_code, equipment, service_mode,
+                base_amount, currency, routing, valid_from,
                 valid_to, source_reference, metadata, created_at
             ) values (
                 %(id)s, %(application_id)s, %(organization_id)s, %(import_id)s,
-                %(rate_card_id)s, %(collection)s, %(origin)s, %(pol)s, %(pod)s,
-                %(destination)s, %(equipment)s, %(service_mode)s,
+                %(rate_card_id)s, %(collection)s, %(collection_location_code)s,
+                %(origin)s, %(pol)s, %(pod)s, %(destination)s,
+                %(destination_location_code)s, %(equipment)s, %(service_mode)s,
                 %(base_amount)s, %(currency)s, %(routing)s, %(valid_from)s,
                 %(valid_to)s, %(source_reference)s, %(metadata)s, %(created_at)s
             )
             """,
             payloads,
         )
+
+    @staticmethod
+    def _upsert_offer_locations(connection: Any, offers: list[RateOffer]) -> None:
+        locations: dict[str, tuple[str, str, str | None]] = {}
+        aliases: dict[tuple[str | None, str | None], tuple[str, str | None]] = {}
+        for offer in offers:
+            pairs = (
+                (
+                    offer.collection_location_code,
+                    offer.collection_location_name,
+                    offer.place_of_receipt or offer.origin,
+                    extract_collection_source_code(offer),
+                ),
+                (
+                    offer.destination_location_code,
+                    offer.destination_location_name,
+                    offer.final_destination or offer.pod,
+                    None,
+                ),
+            )
+            for code, display_name, source_name, source_code in pairs:
+                if not code or not display_name:
+                    continue
+                country_code = display_name.rsplit(",", 1)[-1].strip().upper()
+                display_parts = [part.strip() for part in display_name.split(",")]
+                subdivision_name = (
+                    display_parts[-2] if len(display_parts) > 2 else None
+                )
+                locations[code] = (
+                    display_name,
+                    country_code,
+                    subdivision_name,
+                )
+                match_key = location_match_key(source_name) or None
+                normalized_source_code = source_code.upper() if source_code else None
+                if match_key or normalized_source_code:
+                    aliases[(match_key, normalized_source_code)] = (
+                        code,
+                        source_name,
+                    )
+
+        if locations:
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    """
+                    insert into public.locations (
+                        code, display_name, country_code, subdivision_name
+                    ) values (
+                        %(code)s, %(display_name)s, %(country_code)s,
+                        %(subdivision_name)s
+                    )
+                    on conflict (code) do update set
+                        display_name = excluded.display_name,
+                        country_code = excluded.country_code,
+                        subdivision_name = excluded.subdivision_name,
+                        updated_at = now()
+                    """,
+                    [
+                        {
+                            "code": code,
+                            "display_name": display_name,
+                            "country_code": country_code,
+                            "subdivision_name": subdivision_name,
+                        }
+                        for code, (
+                            display_name,
+                            country_code,
+                            subdivision_name,
+                        ) in locations.items()
+                    ],
+                )
+        if aliases:
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    """
+                    insert into public.location_aliases (
+                        location_code, source_name, match_key, source_code
+                    ) values (
+                        %(location_code)s, %(source_name)s,
+                        %(match_key)s, %(source_code)s
+                    )
+                    on conflict do nothing
+                    """,
+                    [
+                        {
+                            "location_code": code,
+                            "source_name": source_name,
+                            "match_key": match_key,
+                            "source_code": source_code,
+                        }
+                        for (match_key, source_code), (code, source_name) in aliases.items()
+                    ],
+                )
 
     @staticmethod
     def _insert_charges(connection: Any, payloads: list[dict[str, Any]]) -> None:

@@ -22,7 +22,7 @@ from rate_ingest.repositories.base import (
     RateRepository,
 )
 from rate_ingest.source_registry import register_source
-from rate_ingest.utils import read_csv_rows, read_json
+from rate_ingest.utils import read_csv_rows, read_json, write_csv_rows
 from rate_ingest.warehouse import (
     publish_approved_rows,
     record_import,
@@ -294,6 +294,18 @@ class CsvRateRepository(RateRepository):
             charges=charges,
             notes=notes,
             source_by_import=source_by_import,
+        )
+
+    def persist_offer_locations(
+        self,
+        offers: list[RateOffer],
+        *,
+        organization_id: OrganizationId,
+    ) -> None:
+        del organization_id
+        write_csv_rows(
+            warehouse_paths(self.settings)["offers"],
+            [offer.model_dump(mode="json") for offer in offers],
         )
 
 

@@ -14,6 +14,12 @@ from rate_ingest.approve import reject_import as reject_run
 from rate_ingest.canonical import build_canonical_rates
 from rate_ingest.classifier import classify_source
 from rate_ingest.config import Settings
+from rate_ingest.locations import (
+    LOCATION_CATALOGUE_PARSER_FAMILIES,
+    LocationCatalogue,
+    apply_location_catalogue,
+    ensure_offer_locations,
+)
 from rate_ingest.models import (
     RateCard,
     RateChargeLine,
@@ -198,6 +204,12 @@ def import_source_file(
         rate_import,
         source_file_name=source.file_name,
     )
+    location_issues = []
+    if matched_template.parser_family in LOCATION_CATALOGUE_PARSER_FAMILIES:
+        location_issues = apply_location_catalogue(
+            offers,
+            LocationCatalogue.default(),
+        )
     validation = validate_import(
         rate_import.id,
         card,
@@ -205,6 +217,8 @@ def import_source_file(
         charges,
         amount_min=matched_template.validation.get("amount_min"),
         amount_max=matched_template.validation.get("amount_max"),
+        location_issues=location_issues,
+        source_file_name=source.file_name,
     )
     if validation.summary.get("errors", 0) > 0:
         rate_import.status = "failed"
@@ -573,7 +587,9 @@ def search_approved_offers(
 
     valid_on_date = parse_iso_date(valid_on) if valid_on else None
     results: list[dict[str, Any]] = []
+    location_catalogue = LocationCatalogue.default()
     for offer in offers:
+        ensure_offer_locations(offer, location_catalogue)
         card = cards_by_id.get(offer.rate_card_id)
         if not card:
             continue
@@ -584,13 +600,23 @@ def search_approved_offers(
         if carrier_name and not contains_text(card.carrier_name, carrier_name):
             continue
         if collection and not contains_text(
-            first_present(offer.place_of_receipt, offer.origin), collection
+            first_present(
+                offer.collection_location_name,
+                offer.place_of_receipt,
+                offer.origin,
+            ),
+            collection,
         ):
             continue
         if pol and not contains_text(offer.pol, pol):
             continue
         if pod and not contains_text(
-            first_present(offer.pod, offer.final_destination), pod
+            first_present(
+                offer.destination_location_name,
+                offer.final_destination,
+                offer.pod,
+            ),
+            pod,
         ):
             continue
         if (
@@ -648,9 +674,13 @@ def search_approved_offers(
             "commodity": offer_commodity,
             "origin": offer.origin,
             "place_of_receipt": offer.place_of_receipt,
+            "collection_location_code": offer.collection_location_code,
+            "collection_location_name": offer.collection_location_name,
             "pol": offer.pol,
             "pod": offer.pod,
             "final_destination": offer.final_destination,
+            "destination_location_code": offer.destination_location_code,
+            "destination_location_name": offer.destination_location_name,
             "equipment_type": offer.equipment_type,
             "service_mode": offer.service_mode,
             "transit_time_days": offer.transit_time_days,
@@ -826,9 +856,13 @@ def compact_rate_summary(rate: dict[str, Any]) -> dict[str, Any]:
             "commodity",
             "origin",
             "place_of_receipt",
+            "collection_location_code",
+            "collection_location_name",
             "pol",
             "pod",
             "final_destination",
+            "destination_location_code",
+            "destination_location_name",
             "equipment_type",
             "service_mode",
             "transit_time_days",
@@ -925,7 +959,11 @@ def get_rate_desk_data(
     dest_map: dict[str, str] = {}
     collection_map: dict[str, str] = {}
     for rate in quote_rates:
-        val = first_present(rate.get("place_of_receipt"), rate.get("origin"))
+        val = first_present(
+            rate.get("collection_location_name"),
+            rate.get("place_of_receipt"),
+            rate.get("origin"),
+        )
         if val:
             collection_map.setdefault(normalize_location_key(val), val)
         val = first_present(
@@ -933,7 +971,11 @@ def get_rate_desk_data(
         )
         if val:
             origin_map.setdefault(normalize_location_key(val), val)
-        val = first_present(rate.get("final_destination"), rate.get("pod"))
+        val = first_present(
+            rate.get("destination_location_name"),
+            rate.get("final_destination"),
+            rate.get("pod"),
+        )
         if val:
             dest_map.setdefault(normalize_location_key(val), val)
     origins = sorted(origin_map.values())
@@ -1072,6 +1114,58 @@ def invalidate_rate_desk_cache(
                 _RATE_DESK_CACHE.pop(key, None)
 
 
+def backfill_location_catalogue(
+    settings: Settings,
+    *,
+    apply: bool = False,
+    repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
+) -> dict[str, Any]:
+    """Resolve approved offers in place; dry-run unless explicitly applied."""
+    rate_repository = (
+        repository if repository is not None else get_rate_repository(settings)
+    )
+    repository_org_id = resolve_repository_organization_id(settings, organization_id)
+    library = rate_repository.load_approved_rate_library(
+        organization_id=repository_org_id
+    )
+    offers = list(library.offers)
+    issues = apply_location_catalogue(offers, LocationCatalogue.default())
+    unresolved = [
+        {
+            "role": issue.role,
+            "raw_name": issue.raw_name,
+            "source_code": issue.source_code,
+            "source_reference": issue.source_reference,
+            "sheet_name": issue.sheet_name,
+        }
+        for issue in issues
+    ]
+    if apply and unresolved:
+        raise ValueError(
+            "Location backfill has unresolved rows; update the catalogue before applying."
+        )
+    if apply:
+        rate_repository.persist_offer_locations(
+            offers,
+            organization_id=repository_org_id,
+        )
+        invalidate_rate_desk_cache(settings, repository_org_id)
+    return {
+        "applied": apply,
+        "offer_count": len(offers),
+        "resolved_offer_count": sum(
+            bool(
+                offer.collection_location_code
+                and offer.destination_location_code
+            )
+            for offer in offers
+        ),
+        "unresolved_count": len(unresolved),
+        "unresolved": unresolved,
+    }
+
+
 def latest_approved_timestamp(
     repository: RateRepository,
     organization_id: OrganizationId,
@@ -1105,14 +1199,22 @@ def filter_rate_summaries(
         if carrier_name and not contains_text(rate.get("carrier_name"), carrier_name):
             continue
         if collection and not contains_text(
-            first_present(rate.get("place_of_receipt"), rate.get("origin")),
+            first_present(
+                rate.get("collection_location_name"),
+                rate.get("place_of_receipt"),
+                rate.get("origin"),
+            ),
             collection,
         ):
             continue
         if pol and not contains_text(rate.get("pol"), pol):
             continue
         if pod and not contains_text(
-            first_present(rate.get("pod"), rate.get("final_destination")),
+            first_present(
+                rate.get("destination_location_name"),
+                rate.get("final_destination"),
+                rate.get("pod"),
+            ),
             pod,
         ):
             continue
@@ -1152,10 +1254,18 @@ def build_rate_desk_metadata(
         value = rate.get("pol")
         if value:
             origin_map.setdefault(normalize_location_key(value), value)
-        value = first_present(rate.get("final_destination"), rate.get("pod"))
+        value = first_present(
+            rate.get("destination_location_name"),
+            rate.get("final_destination"),
+            rate.get("pod"),
+        )
         if value:
             destination_map.setdefault(normalize_location_key(value), value)
-        value = first_present(rate.get("place_of_receipt"), rate.get("origin"))
+        value = first_present(
+            rate.get("collection_location_name"),
+            rate.get("place_of_receipt"),
+            rate.get("origin"),
+        )
         if value:
             collection_map.setdefault(normalize_location_key(value), value)
     tariffs, pickups, haulage_currency = build_haulage_lookup(haulage_rates)
@@ -1474,7 +1584,11 @@ def build_haulage_lookup(
     tariffs: dict[str, dict[str, float]] = {}
     haulage_currency: str | None = None
     for rate in haulage_rates:
-        collection = first_present(rate.get("place_of_receipt"), rate.get("origin"))
+        collection = first_present(
+            rate.get("collection_location_name"),
+            rate.get("place_of_receipt"),
+            rate.get("origin"),
+        )
         port = first_present(
             rate.get("pol"), rate.get("final_destination"), rate.get("pod")
         )

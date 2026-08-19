@@ -12,6 +12,7 @@ from rate_ingest.inspector import inspect_source
 from rate_ingest.search import run_search
 from rate_ingest.services import (
     approve_import_by_id,
+    backfill_location_catalogue,
     get_import_detail,
     import_source_file,
     reject_import_by_id,
@@ -161,3 +162,44 @@ def backfill_postgres(
         f"{report.rate_offer_count} offers, {report.charge_line_count} charge lines, "
         f"and {report.note_count} notes."
     )
+
+
+@app.command(
+    "backfill-locations",
+    help="Validate or apply canonical collection/destination links to approved imports.",
+)
+def backfill_locations(
+    organization_id: str = typer.Option("", "--organization-id"),
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Persist the links. Without this flag the command is a dry run.",
+    ),
+) -> None:
+    cfg = settings()
+    repository_org_id = organization_id or (
+        LOCAL_CSV_ORGANIZATION_ID if cfg.rate_storage_backend == "csv" else None
+    )
+    if repository_org_id is None:
+        console.print("--organization-id is required for Postgres storage")
+        raise typer.Exit(code=1)
+    try:
+        report = backfill_location_catalogue(
+            cfg,
+            apply=apply,
+            organization_id=repository_org_id,
+        )
+    except (RuntimeError, ValueError) as exc:
+        console.print(str(exc))
+        raise typer.Exit(code=1)
+    action = "Updated" if report["applied"] else "Checked"
+    console.print(
+        f"{action} {report['offer_count']} approved offers: "
+        f"{report['resolved_offer_count']} fully mapped, "
+        f"{report['unresolved_count']} unresolved."
+    )
+    for issue in report["unresolved"][:50]:
+        console.print(
+            f"- {issue['role']}: {issue['raw_name'] or '(missing)'} "
+            f"({issue['source_reference'] or issue['sheet_name'] or 'unknown row'})"
+        )

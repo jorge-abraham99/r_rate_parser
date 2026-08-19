@@ -1,0 +1,375 @@
+# Explicit collection aliases found in the agreed Maersk/Hapag source set.
+# New spellings must be added deliberately; the resolver does not fuzzy-match.
+Antwerp, Antwerp, Belgium
+Rotterdam, Zuid-Holland, Netherlands
+Alcester, GB
+Alfreton, GB
+Alton Hampshire, GB
+Altrincham, GB
+Amersham, GB
+Ampthill, GB
+Ancaster Lincolnshire, GB
+Andover, GB
+Ardwick Manchester, GB
+Arundel, GB
+Ashbourne, GB
+Ashford Kent, GB
+Atherstone, GB
+Atherton, GB
+Attleborough Norfolk, GB
+Audenshaw Manchester M, GB
+Avonmouth, GB
+Aylesbury, GB
+Aylesford Kent ME, GB
+Bacup, GB
+Banbury, GB
+Barking London, GB
+Barnsley Yorkshire, GB
+Barnstaple, GB
+Barrow In Furness, GB
+Barton Stacey, GB
+Barton Upon Humber, GB
+Basildon Essex, GB
+Batley, GB
+Beccles, GB
+Bedford, GB
+Bedlington, GB
+Bedwas, GB
+Beetham, GB
+Belfast Northern Ireland, GB
+Belvedere, GB
+Benfleet, GB
+Billingshurst, GB
+Bilston Wolverhampton, GB
+Birmingham, GB
+Birstall Kirklees, GB
+Birtley Tyne, GB
+Blackburn Lancs, GB
+Blackpool, GB
+Blandford Forum, GB
+Bolton Lancs, GB
+Bootle Sefton, GB
+Boston, GB
+Bottesford Lincolnshire, GB
+Bourne Lincolnshire, GB
+Bradford Yorkshire, GB
+Brampton Cambridgeshire, GB
+Bridgend Glam, GB
+Bridgwater Somerset, GB
+Brighton Brighton And Hove, GB
+Bristol, GB
+Bromborough, GB
+Bromsgrove, GB
+Brownhills Staffordshire, GB
+Burnley, GB
+Burton on Trent, GB
+Bury Lancs, GB
+Bury St Edmunds, GB
+Buxton Derbyshire, GB
+Caenby Lincs, GB
+Caerphilly, GB
+Calverton Nottinghamshire, GB
+Cambridge Cambridgeshire, GB
+Canning Town London, GB
+Cannock, GB
+Canvey Island, GB
+Cardiff, GB
+Carlisle, GB
+Carrington Man, GB
+Castle Donington, GB
+Castleford, GB
+Charlton London SE, GB
+Chatham, GB
+Chatteris, GB
+Chelmsford, GB
+Cheltenham, GB
+Chester le Street, GB
+Chesterfield Derbyshire, GB
+Cleckheaton, GB
+Colchester, GB
+Colnbrook, GB
+Colwick Nottinghamshire, GB
+Congleton, GB
+Corby Northamptonshire, GB
+Cork Co Cork, IE
+Coseley, GB
+Cotgrave, GB
+Coventry, GB
+Cowbridge, GB
+Cradley Heath, GB
+Cranbrook, GB
+Crayford, GB
+Crewe Cheshire, GB
+Cricklade, GB
+Croy Lanarkshire, GB
+Croydon London, GB
+Cumbernauld, GB
+Dagenham, GB
+Darlaston, GB
+Darlington, GB
+Dartford, GB
+Darwen, GB
+Daventry, GB
+Deeside Industrial Park, GB
+Derby, GB
+Devizes, GB
+Dewsbury, GB
+Didcot, GB
+Dinnington Rotherham S, GB
+Diss Norfolk, GB
+Distington, GB
+Doncaster, GB
+Dordon, GB
+Droitwich, GB
+Dublin, IE
+Dudley W Midlands, GB
+Dunstable, GB
+Durham, GB
+East Kilbride, GB
+Eastleigh Hampshire, GB
+Edinburgh, GB
+Edmonton, GB
+Ellesmere Port, GB
+Ellington Cambrigdeshire, GB
+Ely Cambs, GB
+Enderby, GB
+Enfield, GB
+Erith, GB
+Eversley Hampshire, GB
+Evesham, GB
+Exeter, GB
+Failsworth, GB
+Felixstowe, GB
+Flint, GB
+Ford West Sussex, GB
+Frome, GB
+Full Sutton, GB
+Gainsborough, GB
+Gateshead, GB
+Gillingham Kent, GB
+Glasgow, GB
+Glenrothes, GB
+Glossop, GB
+Gloucester, GB
+Goldthorpe South Yorks, GB
+Goole, GB
+Gosport, GB
+Grangetown Redcar, GB
+Grantham, GB
+Great Blakenham, GB
+Great Dunmow, GB
+Greenwich, GB
+Grimsby, GB
+Guildford, GB
+Hailsham, GB
+Halifax, GB
+Harlow, GB
+Harrogate, GB
+Hartlepool, GB
+Hartley Wintney, GB
+Hatfield Hertfordshire, GB
+Haverhill, GB
+Haydock, GB
+Hayes London, GB
+Hemel Hempstead, GB
+Hengoed Caerphilly, GB
+Hereford, GB
+Hertford, GB
+Heywood Lancs, GB
+High Roding, GB
+Hinckley, GB
+Hitchin, GB
+Hixon, GB
+Hoddesdon, GB
+Holme Upon Spalding Moor, GB
+Hook Hampshire, GB
+Hounslow, GB
+Howden Yorkshire DN, GB
+Huddersfield, GB
+Hull, GB
+Huntingdon Cambs, GB
+Ilford, GB
+Ilkeston, GB
+Immingham, GB
+Ipswich, GB
+Irlam, GB
+Jarrow, GB
+Kenilworth, GB
+Kettering, GB
+Ketteringham, GB
+King's Lynn, GB
+Kingston upon Thames London, GB
+Kingswinford, GB
+Kirby Muxloe, GB
+Kirkham Lancashire, GB
+Kirksandall, GB
+Lancaster, GB
+Leatherhead, GB
+Ledbury, GB
+Leeds Yorkshire, GB
+Leicester, GB
+Lenwade Norfolk NR, GB
+Lewes, GB
+Leyton, GB
+Liverpool, GB
+London Gateway, GB
+London, GB
+Long Eaton, GB
+Long Marston Hertfordshire, GB
+Loughborough, GB
+Louth, GB
+Luton Bedfordshire, GB
+Lutterworth, GB
+Macclesfield, GB
+Maidstone, GB
+Manchester, GB
+Mansfield Notts, GB
+March, GB
+Margate, GB
+Market Drayton, GB
+Market Rasen, GB
+Market Weighton, GB
+Marston Magna, GB
+Melton Mowbray, GB
+Merthyr Tydfil, GB
+Methwold Norfolk IP, GB
+Mexborough, GB
+Micheldever, GB
+Middlesbrough, GB
+Milton Keynes, GB
+Mitcham, GB
+Morecambe, GB
+Mossley, GB
+Nelson Lancs, GB
+Neston Cheshire, GB
+New Alresford, GB
+Newark Nottinghamshire, GB
+Newbury, GB
+Newcastle upon Tyne, GB
+Newhaven, GB
+Newton Aycliffe, GB
+North Shields, GB
+Northampton, GB
+Northwich, GB
+Norwich, GB
+Nottingham, GB
+Oldbury West Midlands, GB
+Oldham, GB
+Ossett, GB
+Oswestry Shrops, GB
+Otley Yorkshire, GB
+Penistone, GB
+Perth, GB
+Peterborough, GB
+Plymouth, GB
+Polegate, GB
+Pontefract, GB
+Pontypridd, GB
+Poole Dorset, GB
+Portsmouth, GB
+Potters Bar, GB
+Poulton-le-Fylde, GB
+Preston Lancs, GB
+Pudsey, GB
+Queenborough Kent, GB
+Rainham Essex, GB
+Reading, GB
+Redcar, GB
+Reddish, GB
+Redditch, GB
+Redruth, GB
+Retford, GB
+Rochdale, GB
+Rochester Kent, GB
+Rochford Essex, GB
+Romford London, GB
+Rotherham, GB
+Rowley Regis, GB
+Rufforth York YO, GB
+Rugby, GB
+Rushden Hertfordshire, GB
+Rushden Northampton, GB
+Ryton On Dunsmore Warwickshire, GB
+Salford Manchester, GB
+Sandycroft, GB
+Scunthorpe, GB
+Seaford, GB
+Severn Beach Gloucestershire BS, GB
+Sheffield, GB
+Sheldon Birmingham, GB
+Sherburn In Elmet, GB
+Shildon, GB
+Shipley Yorks, GB
+Shirebrook Derbyshire NG, GB
+Silloth, GB
+Sittingbourne, GB
+Skegness, GB
+Skelmersdale, GB
+Slough, GB
+Smethwick, GB
+Somercotes, GB
+South Shields, GB
+Southall London UB, GB
+Southam Gloucs, GB
+Southampton, GB
+Southwark London, GB
+Southwell Nottinghamshire, GB
+Speke, GB
+Spilsby, GB
+St Albans, GB
+Stafford, GB
+Stevenage, GB
+Stockport, GB
+Stoke-on-Trent, GB
+Stratford London, GB
+Stratford-upon-Avon, GB
+Stretford Manchester M, GB
+Stroud Gloucestershire, GB
+Sutton-in-Ashfield, GB
+Swadlincote, GB
+Swindon Swindon, GB
+Swinton Manchester, GB
+Tamworth, GB
+Taunton, GB
+Teesport, GB
+Telford, GB
+Tenbury Worcester, GB
+Tetbury, GB
+Thatcham, GB
+Thetford Norfolk, GB
+Thirsk, GB
+Tipperary Tipperary, IE
+Tipton, GB
+Todmorden, GB
+Tonbridge, GB
+Trafford Park, GB
+Uxbridge, GB
+Wakefield, GB
+Wallingford, GB
+Wallsend, GB
+Walsall, GB
+Warwick Warwickshire, GB
+Washington Tyne and Wear, GB
+Water Orton Warwickshire, GB
+Water Orton, GB
+Waterbeach, GB
+Wellingborough, GB
+Welshpool, GB
+Wembley, GB
+West Bromwich, GB
+West Dereham PE, GB
+West Drayton London, GB
+Widnes, GB
+Wigan, GB
+Wigton, GB
+WillenhallWalsall, GB
+Wimblington, GB
+Winchester, GB
+Winsford Ches, GB
+Witham, GB
+Witney, GB
+Wolverhampton, GB
+Workington, GB
+Yateley, GB
+Yeovil, GB
+York, GB

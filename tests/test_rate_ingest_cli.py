@@ -247,7 +247,7 @@ def test_cosco_pdf_quote_prices_only_freight_efs_and_haulage(tmp_path: Path, mon
     desk = api_client.get("/api/rate-desk", params={"limit": 1000}).json()
     assert desk["haulage_tariffs"] == {}
     assert desk["filters"]["door_pickups"] == []
-    assert "Birmingham" in desk["filters"]["collection_places"]
+    assert "Birmingham, GB" in desk["filters"]["collection_places"]
 
 
 def test_maersk_offer_block_import_creates_charge_lines(tmp_path: Path, monkeypatch):
@@ -687,8 +687,10 @@ def test_msc_zoned_inline_import_joins_birmingham_to_both_pols_and_tiers(tmp_pat
     assert desk_response.status_code == 200
     desk = desk_response.json()
     assert {"FELIXSTOWE", "LONDON GATEWAY"}.issubset(desk["filters"]["origins"])
-    assert {"SURABAYA", "SEMARANG"}.issubset(desk["filters"]["destinations"])
-    assert "Birmingham" in desk["filters"]["collection_places"]
+    assert {"Surabaya, ID", "Semarang, ID"}.issubset(
+        desk["filters"]["destinations"]
+    )
+    assert "Birmingham, GB" in desk["filters"]["collection_places"]
     assert desk["haulage_tariffs"] == {}
     assert desk["filters"]["door_pickups"] == []
     assert any(
@@ -790,7 +792,18 @@ def test_hapag_door_matrix_import_adds_conditional_container_charges(tmp_path: P
     desk = api_client.get("/api/rate-desk", params={"limit": 1000}).json()
     assert desk["haulage_tariffs"] == {}
     assert desk["filters"]["door_pickups"] == []
-    assert "Dartford" in desk["filters"]["collection_places"]
+    assert "Dartford, GB" in desk["filters"]["collection_places"]
+    canonical_search = api_client.get(
+        "/api/rate-desk/search",
+        params={"collection": "Dartford, GB", "pod": "Ho Chi Minh, VN"},
+    ).json()
+    canonical_rate = canonical_search["rates"][0]
+    assert canonical_rate["collection_location_code"] == "dartford-gb"
+    assert canonical_rate["collection_location_name"] == "Dartford, GB"
+    assert canonical_rate["destination_location_code"] == "ho-chi-minh-vn"
+    assert canonical_rate["destination_location_name"] == "Ho Chi Minh, VN"
+    assert canonical_rate["place_of_receipt"] == "Dartford"
+    assert canonical_rate["final_destination"] == "Cat Lei Terminal"
 
 
 def test_hapag_india_rows_preserve_all_charges_but_total_only_selected_codes(tmp_path: Path, monkeypatch):
