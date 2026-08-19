@@ -722,7 +722,7 @@ def test_hapag_door_matrix_import_adds_conditional_container_charges(tmp_path: P
     offers = detail_rows(run_dir / "parsed_rate_offers.csv")
     charges = detail_rows(run_dir / "parsed_rate_charge_lines.csv")
     assert len(offers) == 546
-    assert len(charges) == 702
+    assert len(charges) == 1248
     assert {offer["service_mode"] for offer in offers} == {"SD / CY"}
     assert {offer["equipment_type"] for offer in offers} == {"40HC"}
     assert {offer["valid_from"] for offer in offers} == {"2026-08-01"}
@@ -746,14 +746,17 @@ def test_hapag_door_matrix_import_adds_conditional_container_charges(tmp_path: P
     lat_krabang_charges = charges_by_offer[dartford["Lat Krabang"]["id"]]
     assert [(charge["charge_name"], float(charge["amount"])) for charge in cat_lei_charges] == [
         ("Live Position", 15.0),
+        ("Origin Docs Charges", 25.0),
     ]
     assert [(charge["charge_name"], float(charge["amount"])) for charge in binh_duong_charges] == [
         ("Live Position", 15.0),
         ("Emergency Fuel Destination", 20.0),
+        ("Origin Docs Charges", 25.0),
     ]
     assert [(charge["charge_name"], float(charge["amount"])) for charge in lat_krabang_charges] == [
         ("Live Position", 15.0),
         ("Emergency Fuel Destination", 20.0),
+        ("Origin Docs Charges", 25.0),
     ]
 
     approve_response = api_client.post(
@@ -773,6 +776,16 @@ def test_hapag_door_matrix_import_adds_conditional_container_charges(tmp_path: P
     assert len(search) == 1
     assert search[0]["all_in_amount"] == 450.0
     assert search[0]["carrier_label"] == "Hapag-Lloyd · Door-to-quay"
+    origin_docs = next(
+        line
+        for group in search[0]["charge_analysis"]["groups"]
+        for line in group["lines"]
+        if line["name"] == "Origin Docs Charges"
+    )
+    assert origin_docs["basis"] == "per_bill_of_lading"
+    assert origin_docs["currency"] == "GBP"
+    assert origin_docs["unit_amount"] == 25.0
+    assert origin_docs["counts_toward_total"] is False
 
     desk = api_client.get("/api/rate-desk", params={"limit": 1000}).json()
     assert desk["haulage_tariffs"] == {}

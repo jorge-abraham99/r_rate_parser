@@ -59,6 +59,12 @@ def parse_workbook(
     }
     live_position_amount = float(rules.get("live_position_amount", 15))
     emergency_fuel_amount = float(rules.get("emergency_fuel_amount", 20))
+    origin_docs_rules = rules.get("origin_documentation_charge", {})
+    origin_docs_amount = origin_docs_rules.get("amount")
+    origin_docs_currency = origin_docs_rules.get("currency", "GBP")
+    origin_docs_basis = origin_docs_rules.get("basis", "per_bill_of_lading")
+    origin_docs_name = origin_docs_rules.get("name", "Origin Docs Charges")
+    total_charge_codes = ["Live Position", "Emergency Fuel Destination"]
 
     offers: list[RateOffer] = []
     charges: list[RateChargeLine] = []
@@ -99,6 +105,9 @@ def parse_workbook(
                     "destination": pod,
                     "applicable_routing": destination["routing"],
                     "matrix_value": normalize_text(sheet.cell(row_number, column).value),
+                    # Documentation is displayed as a separately payable fixed
+                    # charge, but is not part of the quoted ocean all-in total.
+                    "total_charge_codes": total_charge_codes,
                 },
             )
             offers.append(offer)
@@ -127,6 +136,26 @@ def parse_workbook(
                         included_flag=False,
                         source_label="Emergency Fuel Destination USD 20/container",
                         raw_value=f"{currency} {emergency_fuel_amount:g}/container",
+                    )
+                )
+            if origin_docs_amount is not None:
+                charges.append(
+                    RateChargeLine(
+                        rate_offer_id=offer.id,
+                        charge_name=origin_docs_name,
+                        charge_type="origin",
+                        basis=origin_docs_basis,
+                        amount=float(origin_docs_amount),
+                        currency=origin_docs_currency,
+                        included_flag=False,
+                        source_label=(
+                            f"{origin_docs_name} {origin_docs_currency} "
+                            f"{float(origin_docs_amount):g}/B/L"
+                        ),
+                        raw_value=(
+                            f"{origin_docs_currency} "
+                            f"{float(origin_docs_amount):g}/B/L"
+                        ),
                     )
                 )
 
