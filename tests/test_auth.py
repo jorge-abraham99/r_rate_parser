@@ -404,7 +404,7 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert rate_desk_js.count("countsTowardTotal: line.counts_toward_total !== false") >= 2
 
 
-def test_invitation_password_page_enforces_safe_acceptance_flow():
+def test_invitation_and_recovery_password_page_enforces_safe_acceptance_flow():
     password_html = Path("UI/set-password.html").read_text(encoding="utf-8")
     password_js = Path("UI/set-password.js").read_text(encoding="utf-8")
     auth_js = Path("UI/auth.js").read_text(encoding="utf-8")
@@ -413,8 +413,9 @@ def test_invitation_password_page_enforces_safe_acceptance_flow():
     assert 'minlength="8"' in password_html
     assert "signUp" not in password_html
     assert "signUp" not in password_js
-    assert 'hash.get("type") === "invite"' in password_js
+    assert 'type === "invite" || type === "recovery"' in password_js
     assert "invalid or has expired" in password_js
+    assert "password recovery link" in password_js
     assert "password !== confirmInput.value" in password_js
     assert "updateUser({ password })" in password_js
     assert 'RATE_DESK_AUTH.apiFetch("/api/me")' in password_js
