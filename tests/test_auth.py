@@ -413,11 +413,15 @@ def test_invitation_and_recovery_password_page_enforces_safe_acceptance_flow():
     assert 'minlength="8"' in password_html
     assert "signUp" not in password_html
     assert "signUp" not in password_js
-    assert 'type === "invite" || type === "recovery"' in password_js
+    assert "hasPasswordSetupMarker" not in password_js
+    assert "getSession()" in password_js
+    assert "hasAuthLinkError()" in password_js
     assert "invalid or has expired" in password_js
     assert "password recovery link" in password_js
     assert "password !== confirmInput.value" in password_js
     assert "updateUser({ password })" in password_js
+    assert 'error?.code === "same_password"' in password_js
+    assert "different from your current password" in password_js
     assert 'RATE_DESK_AUTH.apiFetch("/api/me")' in password_js
     assert "has no organization access" in password_js
     assert 'signOut({ scope: "local" })' in password_js
