@@ -6,7 +6,7 @@
   const confirmInput = document.getElementById("confirmPassword");
   const submitButton = document.getElementById("passwordSubmit");
   const alert = document.getElementById("passwordAlert");
-  const invalidInviteMessage = "This invitation link is invalid or has expired. Ask your Reudan administrator for a new invitation.";
+  const invalidPasswordLinkMessage = "This password link is invalid or has expired. Request a new password recovery link or ask your Reudan administrator for a new invitation.";
 
   function showMessage(message, success = false) {
     alert.textContent = message;
@@ -19,10 +19,11 @@
     submitButton.textContent = busy ? "Setting password…" : "Set password";
   }
 
-  function hasInvitationMarker() {
+  function hasPasswordSetupMarker() {
     const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     const query = new URLSearchParams(window.location.search);
-    return hash.get("type") === "invite" || query.get("type") === "invite";
+    const type = hash.get("type") || query.get("type");
+    return type === "invite" || type === "recovery";
   }
 
   function hasAuthLinkError() {
@@ -46,9 +47,9 @@
   }
 
   async function boot() {
-    if (hasAuthLinkError() || !hasInvitationMarker()) {
+    if (hasAuthLinkError() || !hasPasswordSetupMarker()) {
       await clearLocalSession();
-      showMessage(invalidInviteMessage);
+      showMessage(invalidPasswordLinkMessage);
       return;
     }
 
@@ -58,7 +59,7 @@
       form.hidden = false;
     } catch (_error) {
       await clearLocalSession();
-      showMessage(invalidInviteMessage);
+      showMessage(invalidPasswordLinkMessage);
     }
   }
 
