@@ -19,13 +19,6 @@
     submitButton.textContent = busy ? "Setting password…" : "Set password";
   }
 
-  function hasPasswordSetupMarker() {
-    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-    const query = new URLSearchParams(window.location.search);
-    const type = hash.get("type") || query.get("type");
-    return type === "invite" || type === "recovery";
-  }
-
   function hasAuthLinkError() {
     const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     const query = new URLSearchParams(window.location.search);
@@ -47,13 +40,16 @@
   }
 
   async function boot() {
-    if (hasAuthLinkError() || !hasPasswordSetupMarker()) {
+    if (hasAuthLinkError()) {
       await clearLocalSession();
       showMessage(invalidPasswordLinkMessage);
       return;
     }
 
     try {
+      // Supabase can complete an implicit recovery flow without preserving a
+      // `type` marker in the final URL. A recovered session is the authority;
+      // URL markers are not.
       const session = await window.RATE_DESK_AUTH.getSession();
       if (!session?.access_token) throw new Error("No invitation session");
       form.hidden = false;
