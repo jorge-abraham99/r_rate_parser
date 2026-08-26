@@ -426,6 +426,7 @@ def test_rate_desk_summary_paginates_and_loads_offer_detail_on_demand(tmp_path: 
     assert "charges" not in summary
     assert "charge_analysis" not in summary
     assert "notes" not in summary
+    assert "zone" in summary
     assert summary["all_in_usd"] is not None
 
     detail_response = api_client.get(
