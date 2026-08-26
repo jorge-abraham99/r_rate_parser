@@ -284,6 +284,61 @@ def test_search_service_uses_injected_repository(tmp_path: Path) -> None:
     assert [row["offer_id"] for row in rows] == [offer.id]
 
 
+def test_rate_desk_keeps_maersk_door_rates_with_equivalent_equipment_and_no_pol(
+    tmp_path: Path,
+) -> None:
+    settings = Settings.load(cwd=tmp_path)
+    card = RateCard(
+        id="card_maersk_filter_test",
+        rate_import_id="import_maersk_filter_test",
+        provider_name="Maersk",
+        carrier_name="Maersk",
+        document_type="ocean_export",
+        currency_default="USD",
+    )
+    offer = RateOffer(
+        id="offer_maersk_filter_test",
+        rate_card_id=card.id,
+        place_of_receipt="Ilford, GB",
+        final_destination="Laem Chabang, TH",
+        service_mode="SD / CY",
+        equipment_type="40HDRY",
+        base_amount=75,
+        base_currency="USD",
+    )
+    conflicting_offer = offer.model_copy(
+        update={
+            "id": "offer_maersk_conflicting_pol_test",
+            "pol": "London Gateway",
+        }
+    )
+    repository = Mock(spec=RateRepository)
+    repository.backend_name = "csv"
+    repository.list_import_records.return_value = ()
+    repository.load_approved_rate_library.return_value = ApprovedRateLibrary(
+        cards=(card,),
+        offers=(offer, conflicting_offer),
+        charges=(),
+        notes=(),
+        source_by_import={
+            card.rate_import_id: {
+                "operator_carrier_key": "maersk-sea",
+                "operator_carrier_label": "Maersk · SEA rates",
+            }
+        },
+    )
+
+    payload = search_rate_summaries(
+        settings,
+        pol="Felixstowe",
+        pod="Laem Chabang",
+        equipment_type="40HC",
+        repository=repository,
+    )
+
+    assert [rate["offer_id"] for rate in payload["rates"]] == [offer.id]
+
+
 def test_postgres_rate_desk_reuses_snapshot_until_invalidated(tmp_path: Path) -> None:
     settings = replace(Settings.load(cwd=tmp_path), rate_storage_backend="postgres")
     organization_id = "organization-service-test"
