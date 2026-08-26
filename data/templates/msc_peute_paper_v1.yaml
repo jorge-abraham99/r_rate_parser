@@ -1,0 +1,60 @@
+template_id: msc_peute_paper_v1
+template_name: MSC PEUTE/PAPER Zoned Door-to-quay v1
+provider_name: MSC
+parser_family: msc_zoned_inline
+document_type: ocean_export
+file_type: xlsx
+active: true
+
+match_rules:
+  priority: 10
+  strong_filename_match: true
+  filename_contains:
+    - "REUDAN"
+    - "FAR EAST"
+    - "SEPTEMBER"
+  required_header_labels:
+    - "CITY"
+    - "COUNTY"
+    - "ZONE"
+    - "ALL IN RATE"
+  required_sheet_name_contains_all:
+    - "HAULAGE ZONES SEP"
+    - "REUDAN-PEUTE"
+    - "REUDAN-PAPER"
+  sheet_name_contains_any:
+    - "HAULAGE ZONES SEP"
+    - "REUDAN-PEUTE"
+    - "REUDAN-PAPER"
+
+inline_haulage_rules:
+  haulage_sheet: "Haulage Zones SEP"
+  rate_sheets:
+    REUDAN-PEUTE: PEUTE
+    REUDAN-PAPER: PAPER
+  pol_aliases:
+    Bristol: PORTBURY
+  forty_default: 40HC
+  documentation_charge:
+    amount: 30
+    currency: GBP
+    basis: per B/L
+
+defaults:
+  carrier_name: MSC
+  currency_default: USD
+  commodity: WASTE PAPER
+
+note_extraction:
+  scan_sheets:
+    - "T&C"
+  scan_top_rows: 60
+  keywords:
+    - "subject to"
+    - "quotation"
+    - "charge"
+    - "container"
+
+validation:
+  amount_min: 1
+  amount_max: 10000

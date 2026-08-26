@@ -565,6 +565,8 @@ function makeConnectedRow(rate, quantity) {
 }
 
 function makeConnectedDoorRow(rate, quantity) {
+  const sourceFile = rate.source_file_name || rate.raw_sheet_name || "Approved rate";
+  const customerRateLabel = normalized(rate.offer_reference) === "peute" ? "PEUTE" : "";
   return {
     ...makeConnectedRow(rate, quantity),
     type: "CONTRACT",
@@ -575,7 +577,10 @@ function makeConnectedDoorRow(rate, quantity) {
     ),
     routing: "Door to quay",
     routingDetail: laneDetail(rate),
-    services: [{ label: "Door-to-quay", file: rate.source_file_name || rate.raw_sheet_name || "Approved rate" }],
+    services: [
+      { label: "Door-to-quay", file: sourceFile },
+      ...(customerRateLabel ? [{ label: customerRateLabel, file: sourceFile, customerSpecific: true }] : []),
+    ],
   };
 }
 
@@ -727,7 +732,7 @@ function renderRate(row, index, isBest) {
           <small class="routing-type">${escapeHtml(row.routing)}</small>
         </span>
         <span class="carrier-name">${escapeHtml(row.carrier || "—")}</span>
-        <span class="service-tags">${row.services.map((serviceItem) => `<span title="${escapeAttr(`${row.carrier} · ${serviceItem.file}`)}">${escapeHtml(serviceItem.label)}</span>`).join("")}</span>
+        <span class="service-tags">${row.services.map((serviceItem) => `<span class="${serviceItem.customerSpecific ? "customer-rate-tag" : ""}" title="${escapeAttr(`${row.carrier} · ${serviceItem.file}`)}">${escapeHtml(serviceItem.label)}</span>`).join("")}</span>
         <span class="mono transit-value">${escapeHtml(row.transit || "—")}</span>
         <span class="number">${renderInland(row)}</span>
         <span class="number component-value">${escapeHtml(formatUsd(row.originUsd))}</span>

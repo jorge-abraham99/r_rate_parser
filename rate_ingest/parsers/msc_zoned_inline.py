@@ -89,9 +89,9 @@ def parse_workbook(
                             rate_offer_id=offer.id,
                             charge_name="Export Booking Documentation Fee",
                             charge_type="origin",
-                            basis="per B/L",
+                            basis=rate["doc_basis"],
                             amount=rate["doc_amount"],
-                            currency=rate["currency"],
+                            currency=rate["doc_currency"],
                             included_flag=False,
                             source_label="DOC (per B/L)",
                             raw_value=rate["doc_raw"],
@@ -116,7 +116,8 @@ def extract_tier_rate_tables(path: Path, template: ParserTemplate) -> dict[str, 
                 "equipment_type": rate["equipment_type"],
                 "amount": rate["amount"],
                 "currency": rate["currency"],
-                "documentation": rate["doc_raw"],
+                "documentation": rate["doc_display"],
+                "source_documentation": rate["doc_raw"],
                 "freetime": rate["freetime"],
                 "valid_from": rate["valid_from"].isoformat() if rate["valid_from"] else None,
                 "valid_to": rate["valid_to"].isoformat() if rate["valid_to"] else None,
@@ -131,18 +132,31 @@ def load_haulage_rows(workbook, rules: dict[str, Any]) -> list[dict[str, str]]:
     sheet = workbook[sheet_name]
     aliases = {normalize_key(left): normalize_key(right) for left, right in rules.get("pol_aliases", {}).items()}
     rows: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
     for row_number, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
         city = normalize_text(value_at(row, 0))
+        area = normalize_text(value_at(row, 1))
+        county = normalize_text(value_at(row, 2))
         pol = normalize_text(value_at(row, 3))
         zone_key = normalize_zone(value_at(row, 4))
         if not city or not pol or not zone_key:
             continue
         raw_pol_key = normalize_key(pol)
+        dedupe_key = (
+            normalize_key(city),
+            normalize_key(area),
+            normalize_key(county),
+            raw_pol_key,
+            zone_key,
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
         rows.append(
             {
                 "city": city,
-                "area": normalize_text(value_at(row, 1)),
-                "county": normalize_text(value_at(row, 2)),
+                "area": area,
+                "county": county,
                 "pol": pol,
                 "join_pol": aliases.get(raw_pol_key, raw_pol_key),
                 "zone_key": zone_key,
@@ -157,6 +171,7 @@ def iter_rate_rows(workbook, rules: dict[str, Any], default_currency: str) -> It
         "rate_sheets",
         {"REUDAN-SPECIAL": "SPECIAL", "REUDAN-TARRIFF": "TARIFF"},
     )
+    documentation_rule = rules.get("documentation_charge", {})
     for sheet_name, tier in rate_sheets.items():
         sheet = workbook[sheet_name]
         for row_number, row in enumerate(sheet.iter_rows(min_row=4, values_only=True), start=4):
@@ -171,7 +186,20 @@ def iter_rate_rows(workbook, rules: dict[str, Any], default_currency: str) -> It
             if not zone_key or not pol or not pod or not equipment_type or amount is None:
                 continue
             doc_raw = normalize_text(value_at(row, 6))
-            doc_amount, _ = parse_amount(doc_raw)
+            source_doc_amount, _ = parse_amount(doc_raw)
+            configured_doc_amount = documentation_rule.get("amount")
+            doc_amount = (
+                float(configured_doc_amount)
+                if configured_doc_amount is not None
+                else source_doc_amount
+            )
+            doc_currency = str(documentation_rule.get("currency") or default_currency).upper()
+            doc_basis = str(documentation_rule.get("basis") or "per B/L")
+            doc_display = (
+                f"{doc_currency} {doc_amount:g} {doc_basis}"
+                if doc_amount is not None
+                else doc_raw
+            )
             yield {
                 "sheet_name": sheet_name,
                 "tier": str(tier).upper(),
@@ -186,6 +214,9 @@ def iter_rate_rows(workbook, rules: dict[str, Any], default_currency: str) -> It
                 "currency": default_currency,
                 "doc_raw": doc_raw,
                 "doc_amount": doc_amount,
+                "doc_currency": doc_currency,
+                "doc_basis": doc_basis,
+                "doc_display": doc_display,
                 "freetime": normalize_text(value_at(row, 7)),
                 "valid_from": parse_date_value(value_at(row, 8)),
                 "valid_to": parse_date_value(value_at(row, 9)),

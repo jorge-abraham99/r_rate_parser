@@ -7,6 +7,7 @@ from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 from typer.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -61,6 +62,36 @@ def seed_templates(tmp_path: Path) -> None:
             template_path.read_text(encoding="utf-8"),
             encoding="utf-8",
         )
+
+
+def build_msc_peute_paper_fixture(tmp_path: Path) -> Path:
+    source = tmp_path / "Reudan - Export Far East - Waste Paper Rate Sheet - September 2026.xlsx"
+    workbook = load_workbook("rate_sheet_files/MSC - FAR EAST  AUGUST.xlsx")
+    workbook["REUDAN-SPECIAL"].title = "REUDAN-PEUTE"
+    workbook["REUDAN-TARRIFF"].title = "REUDAN-PAPER"
+    workbook["Haulage Zones"].title = "Haulage Zones SEP"
+
+    for sheet_name, documentation in (
+        ("REUDAN-PEUTE", "USD 40 per B/L"),
+        ("REUDAN-PAPER", "GBP 30 per B/L"),
+    ):
+        sheet = workbook[sheet_name]
+        for row_number in range(4, 256):
+            sheet.cell(row=row_number, column=7).value = documentation
+            sheet.cell(row=row_number, column=9).value = "01.09.26"
+            sheet.cell(row=row_number, column=10).value = "30.09.26"
+
+    cover = workbook["Cover page"]
+    for row in cover.iter_rows():
+        if any(cell.value == "Validity From/To" for cell in row):
+            next(cell for cell in reversed(row) if cell.value is not None).value = "01.09.26 - 30.09.26"
+            break
+
+    haulage = workbook["Haulage Zones SEP"]
+    duplicate = [haulage.cell(row=3, column=column).value for column in range(1, 6)]
+    haulage.append(duplicate)
+    workbook.save(source)
+    return source
 
 
 def test_settings_seed_missing_bundled_templates_without_overwriting_existing(tmp_path: Path, monkeypatch):
@@ -705,6 +736,47 @@ def test_msc_zoned_inline_import_joins_birmingham_to_both_pols_and_tiers(tmp_pat
     assert birmingham_response.status_code == 200
     assert birmingham_response.json()
     assert all(rate["place_of_receipt"] == "Birmingham" for rate in birmingham_response.json())
+
+
+def test_msc_peute_paper_import_applies_confirmed_documentation_rule(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    source = build_msc_peute_paper_fixture(tmp_path)
+    seed_templates(tmp_path)
+
+    result = runner.invoke(app, ["import", str(source)])
+    assert result.exit_code == 0, result.stdout
+    assert "Parser family: msc_zoned_inline" in result.stdout
+    assert "Template used: msc_peute_paper_v1" in result.stdout
+    import_id = next(
+        line.split(": ", 1)[1]
+        for line in result.stdout.splitlines()
+        if line.startswith("Import created:")
+    )
+    run_dir = tmp_path / "data" / "runs" / import_id
+
+    offers = detail_rows(run_dir / "parsed_rate_offers.csv")
+    charges = detail_rows(run_dir / "parsed_rate_charge_lines.csv")
+    tier_tables = json.loads(run_dir.joinpath("tier_rate_tables.json").read_text(encoding="utf-8"))
+    validation = json.loads(run_dir.joinpath("validation_report.json").read_text(encoding="utf-8"))
+
+    assert len(offers) > 30000
+    assert len(charges) == len(offers)
+    assert {offer["offer_reference"] for offer in offers} == {"PEUTE", "PAPER"}
+    assert {offer["base_currency"] for offer in offers} == {"USD"}
+    assert {
+        (charge["charge_type"], charge["basis"], float(charge["amount"]), charge["currency"])
+        for charge in charges
+    } == {("origin", "per B/L", 30.0, "GBP")}
+    assert {charge["raw_value"] for charge in charges} == {
+        "USD 40 per B/L",
+        "GBP 30 per B/L",
+    }
+    assert len(tier_tables["PEUTE"]) == 252
+    assert len(tier_tables["PAPER"]) == 252
+    assert {row["documentation"] for rows in tier_tables.values() for row in rows} == {
+        "GBP 30 per B/L"
+    }
+    assert validation["summary"] == {"errors": 0, "warnings": 0, "info": 0}
 
 
 def test_hapag_door_matrix_import_adds_conditional_container_charges(tmp_path: Path, monkeypatch):

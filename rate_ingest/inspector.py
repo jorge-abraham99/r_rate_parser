@@ -154,15 +154,30 @@ def guess_parser_family(sheet_summaries: list[dict[str, Any]], source_type: str 
         return "email_table"
     if "CITY NAME" in flattened and ("GBFXT" in flattened or "GBSOU" in flattened or "GBLGP" in flattened):
         return "haulage_matrix"
+    has_msc_zoned_rate_pair = (
+        "REUDAN-SPECIAL" in sheet_names
+        and "REUDAN-TARRIFF" in sheet_names
+    ) or (
+        "HAULAGE ZONES SEP" in sheet_names
+        and "REUDAN-PEUTE" in sheet_names
+        and "REUDAN-PAPER" in sheet_names
+    )
     if (
         "HAULAGE ZONES" in sheet_names
-        and "REUDAN-SPECIAL" in sheet_names
-        and "REUDAN-TARRIFF" in sheet_names
+        and has_msc_zoned_rate_pair
         and "CITY" in flattened
         and "COUNTY" in flattened
         and "ALL IN RATE" in flattened
     ):
         return "msc_zoned_inline"
+    if (
+        "REUDAN-PEUTE" in sheet_names
+        and "REUDAN-PAPER" in sheet_names
+        and "CUSTOMER" in flattened
+        and "POL" in flattened
+        and "POD" in flattened
+    ):
+        return "tabular_lane"
     if (
         "SRV ID" in flattened
         and "CHARGE TYPE" in flattened

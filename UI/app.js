@@ -471,7 +471,7 @@ function renderDifferences(summary) {
 }
 
 function renderTierRateTables(tables) {
-  const tiers = ["SPECIAL", "TARIFF"].filter((tier) => Array.isArray(tables?.[tier]) && tables[tier].length);
+  const tiers = Object.keys(tables || {}).filter((tier) => Array.isArray(tables[tier]) && tables[tier].length);
   elements.tierRateSection.hidden = !tiers.length;
   elements.parseModal.classList.toggle("has-tier-tables", Boolean(tiers.length));
   if (!tiers.length) {

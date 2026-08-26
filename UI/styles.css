@@ -721,6 +721,13 @@ label:focus-within {
   white-space: nowrap;
 }
 
+.service-tags .customer-rate-tag {
+  border-color: #d7a623;
+  background: #fff4c7;
+  color: #6f4d00;
+  font-weight: 700;
+}
+
 .transit-value,
 .component-value {
   color: var(--body);

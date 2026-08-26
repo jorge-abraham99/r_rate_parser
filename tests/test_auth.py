@@ -367,6 +367,7 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     login_html = Path("UI/login.html").read_text(encoding="utf-8")
     import_html = Path("UI/import.html").read_text(encoding="utf-8")
     quote_html = Path("UI/index.html").read_text(encoding="utf-8")
+    styles_css = Path("UI/styles.css").read_text(encoding="utf-8")
     auth_js = Path("UI/auth.js").read_text(encoding="utf-8")
     app_js = Path("UI/app.js").read_text(encoding="utf-8")
     rate_desk_js = Path("UI/rate-desk.js").read_text(encoding="utf-8")
@@ -402,6 +403,10 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert "deskState.pageSize" in rate_desk_js
     assert ": [...portRates, ...doorRates]" in rate_desk_js
     assert rate_desk_js.count("countsTowardTotal: line.counts_toward_total !== false") >= 2
+    assert 'normalized(rate.offer_reference) === "peute"' in rate_desk_js
+    assert "customerSpecific: true" in rate_desk_js
+    assert ".service-tags .customer-rate-tag" in styles_css
+    assert "Object.keys(tables || {})" in app_js
 
 
 def test_invitation_and_recovery_password_page_enforces_safe_acceptance_flow():

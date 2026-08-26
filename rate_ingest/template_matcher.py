@@ -47,6 +47,12 @@ def score_template(template: ParserTemplate, inspect_result: InspectResult) -> f
         score += 0.2 * len(filename_matches)
 
     sheet_names = [summary["sheet_name"].upper() for summary in inspect_result.sheet_summaries]
+    required_sheet_tokens = rules.get("required_sheet_name_contains_all", [])
+    if any(
+        not any(token.upper() in sheet_name for sheet_name in sheet_names)
+        for token in required_sheet_tokens
+    ):
+        return 0.0
     for token in rules.get("sheet_name_contains_any", []):
         if any(token.upper() in sheet_name for sheet_name in sheet_names):
             score += 0.15
@@ -79,9 +85,17 @@ def find_best_template(settings: Settings, inspect_result: InspectResult) -> tup
                 "template_name": template.template_name,
                 "confidence": round(score, 2),
                 "parser_family_match": inspect_result.parser_family_guess == template.parser_family,
+                "match_priority": int(template.match_rules.get("priority", 0)),
             }
         )
-    scored.sort(key=lambda item: (item["confidence"], item["parser_family_match"]), reverse=True)
+    scored.sort(
+        key=lambda item: (
+            item["confidence"],
+            item["parser_family_match"],
+            item["match_priority"],
+        ),
+        reverse=True,
+    )
     best = scored[0] if scored else None
     if best and best["confidence"] >= 0.55:
         template = next(template for template in load_templates(settings) if template.template_id == best["template_id"])
