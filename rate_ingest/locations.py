@@ -12,6 +12,7 @@ from rate_ingest.models import RateOffer
 LOCATION_CATALOGUE_PARSER_FAMILIES = {
     "hapag_door_matrix",
     "hapag_india_rows",
+    "msc_zoned_inline",
     "offer_block",
     "site_to_site_rows",
 }
@@ -139,6 +140,8 @@ def apply_location_catalogue(
             collection_name,
             source_code=collection_source_code,
         )
+        if not collection:
+            collection = resolve_structured_collection(offer, collection_name)
         if collection:
             offer.collection_location_code = collection.location.code
             offer.collection_location_name = collection.location.display_name
@@ -202,6 +205,99 @@ def extract_collection_source_code(offer: RateOffer) -> str | None:
 def extract_destination_source_code(offer: RateOffer) -> str | None:
     explicit = offer.raw_row_json.get("destination_source_code")
     return normalize_source_code(str(explicit)) if explicit else None
+
+
+_STRUCTURED_COLLECTION_DISPLAY_OVERRIDES = {
+    "ashby de la zouch": "Ashby-de-la-Zouch",
+    "burton upon trent": "Burton-upon-Trent",
+    "kingston upon hull": "Kingston upon Hull",
+    "lichfield": "Lichfield",
+    "stoke on trent": "Stoke-on-Trent",
+}
+
+_MSC_GB_LOAD_PORTS = {
+    "BRISTOL",
+    "FELIXSTOWE",
+    "GREENOCK",
+    "LIVERPOOL",
+    "LONDONGATEWAY",
+    "SOUTHAMPTON",
+    "TEESPORT",
+}
+
+
+def resolve_structured_collection(
+    offer: RateOffer,
+    raw_name: str | None,
+) -> LocationResolution | None:
+    """Build a canonical location from an explicit carrier location table row.
+
+    MSC's haulage-zone sheet is a structured collection catalogue rather than a
+    free-text address field. Existing published offers predate the explicit
+    country hint, so the stored MSC row shape is also recognised for backfill.
+    """
+    country_code = normalize_source_code(
+        str(offer.raw_row_json.get("collection_country_code") or "")
+    )
+    if not country_code and is_msc_haulage_location_row(offer):
+        country_code = "GB"
+    if (
+        not raw_name
+        or not country_code
+        or not re.fullmatch(r"[A-Z]{2}", country_code)
+    ):
+        return None
+
+    base_name = normalize_structured_collection_display(raw_name)
+    display_name = (
+        base_name
+        if re.search(rf",\s*{re.escape(country_code)}$", base_name, re.IGNORECASE)
+        else f"{base_name}, {country_code}"
+    )
+    return LocationResolution(
+        CanonicalLocation(
+            code=location_code(display_name),
+            display_name=display_name,
+            country_code=country_code,
+            subdivision_name=(
+                [part.strip() for part in display_name.split(",")][-2]
+                if display_name.count(",") >= 2
+                else None
+            ),
+        ),
+        "structured_collection",
+    )
+
+
+def is_msc_haulage_location_row(offer: RateOffer) -> bool:
+    required_keys = {
+        "city",
+        "area",
+        "county",
+        "haulage_pol_raw",
+        "zone",
+        "haulage_row_reference",
+    }
+    haulage_pol = normalize_source_code(
+        str(offer.raw_row_json.get("haulage_pol_raw") or "")
+    )
+    return (
+        offer.service_mode == "SD / CY"
+        and required_keys.issubset(offer.raw_row_json)
+        and haulage_pol in _MSC_GB_LOAD_PORTS
+    )
+
+
+def normalize_structured_collection_display(value: str) -> str:
+    normalized = " ".join(value.strip().split())
+    override = _STRUCTURED_COLLECTION_DISPLAY_OVERRIDES.get(
+        location_match_key(normalized)
+    )
+    if override:
+        return override
+    if normalized.isupper() or normalized.islower():
+        return normalized.title()
+    return normalized
 
 
 _COLLECTION_DISPLAY_OVERRIDES = {
@@ -292,11 +388,12 @@ _COLLECTION_SUFFIXES = sorted(
 _DESTINATION_ALIASES = {
     "Bangkok, TH": ("Bangkok, TH", "Lat Krabang"),
     "Binh Duong, VN": ("Binh Duong, VN", "Binh Duong Terminal"),
-    "Da Nang, VN": ("Da Nang, VN",),
+    "Da Nang, VN": ("Da Nang, VN", "DA-NANG"),
     "Ennore Chennai, IN": ("Ennore Chennai, IN",),
     "Hai Phong, VN": (
         "Hai Phong, VN",
         "Hai Phong",
+        "HAIPHONG",
         "Haiphong - Lach Huyen, VN",
         "Haiphong – Lach Huyen, VN",
     ),
@@ -309,12 +406,14 @@ _DESTINATION_ALIASES = {
         "Cat Lai Terminal",
     ),
     "Jakarta, ID": ("Jakarta, ID", "Jakarta"),
+    "Indonesia, ID": ("Indonesia, ID", "INDONESIA"),
     "Jawaharlal Nehru, IN": (
         "Jawaharlal Nehru, IN",
         "Jawaharlal Nehru, MAHARASHTRA, India",
     ),
     "Kaohsiung, TW": ("Kaohsiung, TW",),
     "Laem Chabang, TH": ("Laem Chabang, TH", "Laem Chabang"),
+    "Manila, PH": ("Manila, PH", "MANILA"),
     "Mundra, IN": ("Mundra, IN", "Mundra, GUJARAT, India"),
     "Penang, MY": ("Penang, MY",),
     "Pipavav, IN": ("Pipavav, IN",),

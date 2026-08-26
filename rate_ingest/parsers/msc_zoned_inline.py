@@ -17,6 +17,9 @@ def parse_workbook(
 ) -> tuple[RateCard, list[RateOffer], list[RateChargeLine], list[RateNote]]:
     workbook = load_workbook(path, data_only=True, read_only=True)
     rules = template.inline_haulage_rules
+    collection_country_code = str(
+        rules.get("collection_country_code") or ""
+    ).upper()
     metadata = extract_cover_metadata(workbook)
     card_valid_from, card_valid_to = parse_compact_date_range(metadata.get("Validity From/To"))
     card = RateCard(
@@ -67,6 +70,7 @@ def parse_workbook(
                     raw_row_reference=f"{rate['rate_row_reference']} + {haulage['haulage_row_reference']}",
                     raw_row_json={
                         "pricing_tier": rate["tier"],
+                        "collection_country_code": collection_country_code,
                         "city": haulage["city"],
                         "area": haulage["area"],
                         "county": haulage["county"],

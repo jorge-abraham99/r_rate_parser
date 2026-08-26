@@ -58,6 +58,10 @@ def test_catalogue_maps_agreed_destination_aliases_and_county_exceptions():
         catalogue.resolve("Rushden Northampton, GB").location.display_name
         == "Rushden, Northamptonshire, GB"
     )
+    assert catalogue.resolve("DA-NANG").location.display_name == "Da Nang, VN"
+    assert catalogue.resolve("HAIPHONG").location.display_name == "Hai Phong, VN"
+    assert catalogue.resolve("MANILA").location.display_name == "Manila, PH"
+    assert catalogue.resolve("INDONESIA").location.display_name == "Indonesia, ID"
 
 
 def test_catalogue_matching_ignores_case_and_spacing_but_not_punctuation():
@@ -93,6 +97,29 @@ def test_offer_gets_canonical_links_without_changing_raw_carrier_fields():
     assert offer.origin == "Norwich"
     assert offer.pod == "Vung Tau"
     assert offer.final_destination == "Vung Tau"
+
+
+def test_structured_msc_collection_row_creates_canonical_location():
+    offer = make_offer(
+        origin="Alford, Grampian Region",
+        place_of_receipt="Alford, Grampian Region",
+        service_mode="SD / CY",
+        raw_row_json={
+            "city": "Alford",
+            "area": "Scottish Highlands",
+            "county": "Grampian Region",
+            "haulage_pol_raw": "Greenock",
+            "zone": "ZONE 4",
+            "haulage_row_reference": "Haulage Zones SEP!R12",
+        },
+    )
+
+    issues = apply_location_catalogue([offer], LocationCatalogue.default())
+
+    assert issues == []
+    assert offer.collection_location_code == "alford-grampian-region-gb"
+    assert offer.collection_location_name == "Alford, Grampian Region, GB"
+    assert offer.place_of_receipt == "Alford, Grampian Region"
 
 
 def test_unknown_location_blocks_publication_and_names_file_sheet_and_row():
@@ -183,6 +210,7 @@ def test_existing_approved_offers_can_be_backfilled_without_reupload(tmp_path):
 
     assert dry_run == {
         "applied": False,
+        "import_id": None,
         "offer_count": 1,
         "resolved_offer_count": 1,
         "unresolved_count": 0,
@@ -190,3 +218,63 @@ def test_existing_approved_offers_can_be_backfilled_without_reupload(tmp_path):
     }
     assert applied["applied"] is True
     repository.persist_offer_locations.assert_called_once()
+
+
+def test_location_backfill_can_be_scoped_to_one_approved_import(tmp_path):
+    target_card = RateCard(
+        id="target_card",
+        rate_import_id="target_import",
+        document_type="ocean_export",
+    )
+    other_card = RateCard(
+        id="other_card",
+        rate_import_id="other_import",
+        document_type="ocean_export",
+    )
+    target_offer = make_offer(
+        rate_card_id=target_card.id,
+        origin="Abercarn",
+        place_of_receipt="Abercarn",
+        service_mode="SD / CY",
+        raw_row_json={
+            "city": "Abercarn",
+            "area": "South Wales",
+            "county": "Caerphilly",
+            "haulage_pol_raw": "Bristol",
+            "zone": "ZONE 4",
+            "haulage_row_reference": "Haulage Zones SEP!R2",
+        },
+    )
+    other_offer = make_offer(
+        rate_card_id=other_card.id,
+        origin="Mystery Place",
+        place_of_receipt="Mystery Place",
+    )
+    repository = Mock(spec=RateRepository)
+    repository.backend_name = "csv"
+    repository.load_approved_rate_library.return_value = ApprovedRateLibrary(
+        cards=(target_card, other_card),
+        offers=(target_offer, other_offer),
+        charges=(),
+        notes=(),
+        source_by_import={},
+    )
+
+    result = backfill_location_catalogue(
+        Settings.load(tmp_path),
+        apply=True,
+        import_id="target_import",
+        repository=repository,
+        organization_id="local-csv",
+    )
+
+    assert result == {
+        "applied": True,
+        "import_id": "target_import",
+        "offer_count": 1,
+        "resolved_offer_count": 1,
+        "unresolved_count": 0,
+        "unresolved": [],
+    }
+    persisted_offers = repository.persist_offer_locations.call_args.args[0]
+    assert [offer.id for offer in persisted_offers] == [target_offer.id]

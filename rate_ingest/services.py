@@ -1120,6 +1120,7 @@ def backfill_location_catalogue(
     settings: Settings,
     *,
     apply: bool = False,
+    import_id: str | None = None,
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
 ) -> dict[str, Any]:
@@ -1132,6 +1133,15 @@ def backfill_location_catalogue(
         organization_id=repository_org_id
     )
     offers = list(library.offers)
+    if import_id:
+        matching_card_ids = {
+            card.id for card in library.cards if card.rate_import_id == import_id
+        }
+        if not matching_card_ids:
+            raise ValueError(f"Approved import {import_id} was not found.")
+        offers = [
+            offer for offer in offers if offer.rate_card_id in matching_card_ids
+        ]
     issues = apply_location_catalogue(offers, LocationCatalogue.default())
     unresolved = [
         {
@@ -1155,6 +1165,7 @@ def backfill_location_catalogue(
         invalidate_rate_desk_cache(settings, repository_org_id)
     return {
         "applied": apply,
+        "import_id": import_id,
         "offer_count": len(offers),
         "resolved_offer_count": sum(
             bool(

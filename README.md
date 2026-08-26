@@ -130,6 +130,7 @@ After applying the canonical-location database migration, existing approved Post
 ```bash
 python -m rate_ingest backfill-locations --organization-id <organization-uuid>
 python -m rate_ingest backfill-locations --organization-id <organization-uuid> --apply
+python -m rate_ingest backfill-locations --organization-id <organization-uuid> --import-id <import-id> --apply
 ```
 
 The first command is a dry run and the second refuses to write if any collection or destination is still unmapped.
