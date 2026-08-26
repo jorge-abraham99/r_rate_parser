@@ -401,6 +401,7 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert "/api/rate-desk/offers/${encodeURIComponent(offerId)}" in rate_desk_js
     assert "deskState.totalMatches" in rate_desk_js
     assert "deskState.pageSize" in rate_desk_js
+    assert '"40hdry"' in rate_desk_js
     assert ": [...portRates, ...doorRates]" in rate_desk_js
     assert rate_desk_js.count("countsTowardTotal: line.counts_toward_total !== false") >= 2
     assert 'normalized(rate.offer_reference) === "peute"' in rate_desk_js

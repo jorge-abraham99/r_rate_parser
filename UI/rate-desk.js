@@ -1134,7 +1134,7 @@ function canonicalEquipment(value) {
   const text = normalized(value);
   if (["20", "20gp", "20ft", "20dv"].includes(text)) return "20GP";
   if (["40", "40gp"].includes(text)) return "40GP";
-  if (["40hc", "40hq", "40'hc", "40′hc", "feu"].includes(text)) return "40HC";
+  if (["40hc", "40hdry", "40hq", "40'hc", "40′hc", "feu"].includes(text)) return "40HC";
   return String(value || "").toUpperCase();
 }
 

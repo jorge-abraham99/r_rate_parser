@@ -1231,7 +1231,9 @@ def filter_rate_summaries(
             pod,
         ):
             continue
-        if equipment_type and (rate.get("equipment_type") or "").upper() != equipment_type.upper():
+        if equipment_type and canonical_equipment_type(
+            rate.get("equipment_type")
+        ) != canonical_equipment_type(equipment_type):
             continue
         if material_key and material_key not in {item.lower() for item in rate.get("materials", [])}:
             continue
@@ -1588,6 +1590,23 @@ def normalize_location_key(value: str) -> str:
     text = re.sub(r"[,\s]+(?:gb|uk)$", "", text, flags=re.IGNORECASE)
     text = re.sub(r"[^a-z0-9]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def canonical_equipment_type(value: str | None) -> str:
+    normalized = re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
+    aliases = {
+        "20": "20GP",
+        "20DV": "20GP",
+        "20FT": "20GP",
+        "20GP": "20GP",
+        "40": "40HC",
+        "40HC": "40HC",
+        "40HDRY": "40HC",
+        "40HQ": "40HC",
+        "FEU": "40HC",
+        "40GP": "40GP",
+    }
+    return aliases.get(normalized, normalized)
 
 
 def build_haulage_lookup(
