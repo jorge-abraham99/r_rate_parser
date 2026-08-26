@@ -22,6 +22,7 @@ match_rules:
     - "REUDAN-TARRIFF"
 
 inline_haulage_rules:
+  collection_country_code: GB
   haulage_sheet: "Haulage Zones"
   rate_sheets:
     REUDAN-SPECIAL: SPECIAL

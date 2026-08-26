@@ -764,6 +764,10 @@ def test_msc_peute_paper_import_applies_confirmed_documentation_rule(tmp_path: P
     assert len(charges) == len(offers)
     assert {offer["offer_reference"] for offer in offers} == {"PEUTE", "PAPER"}
     assert {offer["base_currency"] for offer in offers} == {"USD"}
+    assert all(offer["collection_location_code"] for offer in offers)
+    assert all(offer["collection_location_name"] for offer in offers)
+    assert all(offer["destination_location_code"] for offer in offers)
+    assert all(offer["destination_location_name"] for offer in offers)
     assert {
         (charge["charge_type"], charge["basis"], float(charge["amount"]), charge["currency"])
         for charge in charges

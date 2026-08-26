@@ -170,6 +170,11 @@ def backfill_postgres(
 )
 def backfill_locations(
     organization_id: str = typer.Option("", "--organization-id"),
+    import_id: str | None = typer.Option(
+        None,
+        "--import-id",
+        help="Limit the check or update to one approved import.",
+    ),
     apply: bool = typer.Option(
         False,
         "--apply",
@@ -187,6 +192,7 @@ def backfill_locations(
         report = backfill_location_catalogue(
             cfg,
             apply=apply,
+            import_id=import_id,
             organization_id=repository_org_id,
         )
     except (RuntimeError, ValueError) as exc:

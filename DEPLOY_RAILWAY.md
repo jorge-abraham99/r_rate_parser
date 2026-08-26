@@ -159,6 +159,14 @@ After the new code is deployed, validate the existing approved imports without c
 python -m rate_ingest backfill-locations --organization-id <organization-uuid>
 ```
 
+To validate and update one newly supported import without touching unrelated
+historical offers, pass its application import ID:
+
+```bash
+python -m rate_ingest backfill-locations --organization-id <organization-uuid> --import-id <import-id>
+python -m rate_ingest backfill-locations --organization-id <organization-uuid> --import-id <import-id> --apply
+```
+
 The check must report zero unresolved rows. Then persist the links:
 
 ```bash

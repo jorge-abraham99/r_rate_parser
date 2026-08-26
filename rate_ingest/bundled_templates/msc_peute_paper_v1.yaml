@@ -29,6 +29,7 @@ match_rules:
 
 inline_haulage_rules:
   haulage_sheet: "Haulage Zones SEP"
+  collection_country_code: GB
   rate_sheets:
     REUDAN-PEUTE: PEUTE
     REUDAN-PAPER: PAPER
