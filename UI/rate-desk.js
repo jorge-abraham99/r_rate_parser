@@ -567,8 +567,22 @@ function makeConnectedRow(rate, quantity) {
 function makeConnectedDoorRow(rate, quantity) {
   const sourceFile = rate.source_file_name || rate.raw_sheet_name || "Approved rate";
   const customerRateLabel = normalized(rate.offer_reference) === "peute" ? "PEUTE" : "";
+  const baseRow = makeConnectedRow(rate, quantity);
+  const inlandZone = formatZoneLabel(rate.zone);
+  const groups = baseRow.detailLoaded
+    ? orderGroups([
+      makeGroup("inland", "Inland haulage", [makeLineView({
+        name: `Inland haulage included in quoted door-to-quay rate${inlandZone ? ` — ${inlandZone}` : ""}`,
+        basis: "Container",
+        ccy: "—",
+        unit: 0,
+        included: true,
+      }, quantity, DEFAULT_FX)]),
+      ...baseRow.groups,
+    ])
+    : baseRow.groups;
   return {
-    ...makeConnectedRow(rate, quantity),
+    ...baseRow,
     type: "CONTRACT",
     routeLane: formatRouteLane(
       rateCollection(rate),
@@ -581,6 +595,10 @@ function makeConnectedDoorRow(rate, quantity) {
       { label: "Door-to-quay", file: sourceFile },
       ...(customerRateLabel ? [{ label: customerRateLabel, file: sourceFile, customerSpecific: true }] : []),
     ],
+    groups,
+    inlandIncluded: true,
+    inlandZone,
+    fineprint: `Inland haulage is included in the quoted door-to-quay rate${inlandZone ? ` via ${inlandZone}` : ""}; it is not itemised separately by the carrier.`,
   };
 }
 
@@ -751,10 +769,21 @@ function renderRate(row, index, isBest) {
 
 function renderInland(row) {
   if (row.poa) return '<span class="poa-chip">POA</span>';
-  if (!row.groups.some((group) => group.key === "inland") || row.groups.find((group) => group.key === "inland")?.lines.some((line) => line.included)) {
+  const inlandGroup = row.groups.find((group) => group.key === "inland");
+  if (row.inlandIncluded || inlandGroup?.lines.some((line) => line.included)) {
+    return `<span class="included-inland"><strong>Included</strong>${row.inlandZone ? `<small>${escapeHtml(row.inlandZone)}</small>` : ""}</span>`;
+  }
+  if (!inlandGroup) {
     return '<span class="muted-mono">—</span>';
   }
   return `<span class="component-value">${escapeHtml(formatUsd(row.inlandUsd))}</span>`;
+}
+
+function formatZoneLabel(value) {
+  const zone = String(value || "").trim();
+  if (!zone) return "";
+  const match = zone.match(/(?:ZONE\s*)?(\d+)/i);
+  return match ? `Zone ${match[1]}` : zone;
 }
 
 function renderBreakdown(row) {

@@ -406,6 +406,10 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert 'normalized(rate.offer_reference) === "peute"' in rate_desk_js
     assert "customerSpecific: true" in rate_desk_js
     assert ".service-tags .customer-rate-tag" in styles_css
+    assert "inlandIncluded: true" in rate_desk_js
+    assert "Inland haulage included in quoted door-to-quay rate" in rate_desk_js
+    assert 'class="included-inland"' in rate_desk_js
+    assert ".included-inland" in styles_css
     assert "Object.keys(tables || {})" in app_js
 
 
