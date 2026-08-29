@@ -200,6 +200,116 @@ def test_cosco_matrix_import_creates_canonical_rates(tmp_path: Path, monkeypatch
     assert first["to_raw"]
 
 
+def test_cosco_csv_import_extracts_efs_as_charge_lines(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    raw_dir = tmp_path / "incoming"
+    raw_dir.mkdir()
+    source = raw_dir / "COSCO September rates.csv"
+    source.write_bytes(Path("rate_sheet_files/cosco_sep.csv").read_bytes())
+    seed_templates(tmp_path)
+
+    result = runner.invoke(app, ["import", str(source)])
+    assert result.exit_code == 0
+    assert "Template used: cosco_csv_quote_v1" in result.stdout
+    import_id = next(
+        line.split(": ", 1)[1]
+        for line in result.stdout.splitlines()
+        if line.startswith("Import created:")
+    )
+    run_dir = tmp_path / "data" / "runs" / import_id
+    offers = detail_rows(run_dir / "parsed_rate_offers.csv")
+    charges = detail_rows(run_dir / "parsed_rate_charge_lines.csv")
+
+    assert len(offers) == 15
+    assert len(charges) == 15
+    assert {offer["pol"] for offer in offers} == {"Felixstowe", "Southampton"}
+    assert {charge["amount"] for charge in charges} == {"100.0", "150.0"}
+    assert {charge["charge_name"] for charge in charges} == {"Emergency Fuel Surcharge"}
+    assert all(charge["currency"] == "USD" for charge in charges)
+    assert any(offer["base_amount"] == "50.0" for offer in offers)
+
+
+def test_cosco_haulage_import_uses_streaming_header_and_canonical_ports(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    raw_dir = tmp_path / "incoming"
+    raw_dir.mkdir()
+    source = raw_dir / "COSCO Haulage - sep.xlsx"
+    source.write_bytes(Path("rate_sheet_files/Cosco Haulage - sep.xlsx").read_bytes())
+    seed_templates(tmp_path)
+
+    result = runner.invoke(app, ["import", str(source)])
+    assert result.exit_code == 0
+    assert "Template used: cosco_haulage_v1" in result.stdout
+    import_id = next(
+        line.split(": ", 1)[1]
+        for line in result.stdout.splitlines()
+        if line.startswith("Import created:")
+    )
+    run_dir = tmp_path / "data" / "runs" / import_id
+    offers = detail_rows(run_dir / "parsed_rate_offers.csv")
+
+    assert len(offers) == 3630
+    assert {offer["pol"] for offer in offers} == {"Felixstowe", "Southampton"}
+    assert {offer["equipment_type"] for offer in offers} == {"40HC"}
+    assert {offer["base_currency"] for offer in offers} == {"USD"}
+    assert offers[0]["service_mode"] == "Door -> CY"
+
+
+def test_cosco_ocean_and_haulage_publish_as_separate_current_sources(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    raw_dir = tmp_path / "incoming"
+    raw_dir.mkdir()
+    ocean_source = raw_dir / "COSCO September rates.csv"
+    haulage_source = raw_dir / "COSCO Haulage - sep.xlsx"
+    ocean_source.write_bytes(Path("rate_sheet_files/cosco_sep.csv").read_bytes())
+    haulage_source.write_bytes(Path("rate_sheet_files/Cosco Haulage - sep.xlsx").read_bytes())
+    seed_templates(tmp_path)
+
+    ocean_result = runner.invoke(app, ["import", str(ocean_source)])
+    haulage_result = runner.invoke(app, ["import", str(haulage_source)])
+    assert ocean_result.exit_code == 0
+    assert haulage_result.exit_code == 0
+    ocean_id = next(
+        line.split(": ", 1)[1]
+        for line in ocean_result.stdout.splitlines()
+        if line.startswith("Import created:")
+    )
+    haulage_id = next(
+        line.split(": ", 1)[1]
+        for line in haulage_result.stdout.splitlines()
+        if line.startswith("Import created:")
+    )
+
+    for import_id, key, label, tag in (
+        (ocean_id, "cosco-sea", "COSCO · Quay-to-quay", "SEA"),
+        (haulage_id, "cosco-haulage", "COSCO · Export haulage", "HAUL"),
+    ):
+        response = api_client.post(
+            f"/api/imports/{import_id}/approve",
+            json={
+                "approved_by": "jorge",
+                "carrier_name": "COSCO",
+                "carrier_key": key,
+                "carrier_label": label,
+                "contract_tag": tag,
+            },
+        )
+        assert response.status_code == 200
+
+    statuses = {
+        item["import_id"]: item["status"]
+        for item in api_client.get("/api/imports").json()
+        if item["import_id"] in {ocean_id, haulage_id}
+    }
+    assert statuses == {ocean_id: "approved", haulage_id: "approved"}
+    desk = api_client.get("/api/rate-desk", params={"limit": 50}).json()
+    assert len(desk["rates"]) == 15
+    fifty_dollar_rate = next(rate for rate in desk["rates"] if rate["base_amount"] == 50.0)
+    assert fifty_dollar_rate["all_in_usd"] == 150.0
+    assert desk["haulage_tariffs"]["abercarn caerphilly wales united kingdom"]["felixstowe"] == 364.55
+    assert desk["haulage_tariffs_by_source"]["cosco-haulage"]["abercarn caerphilly wales united kingdom"]["felixstowe"] == 364.55
+
+
 def test_cosco_pdf_quote_prices_only_freight_efs_and_haulage(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
     raw_dir = tmp_path / "incoming"

@@ -1,0 +1,27 @@
+template_id: cosco_csv_quote_v1
+template_name: COSCO Quay-to-quay CSV v1
+provider_name: COSCO
+parser_family: cosco_csv_quote
+document_type: ocean_export
+file_type: csv
+active: true
+
+match_rules:
+  filename_contains:
+    - "COSCO"
+  required_header_labels:
+    - "POL"
+    - "POD"
+    - "FREIGHT"
+    - "EFS"
+
+defaults:
+  carrier_name: COSCO
+  currency_default: USD
+  equipment_type: 40HC
+  commodity: WASTE PAPER
+  all_in_flag: false
+
+validation:
+  amount_min: 1
+  amount_max: 10000

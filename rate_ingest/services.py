@@ -31,6 +31,8 @@ from rate_ingest.models import (
 )
 from rate_ingest.parsers.email_table import parse_email as parse_email_table
 from rate_ingest.parsers.cosco_pdf_quote import parse_pdf as parse_cosco_pdf_quote
+from rate_ingest.parsers.cosco_csv_quote import parse_csv as parse_cosco_csv_quote
+from rate_ingest.parsers.cosco_haulage import parse_workbook as parse_cosco_haulage_workbook
 from rate_ingest.parsers.hapag_door_matrix import (
     parse_workbook as parse_hapag_door_matrix_workbook,
 )
@@ -445,6 +447,11 @@ def approve_import_by_id(
         RateChargeLine(**deserialize_row(row)) for row in payload["rate_charge_lines"]
     ]
     notes = [RateNote(**deserialize_row(row)) for row in payload["rate_notes"]]
+    if carrier_key is None:
+        carrier_key = {
+            "cosco_csv_quote": "cosco-sea",
+            "cosco_haulage": "cosco-haulage",
+        }.get(rate_import.parser_family)
     if validation_report.summary.get("errors", 0) > 0:
         raise ValueError(
             "Import has blocking validation errors and cannot be approved."
@@ -999,11 +1006,16 @@ def get_rate_desk_data(
     haulage_tariffs, door_pickups, haulage_currency = build_haulage_lookup(
         haulage_rates
     )
+    haulage_tariffs_by_source, haulage_currencies_by_source = build_haulage_source_lookups(
+        haulage_rates
+    )
     return {
         "last_refreshed": last_refreshed,
         "rates": rates,
         "haulage_tariffs": haulage_tariffs,
         "haulage_currency": haulage_currency,
+        "haulage_tariffs_by_source": haulage_tariffs_by_source,
+        "haulage_currencies_by_source": haulage_currencies_by_source,
         "filters": {
             "origins": origins,
             "destinations": destinations,
@@ -1284,10 +1296,15 @@ def build_rate_desk_metadata(
         if value:
             collection_map.setdefault(normalize_location_key(value), value)
     tariffs, pickups, haulage_currency = build_haulage_lookup(haulage_rates)
+    haulage_tariffs_by_source, haulage_currencies_by_source = build_haulage_source_lookups(
+        haulage_rates
+    )
     return {
         "last_refreshed": last_refreshed,
         "haulage_tariffs": tariffs,
         "haulage_currency": haulage_currency,
+        "haulage_tariffs_by_source": haulage_tariffs_by_source,
+        "haulage_currencies_by_source": haulage_currencies_by_source,
         "filters": {
             "origins": sorted(origin_map.values()),
             "destinations": sorted(destination_map.values()),
@@ -1504,6 +1521,10 @@ def parse_source_by_family(
         return parse_tabular_workbook(source_path, matched_template, rate_import)
     if parser_family == "matrix":
         return parse_matrix_workbook(source_path, matched_template, rate_import)
+    if parser_family == "cosco_csv_quote":
+        return parse_cosco_csv_quote(source_path, matched_template, rate_import)
+    if parser_family == "cosco_haulage":
+        return parse_cosco_haulage_workbook(source_path, matched_template, rate_import)
     if parser_family == "haulage_matrix":
         return parse_haulage_matrix_workbook(source_path, matched_template, rate_import)
     if parser_family == "msc_zoned_inline":
@@ -1653,6 +1674,37 @@ def build_haulage_lookup(
         sorted(pickups.values(), key=lambda item: item["name"]),
         haulage_currency,
     )
+
+
+def build_haulage_source_lookups(
+    haulage_rates: list[dict[str, Any]],
+) -> tuple[dict[str, dict[str, dict[str, float]]], dict[str, str | None]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for rate in haulage_rates:
+        grouped.setdefault(haulage_source_key(rate), []).append(rate)
+    tariffs_by_source: dict[str, dict[str, dict[str, float]]] = {}
+    currencies_by_source: dict[str, str | None] = {}
+    for source_key, rates in grouped.items():
+        tariffs, _, currency = build_haulage_lookup(rates)
+        tariffs_by_source[source_key] = tariffs
+        currencies_by_source[source_key] = currency
+    return tariffs_by_source, currencies_by_source
+
+
+def haulage_source_key(rate: dict[str, Any]) -> str:
+    carrier_key = str(rate.get("carrier_key") or "").strip().lower()
+    if carrier_key == "cosco-haulage":
+        return "cosco-haulage"
+    if carrier_key == "haulage-q2":
+        return "haulage-q2"
+    carrier_name = str(
+        first_present(rate.get("carrier_name"), rate.get("provider_name")) or ""
+    ).strip().lower()
+    if carrier_name == "cosco":
+        return "cosco-haulage"
+    if "haulage" in carrier_name:
+        return "haulage-q2"
+    return carrier_key or "haulage-q2"
 
 
 def is_base_charge(charge: RateChargeLine) -> bool:

@@ -63,6 +63,7 @@
       <footer class="import-footnotes">
         <span>Published sheets feed the Quote tab immediately.</span>
         <span>Publishing a new period’s sheet supersedes the previous one — it stays here as Archived.</span>
+        <span>COSCO quay-to-quay and haulage files publish separately; Quote combines matching port and load-location rates.</span>
       </footer>
     </main>
   </div>
@@ -116,6 +117,15 @@
             <option value="">Select…</option>
             <option value="sea">SEA rates</option>
             <option value="india">India rates</option>
+          </select>
+        </div>
+        <div id="coscoRateTypeRow" class="fact-row choice-fact" hidden>
+          <label for="coscoRateTypeSelect">Rate family</label>
+          <select id="coscoRateTypeSelect">
+            <option value="">Select…</option>
+            <option value="sea">Quay-to-quay</option>
+            <option value="door">Door-to-quay</option>
+            <option value="haulage">Origin haulage</option>
           </select>
         </div>
         <div id="parsedFacts" hidden>

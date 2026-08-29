@@ -14,6 +14,8 @@ const deskState = {
   initialConnectedRates: [],
   filters: {},
   haulageTariffs: {},
+  haulageTariffsBySource: {},
+  haulageCurrenciesBySource: {},
   haulageCurrency: "USD",
   sort: null,
   pageOffset: 0,
@@ -108,6 +110,8 @@ async function bootRateDesk() {
     const metadata = await metaResponse.json();
     deskState.filters = metadata.filters || {};
     deskState.haulageTariffs = metadata.haulage_tariffs || {};
+    deskState.haulageTariffsBySource = metadata.haulage_tariffs_by_source || {};
+    deskState.haulageCurrenciesBySource = metadata.haulage_currencies_by_source || {};
     deskState.haulageCurrency = metadata.haulage_currency || "USD";
     deskState.loaded = true;
     populateConnectedFilters();
@@ -605,12 +609,14 @@ function makeConnectedDoorRow(rate, quantity) {
 function makeConnectedHaulierRow(rate, quantity, collection) {
   const row = makeConnectedRow(rate, quantity);
   const port = merchantHaulagePort(rate);
-  const tariff = findHaulageTariff(collection, port);
+  const tariff = findHaulageTariff(collection, port, rate);
+  const haulageLabel = haulageProviderLabel(rate);
+  const haulageCurrency = haulageCurrencyFor(rate);
   const poa = tariff == null;
   const inlandLines = [makeLineView({
-    name: `Inland Haulage — ${collection} → ${port} (UK Inland Haulage)`,
+    name: `Inland Haulage — ${collection} → ${port} (${haulageLabel})`,
     basis: "Container",
-    ccy: deskState.haulageCurrency || "USD",
+    ccy: haulageCurrency,
     unit: tariff || 0,
     poa,
   }, quantity, DEFAULT_FX)];
@@ -622,15 +628,15 @@ function makeConnectedHaulierRow(rate, quantity, collection) {
     routeLane: formatRouteLane(collection, port, rateDestination(rate)),
     routing: "Quay to quay + your haulier",
     routingDetail: poa
-      ? `${collection} → ${port} → ${rateDestination(rate)} · no tariff rate for ${collection} → ${port}`
-      : `${collection} → ${port} → ${rateDestination(rate)} · ${formatMoney(tariff, deskState.haulageCurrency)}/ctn · separate haulier booking`,
-    services: [...row.services, { label: "+ UK Inland Haulage", file: "UK Inland Haulage" }],
+      ? `${collection} → ${port} → ${rateDestination(rate)} · no ${haulageLabel} tariff for ${collection} → ${port}`
+      : `${collection} → ${port} → ${rateDestination(rate)} · ${formatMoney(tariff, haulageCurrency)}/ctn · separate haulier booking`,
+    services: [...row.services, { label: `+ ${haulageLabel}`, file: haulageLabel }],
     groups,
     inlandUsd: groupTotal(groups, "inland"),
     totalUsd: sumGroups(groups),
     poa,
     fineprint: poa
-      ? `UK Inland Haulage has no ${collection} → ${port} tariff in the approved sheet — request a haulage quote.`
+      ? `${haulageLabel} has no ${collection} → ${port} tariff in the approved sheet — request a haulage quote.`
       : row.fineprint,
   };
 }
@@ -1107,27 +1113,55 @@ function rateDestination(rate) {
 
 function merchantHaulagePort(rate) {
   const pol = firstPresent(rate.pol, "");
-  return supportedHaulagePort(pol) ? pol : "";
+  return supportedHaulagePort(pol, haulageSourceForRate(rate)) ? pol : "";
 }
 
 function canAttachMerchantHaulage(rate) {
-  return Boolean(merchantHaulagePort(rate));
+  return Boolean(haulageSourceForRate(rate) && merchantHaulagePort(rate));
 }
 
-function supportedHaulagePort(value) {
+function supportedHaulagePort(value, sourceKey) {
   if (!value) return false;
   const target = locationKey(value);
-  return Object.values(deskState.haulageTariffs || {}).some((portMap) =>
+  const tariffs = Object.keys(deskState.haulageTariffsBySource || {}).length
+    ? deskState.haulageTariffsBySource[sourceKey] || {}
+    : deskState.haulageTariffs || {};
+  return Object.values(tariffs).some((portMap) =>
     Object.keys(portMap || {}).some((port) => locationKey(port) === target));
 }
 
-function findHaulageTariff(collection, port) {
-  const collectionEntry = Object.entries(deskState.haulageTariffs || {})
+function findHaulageTariff(collection, port, rate) {
+  const sourceKey = haulageSourceForRate(rate);
+  const tariffs = Object.keys(deskState.haulageTariffsBySource || {}).length
+    ? deskState.haulageTariffsBySource[sourceKey] || {}
+    : deskState.haulageTariffs || {};
+  const collectionEntry = Object.entries(tariffs)
     .find(([name]) => locationsMatch(name, collection));
   if (!collectionEntry) return null;
   const portEntry = Object.entries(collectionEntry[1] || {})
     .find(([name]) => locationsMatch(name, port));
   return portEntry ? portEntry[1] : null;
+}
+
+function isCoscoRate(rate) {
+  return normalized(firstPresent(rate.carrier_name, rate.provider_name)).includes("cosco");
+}
+
+function haulageSourceForRate(rate) {
+  if (isCoscoRate(rate)) {
+    return isDoorRate(rate) ? "" : "cosco-haulage";
+  }
+  return "haulage-q2";
+}
+
+function haulageProviderLabel(rate) {
+  return haulageSourceForRate(rate) === "cosco-haulage" ? "COSCO Haulage" : "UK Inland Haulage";
+}
+
+function haulageCurrencyFor(rate) {
+  const sourceKey = haulageSourceForRate(rate);
+  return deskState.haulageCurrenciesBySource?.[sourceKey]
+    || (sourceKey === "cosco-haulage" ? "USD" : deskState.haulageCurrency || "USD");
 }
 
 function canonicalEquipment(value) {

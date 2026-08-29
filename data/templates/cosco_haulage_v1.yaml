@@ -1,0 +1,29 @@
+template_id: cosco_haulage_v1
+template_name: COSCO Origin Haulage Matrix v1
+provider_name: COSCO
+parser_family: cosco_haulage
+document_type: inland_export
+file_type: xlsx
+active: true
+
+match_rules:
+  filename_contains:
+    - "COSCO"
+    - "HAULAGE"
+  required_header_labels:
+    - "Load location"
+    - "POL"
+    - "40ft/HC USD"
+  sheet_name_contains_any:
+    - "Sheet1"
+
+defaults:
+  carrier_name: COSCO
+  currency_default: USD
+  equipment_type: 40HC
+  commodity: WASTE PAPER
+  all_in_flag: false
+
+validation:
+  amount_min: 0
+  amount_max: 10000
