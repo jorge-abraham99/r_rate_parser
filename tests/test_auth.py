@@ -403,6 +403,10 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert 'id="carrierSelect"' in quote_html
     assert "carrierSelect" in rate_desk_js
     assert 'params.set("carrier_name", carrier)' in rate_desk_js
+    assert 'populateSelect(elements.originSelect, origins, "Any origin", "", true)' in rate_desk_js
+    assert 'populateSelect(elements.destinationSelect, destinations, "Any destination", "", true)' in rate_desk_js
+    assert 'data-detail-id="${escapeAttr(row.detailId)}"' in rate_desk_js
+    assert "row.totalUsd + groupTotal(groups, \"inland\")" in rate_desk_js
     assert "/api/rate-desk/offers/${encodeURIComponent(offerId)}" in rate_desk_js
     assert "deskState.totalMatches" in rate_desk_js
     assert "deskState.pageSize" in rate_desk_js

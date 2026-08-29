@@ -160,8 +160,12 @@ function populateConnectedFilters() {
       .filter(Boolean)
   );
 
-  populateSelect(elements.originSelect, origins, "Any origin", origins[0] || "", true);
-  populateSelect(elements.destinationSelect, destinations, "Any destination", destinations[0] || "", true);
+  // Keep the optional lane filters genuinely open on first load. A hidden
+  // first-port/first-destination default makes a carrier filter look as if it
+  // only has one routing option (particularly noticeable for COSCO, where
+  // collection is selected separately to attach haulage).
+  populateSelect(elements.originSelect, origins, "Any origin", "", true);
+  populateSelect(elements.destinationSelect, destinations, "Any destination", "", true);
   populateSelect(elements.carrierSelect, carriers, "Any carrier", "", true);
   populateEquipment(canonicalEquipment(equipment[0] || "40HC"));
   populateSelect(
@@ -338,9 +342,10 @@ function renderDesk() {
   elements.rateRows.querySelectorAll("button[data-rate-id]").forEach((button) => {
     button.addEventListener("click", () => {
       const rateId = button.dataset.rateId;
+      const detailId = button.dataset.detailId || rateId;
       deskState.expandedId = deskState.expandedId === rateId ? null : rateId;
       renderDesk();
-      if (deskState.expandedId && !deskState.detailCache.has(rateId)) loadOfferDetail(rateId);
+      if (deskState.expandedId && !deskState.detailCache.has(detailId)) loadOfferDetail(detailId);
     });
   });
 }
@@ -617,6 +622,7 @@ function makeConnectedDoorRow(rate, quantity) {
 
 function makeConnectedHaulierRow(rate, quantity, collection) {
   const row = makeConnectedRow(rate, quantity);
+  const detailId = row.id;
   const port = merchantHaulagePort(rate);
   const tariff = findHaulageTariff(collection, port, rate);
   const haulageLabel = haulageProviderLabel(rate);
@@ -633,6 +639,7 @@ function makeConnectedHaulierRow(rate, quantity, collection) {
   return {
     ...row,
     id: `${row.id}-haulage-${slugify(collection)}`,
+    detailId,
     type: "CONTRACT",
     routeLane: formatRouteLane(collection, port, rateDestination(rate)),
     routing: "Quay to quay + your haulier",
@@ -642,7 +649,9 @@ function makeConnectedHaulierRow(rate, quantity, collection) {
     services: [...row.services, { label: `+ ${haulageLabel}`, file: haulageLabel }],
     groups,
     inlandUsd: groupTotal(groups, "inland"),
-    totalUsd: sumGroups(groups),
+    totalUsd: row.detailLoaded
+      ? sumGroups(groups)
+      : row.totalUsd + groupTotal(groups, "inland"),
     poa,
     fineprint: poa
       ? `${haulageLabel} has no ${collection} → ${port} tariff in the approved sheet — request a haulage quote.`
@@ -757,7 +766,7 @@ function renderRate(row, index, isBest) {
     : [row.routeLane, row.routingDetail].filter(Boolean).join(" · ");
   return `
     <article class="rate-record">
-      <button class="quote-grid quote-row${row.poa ? " poa-row" : ""}${row.expired ? " expired-row" : ""}" type="button" data-rate-id="${escapeAttr(row.id)}" aria-expanded="${expanded}">
+      <button class="quote-grid quote-row${row.poa ? " poa-row" : ""}${row.expired ? " expired-row" : ""}" type="button" data-rate-id="${escapeAttr(row.id)}"${row.detailId ? ` data-detail-id="${escapeAttr(row.detailId)}"` : ""} aria-expanded="${expanded}">
         <span><span class="type-chip">${escapeHtml(row.type)}</span></span>
         <span class="${isBest ? "rank best-rank" : "rank"}">${row.defaultRank || index + 1}</span>
         <span class="routing-cell" title="${escapeAttr(routingTitle)}">
@@ -802,8 +811,9 @@ function formatZoneLabel(value) {
 }
 
 function renderBreakdown(row) {
-  if (deskState.detailErrors.has(row.id)) {
-    return `<div class="rate-breakdown"><div class="breakdown-panel"><div class="rate-empty">${escapeHtml(deskState.detailErrors.get(row.id))}</div></div></div>`;
+  const detailId = row.detailId || row.id;
+  if (deskState.detailErrors.has(detailId)) {
+    return `<div class="rate-breakdown"><div class="breakdown-panel"><div class="rate-empty">${escapeHtml(deskState.detailErrors.get(detailId))}</div></div></div>`;
   }
   if (row.detailLoading || (deskState.expandedId === row.id && !row.detailLoaded)) {
     return '<div class="rate-breakdown"><div class="breakdown-panel"><div class="rate-empty">Loading charge breakdown…</div></div></div>';
