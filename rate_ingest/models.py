@@ -166,6 +166,7 @@ class ParserTemplate(BaseModel):
     hapag_matrix_rules: dict[str, Any] = Field(default_factory=dict)
     hapag_india_rules: dict[str, Any] = Field(default_factory=dict)
     cosco_pdf_rules: dict[str, Any] = Field(default_factory=dict)
+    csv_rules: dict[str, Any] = Field(default_factory=dict)
     defaults: dict[str, Any] = Field(default_factory=dict)
 
 

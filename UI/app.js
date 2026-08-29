@@ -5,6 +5,7 @@ const SOURCE_DEFINITIONS = [
   { key: "msc-inline", provider: "MSC", service: "Door-to-quay", cadence: "monthly" },
   { key: "hapag-door", provider: "Hapag-Lloyd", service: "SEA · Door-to-quay", cadence: "monthly" },
   { key: "hapag-india", provider: "Hapag-Lloyd", service: "India · Door-to-quay", cadence: "monthly" },
+  { key: "cma-door", provider: "CMA CGM", service: "Door-to-quay", cadence: "monthly" },
   { key: "cosco-sea", provider: "COSCO", service: "SEA · Quay-to-quay", cadence: "monthly" },
   { key: "cosco-door", provider: "COSCO", service: "India/Far East Door-to-quay", cadence: "monthly" },
   { key: "cosco-haulage", provider: "COSCO", service: "Export haulage", cadence: "monthly" },
@@ -677,6 +678,15 @@ function sourcePayload(preview, sourceKey) {
       contract_tag: null,
     };
   }
+  if (sourceKey === "cma-door") {
+    return {
+      approved_by: "Rate Desk operator",
+      carrier_name: "CMA CGM",
+      carrier_key: sourceKey,
+      carrier_label: "CMA CGM · Door-to-quay",
+      contract_tag: null,
+    };
+  }
   if (sourceKey === "haulage-q2") {
     return {
       approved_by: "Rate Desk operator",
@@ -813,6 +823,7 @@ async function deleteFile(sourceKey, fileId) {
 
 function selectedSourceKey(preview) {
   if (preview.source === "msc") return "msc-inline";
+  if (preview.source === "cma") return "cma-door";
   if (preview.source === "hapag") {
     if (preview.hapagRateType === "sea") return "hapag-door";
     if (preview.hapagRateType === "india") return "hapag-india";
@@ -837,6 +848,7 @@ function selectedSourceKey(preview) {
 }
 
 function inferSourceKey(item) {
+  if (item.parser_family === "cma_csv_quote") return "cma-door";
   if (item.parser_family === "cosco_pdf_quote") return "cosco-door";
   if (item.parser_family === "cosco_csv_quote") return "cosco-sea";
   if (item.parser_family === "cosco_haulage") return "cosco-haulage";
@@ -871,6 +883,7 @@ function inferSourceKey(item) {
 
 function inferServiceLabel(item) {
   const text = normalized(`${item?.carrier_label || ""} ${item?.service_mode || ""} ${item?.contract_tag || ""}`);
+  if (item?.parser_family === "cma_csv_quote") return "Door-to-quay";
   if (item?.parser_family === "cosco_haulage") return "Export haulage";
   if (item?.parser_family === "cosco_csv_quote") return "SEA · Quay-to-quay";
   if (text.includes("door") || text.includes("sd / cy") || text.includes("sd/cy")) return "Door-to-quay";
@@ -879,6 +892,7 @@ function inferServiceLabel(item) {
 }
 
 function suggestedSource(detail) {
+  if (detail?.rate_import?.parser_family === "cma_csv_quote") return "cma";
   if (detail?.rate_import?.parser_family === "msc_zoned_inline") return "msc";
   if (detail?.rate_import?.parser_family === "hapag_door_matrix") return "hapag";
   if (detail?.rate_import?.parser_family === "site_to_site_rows") return "maersk";
@@ -897,6 +911,7 @@ function suggestedCoscoRateType(detail) {
 
 function sourceChoiceForKey(sourceKey) {
   if (sourceKey === "msc-inline") return "msc";
+  if (sourceKey === "cma-door") return "cma";
   if (sourceKey === "hapag-door" || sourceKey === "hapag-india") return "hapag";
   if (sourceKey === "cosco-door") return "cosco";
   if (sourceKey === "cosco-sea" || sourceKey === "cosco-haulage") return "cosco";

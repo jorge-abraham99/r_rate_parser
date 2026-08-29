@@ -32,6 +32,7 @@ from rate_ingest.models import (
 from rate_ingest.parsers.email_table import parse_email as parse_email_table
 from rate_ingest.parsers.cosco_pdf_quote import parse_pdf as parse_cosco_pdf_quote
 from rate_ingest.parsers.cosco_csv_quote import parse_csv as parse_cosco_csv_quote
+from rate_ingest.parsers.cma_csv_quote import parse_csv as parse_cma_csv_quote
 from rate_ingest.parsers.cosco_haulage import parse_workbook as parse_cosco_haulage_workbook
 from rate_ingest.parsers.hapag_door_matrix import (
     parse_workbook as parse_hapag_door_matrix_workbook,
@@ -1523,6 +1524,8 @@ def parse_source_by_family(
         return parse_matrix_workbook(source_path, matched_template, rate_import)
     if parser_family == "cosco_csv_quote":
         return parse_cosco_csv_quote(source_path, matched_template, rate_import)
+    if parser_family == "cma_csv_quote":
+        return parse_cma_csv_quote(source_path, matched_template, rate_import)
     if parser_family == "cosco_haulage":
         return parse_cosco_haulage_workbook(source_path, matched_template, rate_import)
     if parser_family == "haulage_matrix":

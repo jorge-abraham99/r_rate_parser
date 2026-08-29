@@ -147,6 +147,11 @@ def guess_parser_family(sheet_summaries: list[dict[str, Any]], source_type: str 
         and all(label in flattened for label in ("POL", "POD", "FREIGHT", "EFS"))
     ):
         return "cosco_csv_quote"
+    if (
+        source_type == "csv"
+        and all(label in flattened for label in ("POO", "PICK-UP", "POL/POD"))
+    ):
+        return "cma_csv_quote"
     if all(label in flattened for label in ("LOAD LOCATION", "POL", "40FT/HC USD")):
         return "cosco_haulage"
     if (

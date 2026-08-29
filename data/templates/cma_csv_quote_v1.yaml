@@ -1,0 +1,43 @@
+template_id: cma_csv_quote_v1
+template_name: CMA CGM Door-to-quay CSV v1
+provider_name: CMA CGM
+parser_family: cma_csv_quote
+document_type: ocean_export
+file_type: csv
+active: true
+
+match_rules:
+  filename_contains:
+    - "CMA"
+  required_header_labels:
+    - "POO"
+    - "PICK-UP"
+    - "POL/POD"
+
+csv_rules:
+  destination_start_column: 3
+  poo_column: "POO"
+  pickup_column: "PICK-UP"
+  pol_column: "POL/POD"
+  additional_charges:
+    - name: "Document Fee"
+      amount: 24
+      currency: GBP
+      charge_type: origin
+      basis: per_bill_of_lading
+    - name: "Export Declaration Fee"
+      amount: 34
+      currency: GBP
+      charge_type: origin
+      basis: per_bill_of_lading
+
+defaults:
+  carrier_name: CMA CGM
+  currency_default: USD
+  equipment_type: 40HC
+  commodity: WASTE PAPER
+  all_in_flag: false
+
+validation:
+  amount_min: 1
+  amount_max: 5000

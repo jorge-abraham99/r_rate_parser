@@ -757,6 +757,77 @@ def test_cma_email_import_creates_canonical_rates(tmp_path: Path, monkeypatch):
     assert "MYPKG" in first["to_raw"]
 
 
+def test_cma_csv_import_expands_unlocodes_and_adds_mixed_currency_charges(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
+    raw_dir = tmp_path / "incoming"
+    raw_dir.mkdir()
+    source = raw_dir / "CMA September rates.csv"
+    source.write_bytes(Path("rate_sheet_files/cma sep.csv").read_bytes())
+    seed_templates(tmp_path)
+
+    result = runner.invoke(app, ["import", str(source)])
+    assert result.exit_code == 0, result.stdout
+    assert "Template used: cma_csv_quote_v1" in result.stdout
+    import_id = next(
+        line.split(": ", 1)[1]
+        for line in result.stdout.splitlines()
+        if line.startswith("Import created:")
+    )
+    run_dir = tmp_path / "data" / "runs" / import_id
+    offers = detail_rows(run_dir / "parsed_rate_offers.csv")
+    charges = detail_rows(run_dir / "parsed_rate_charge_lines.csv")
+    canonical_rates = json.loads(run_dir.joinpath("canonical_rates.json").read_text(encoding="utf-8"))
+    validation = json.loads(run_dir.joinpath("validation_report.json").read_text(encoding="utf-8"))
+
+    assert len(offers) == 69 * 9
+    assert len(charges) == len(offers) * 2
+    assert {offer["pol"] for offer in offers} == {"Felixstowe", "Southampton"}
+    assert {offer["service_mode"] for offer in offers} == {"SD / CY"}
+    assert {offer["equipment_type"] for offer in offers} == {"40HC"}
+    assert {offer["destination_location_name"] for offer in offers} == {
+        "Port Klang, MY",
+        "Vung Tau, VN",
+        "Ho Chi Minh, VN",
+        "Hai Phong, VN",
+        "Jakarta, ID",
+        "Laem Chabang, TH",
+        "Lat Krabang, TH",
+        "Bangkok, TH",
+        "Binh Duong Terminal, VN",
+    }
+    assert {charge["charge_name"] for charge in charges} == {
+        "Document Fee",
+        "Export Declaration Fee",
+    }
+    assert {charge["currency"] for charge in charges} == {"GBP"}
+    assert {charge["basis"] for charge in charges} == {"per_bill_of_lading"}
+    assert {offer["base_currency"] for offer in offers} == {"USD"}
+    assert canonical_rates[0]["from_raw"] == "ACCRINGTON"
+    assert canonical_rates[0]["to_raw"] == "MYPKG"
+    assert canonical_rates[0]["currency"] == "USD"
+    assert validation["summary"]["errors"] == 0
+
+    approve_response = api_client.post(
+        f"/api/imports/{import_id}/approve",
+        json={
+            "approved_by": "jorge",
+            "carrier_name": "CMA CGM",
+            "carrier_key": "cma-door",
+            "carrier_label": "CMA CGM · Door-to-quay",
+        },
+    )
+    assert approve_response.status_code == 200, approve_response.text
+    search_response = api_client.get(
+        "/api/rate-desk/search",
+        params={"carrier_name": "CMA CGM", "pol": "Southampton", "pod": "Port Klang"},
+    )
+    assert search_response.status_code == 200
+    quote = search_response.json()["rates"][0]
+    assert quote["base_amount"] == 450.0
+    assert quote["base_currency"] == "USD"
+    assert quote["all_in_usd"] == 524.82
+
+
 def test_msc_zoned_inline_import_joins_birmingham_to_both_pols_and_tiers(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
     raw_dir = tmp_path / "incoming"
