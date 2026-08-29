@@ -35,6 +35,7 @@ const elements = {
   collectionSelect: document.getElementById("collectionSelect"),
   originSelect: document.getElementById("originSelect"),
   destinationSelect: document.getElementById("destinationSelect"),
+  carrierSelect: document.getElementById("carrierSelect"),
   equipmentSelect: document.getElementById("equipmentSelect"),
   qtyInput: document.getElementById("qtyInput"),
   materialSelect: document.getElementById("materialSelect"),
@@ -54,7 +55,7 @@ const elements = {
   paginationSummary: document.getElementById("paginationSummary"),
 };
 
-[elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.equipmentSelect, elements.materialSelect]
+[elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.carrierSelect, elements.equipmentSelect, elements.materialSelect]
   .forEach((element) => element.addEventListener("change", resetAndRender));
 elements.showExpiredToggle.addEventListener("change", renderDesk);
 elements.showAllQuotesButton.addEventListener("click", showAllQuotes);
@@ -131,9 +132,11 @@ function populateDemoFilters() {
   const quote = window.RATE_DESK_DEMO.quote;
   const origins = unique(quote.rates.flatMap((rate) => rate.origins));
   const destinations = unique(quote.rates.flatMap((rate) => rate.destinations));
+  const carriers = unique(quote.rates.map((rate) => rate.carrier));
   populateSelect(elements.collectionSelect, Object.keys(quote.haulage), "None — port drop-off", "Abbots Bromley", true);
   populateSelect(elements.originSelect, origins, "Any origin", "Felixstowe", true);
   populateSelect(elements.destinationSelect, destinations, "Any destination", "Laem Chabang", true);
+  populateSelect(elements.carrierSelect, carriers, "Any carrier", "", true);
   populateEquipment("40HC");
   populateSelect(elements.materialSelect, MATERIAL_OPTIONS, "No materials", "All materials");
   setCollectionVisibility(true);
@@ -146,6 +149,7 @@ function populateConnectedFilters() {
   // rates are presented as Collection → POL → POD rather than collection-only.
   const origins = unique(metadata.origins || rates.map((rate) => firstPresent(rate.pol, "")));
   const destinations = unique(metadata.destinations || rates.map(rateDestination));
+  const carriers = unique(metadata.carriers || rates.map((rate) => firstPresent(rate.carrier_name, rate.provider_name)));
   const equipment = unique(metadata.equipment_types || rates.map((rate) => rate.equipment_type));
   const materials = unique(metadata.materials || rates.flatMap((rate) => rate.materials || []));
   const pickups = Array.isArray(deskState.filters.door_pickups) ? deskState.filters.door_pickups : [];
@@ -158,6 +162,7 @@ function populateConnectedFilters() {
 
   populateSelect(elements.originSelect, origins, "Any origin", origins[0] || "", true);
   populateSelect(elements.destinationSelect, destinations, "Any destination", destinations[0] || "", true);
+  populateSelect(elements.carrierSelect, carriers, "Any carrier", "", true);
   populateEquipment(canonicalEquipment(equipment[0] || "40HC"));
   populateSelect(
     elements.materialSelect,
@@ -234,6 +239,7 @@ async function refreshConnectedRates(initial = false) {
   const collection = elements.collectionSelect.value;
   const origin = elements.originSelect.value;
   const destination = elements.destinationSelect.value;
+  const carrier = elements.carrierSelect.value;
   const equipment = elements.equipmentSelect.value;
   const params = new URLSearchParams({
     limit: String(deskState.pageSize),
@@ -242,6 +248,7 @@ async function refreshConnectedRates(initial = false) {
   if (collection) params.set("collection", collection);
   if (origin) params.set("pol", origin);
   if (destination) params.set("pod", destination);
+  if (carrier) params.set("carrier_name", carrier);
   if (equipment) params.set("equipment_type", equipment);
   if (elements.materialSelect.value && elements.materialSelect.value !== "All materials") {
     params.set("material", elements.materialSelect.value);
@@ -375,12 +382,14 @@ function buildDemoRows(quantity) {
   const quote = window.RATE_DESK_DEMO.quote;
   const origin = elements.originSelect.value;
   const destination = elements.destinationSelect.value;
+  const carrier = elements.carrierSelect.value;
   const equipment = elements.equipmentSelect.value;
   const material = elements.materialSelect.value;
   const collection = elements.collectionSelect.value;
   const baseRates = quote.rates.filter((rate) =>
     matchesFilter(rate.origins, origin)
     && matchesFilter(rate.destinations, destination)
+    && matchesFilter(rate.carrier, carrier)
     && (!equipment || canonicalEquipment(rate.equipment) === equipment)
     && (material === "All materials" || rate.materials.includes(material)));
 
@@ -1246,6 +1255,7 @@ function showAllQuotes() {
   elements.collectionSelect.value = "";
   elements.originSelect.value = "";
   elements.destinationSelect.value = "";
+  elements.carrierSelect.value = "";
   elements.equipmentSelect.value = "";
   elements.materialSelect.value = "All materials";
   elements.showExpiredToggle.checked = true;
@@ -1256,6 +1266,7 @@ function isAllQuotesView() {
   return !elements.collectionSelect.value
     && !elements.originSelect.value
     && !elements.destinationSelect.value
+    && !elements.carrierSelect.value
     && !elements.equipmentSelect.value
     && elements.materialSelect.value === "All materials";
 }
@@ -1276,6 +1287,7 @@ function hasExpiredMatches() {
 function filterConnectedRates({ includeExpired, kind }) {
   const origin = elements.originSelect.value;
   const destination = elements.destinationSelect.value;
+  const carrier = elements.carrierSelect.value;
   const equipment = elements.equipmentSelect.value;
   const material = elements.materialSelect.value;
   const collection = elements.collectionSelect.value;
@@ -1286,6 +1298,7 @@ function filterConnectedRates({ includeExpired, kind }) {
       if (kind === "port" && doorRate) return false;
       if (kind === "door" && !doorRate) return false;
       if (!includeExpired && isExpiredRate(rate)) return false;
+      if (!matchesFilter(firstPresent(rate.carrier_name, rate.provider_name, rate.carrier), carrier)) return false;
       if (!matchesFilter(rateDestination(rate), destination)) return false;
       if (equipment && canonicalEquipment(rate.equipment_type) !== equipment) return false;
       if (!(material === "All materials" || (rate.materials || []).some((item) => sameValue(item, material)))) return false;

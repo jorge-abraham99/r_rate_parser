@@ -398,6 +398,9 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert 'carrier_label: "Hapag-Lloyd · Quay-to-quay"' not in app_js
     assert '"/api/rate-desk/meta"' in rate_desk_js
     assert "/api/rate-desk/search?" in rate_desk_js
+    assert 'id="carrierSelect"' in quote_html
+    assert "carrierSelect" in rate_desk_js
+    assert 'params.set("carrier_name", carrier)' in rate_desk_js
     assert "/api/rate-desk/offers/${encodeURIComponent(offerId)}" in rate_desk_js
     assert "deskState.totalMatches" in rate_desk_js
     assert "deskState.pageSize" in rate_desk_js

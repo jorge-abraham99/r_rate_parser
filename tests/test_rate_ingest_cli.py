@@ -539,6 +539,15 @@ def test_rate_desk_summary_paginates_and_loads_offer_detail_on_demand(tmp_path: 
     assert "zone" in summary
     assert summary["all_in_usd"] is not None
 
+    carrier_page_response = api_client.get(
+        "/api/rate-desk/search",
+        params={"carrier_name": "MSC", "limit": 50, "offset": 0},
+    )
+    assert carrier_page_response.status_code == 200
+    carrier_page = carrier_page_response.json()
+    assert carrier_page["rates"]
+    assert {rate["carrier_name"] for rate in carrier_page["rates"]} == {"MSC"}
+
     detail_response = api_client.get(
         f"/api/rate-desk/offers/{summary['offer_id']}"
     )
