@@ -492,14 +492,16 @@ def test_maersk_rate_desk_exposes_charge_analysis(tmp_path: Path, monkeypatch):
 def test_rate_desk_summary_paginates_and_loads_offer_detail_on_demand(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("RATE_INGEST_ROOT", str(tmp_path))
     seed_templates(tmp_path)
-    source_bytes = Path("rate_sheet_files/MSC - FAR EAST RATES JAN.xlsx").read_bytes()
+    # Browse mode needs published collection routes, not the legacy port-only
+    # January rows relabelled as door quotes during approval.
+    source_bytes = Path("rate_sheet_files/MSC - FAR EAST  AUGUST.xlsx").read_bytes()
 
     response = api_client.post(
         "/api/imports",
         data={"uploaded_by": "jorge"},
         files={
             "file": (
-                "MSC - FAR EAST RATES JAN.xlsx",
+                "MSC - FAR EAST  AUGUST.xlsx",
                 source_bytes,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )

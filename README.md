@@ -192,8 +192,16 @@ The UI is now connected to the parser workflow through a local API. It can:
 - open import detail and review markdown
 - approve, reject, or delete imports; replacement approvals archive the previous source version
 - search and compare approved rates in the Rate Desk
-- combine ocean rates with approved UK haulage tariffs
+- combine COSCO ocean rates with the dedicated COSCO haulage tariff
 - inspect origin, freight, destination, and unmatched charge groups
+
+Quote search uses the same rules for every carrier:
+
+- Selecting a collection shows fully priced collection-to-destination routes.
+- Selecting both ports without a collection shows only published quay-to-quay rates. Bundled door rates are excluded; haulage is never subtracted to invent an ocean price.
+- Leaving collection blank with neither or only one port selected browses complete collection routes.
+
+COSCO ocean rates combine only with the dedicated COSCO haulage source, matched by collection, origin port, equipment, compatible material and overlapping validity. UK Inland Haulage is not used as a fallback. Published door-to-quay rates keep their existing bundled price. Incomplete combinations are omitted, and complete route prices and expiry are resolved before counting, sorting and pagination.
 
 Run it with:
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import shutil
 from threading import Lock
@@ -697,6 +698,8 @@ def search_approved_offers(
             "base_currency": offer.base_currency or card.currency_default,
             "all_in_amount": all_in_amount,
             "all_in_usd": charge_analysis["total_usd"],
+            "pricing_complete": charge_analysis["pricing_complete"],
+            "per_booking_usd": charge_analysis["per_booking_usd"],
             "all_in_flag": offer.all_in_flag,
             "charge_total": charge_total if offer_charges else None,
             "origin_usd": group_subtotal(charge_analysis, "origin"),
@@ -758,6 +761,7 @@ def search_rate_summaries(
     equipment_type: str | None = None,
     material: str | None = None,
     valid_on: str | None = None,
+    include_expired: bool = True,
     limit: int = 50,
     offset: int = 0,
     repository: RateRepository | None = None,
@@ -779,47 +783,23 @@ def search_rate_summaries(
         material=material,
         valid_on=valid_on,
     )
-    if collection:
-        base_rates = [
-            rate
-            for rate in all_rates
-            if not is_haulage_rate(rate) and not is_spot_rate_result(rate)
-        ]
-        collection_rates = [
-            rate
-            for rate in filter_rate_summaries(
-                snapshot["summaries"],
-                provider_name=provider_name,
-                carrier_name=carrier_name,
-                collection=collection,
-                pol=pol,
-                pod=pod,
-                equipment_type=equipment_type,
-                material=material,
-                valid_on=valid_on,
-            )
-            if not is_haulage_rate(rate) and not is_spot_rate_result(rate)
-        ]
-        by_id = {
-            rate["offer_id"]: rate
-            for rate in base_rates
-            if not is_door_rate_result(rate)
-        }
-        by_id.update({rate["offer_id"]: rate for rate in collection_rates})
-        results = list(by_id.values())
-        results.sort(key=summary_sort_key)
-    else:
-        results = [
-            rate
-            for rate in all_rates
-            if not is_haulage_rate(rate) and not is_spot_rate_result(rate)
-        ]
-
+    quay_only = not collection and bool(pol and pod)
+    results = assemble_quote_routes(
+        all_rates, snapshot["summaries"], collection=collection,
+        quay_only=quay_only, material=material, valid_on=valid_on,
+    )
+    today = datetime.now(timezone.utc).date().isoformat()
+    expired_count = sum(bool(rate.get("valid_to") and rate["valid_to"] < today) for rate in results)
+    if not include_expired:
+        results = [rate for rate in results if not rate.get("valid_to") or rate["valid_to"] >= today]
+    results.sort(key=lambda rate: (*summary_sort_key(rate), rate["quote_id"]))
     total = len(results)
     page_limit = min(max(limit, 1), 50)
     page_offset = max(offset, 0)
     page = results[page_offset : page_offset + page_limit]
     return {
+        "result_type": "quay" if quay_only else "collection",
+        "hidden_expired": 0 if include_expired else expired_count,
         "rates": [compact_rate_summary(rate) for rate in page],
         "pagination": {
             "limit": page_limit,
@@ -828,6 +808,125 @@ def search_rate_summaries(
             "has_more": page_offset + page_limit < total,
         },
     }
+
+
+def quote_service_kind(rate: dict[str, Any]) -> str:
+    """Classify published services, never treating an unknown rate as ocean-only."""
+    if is_haulage_rate(rate):
+        return "haulage"
+    text = " ".join(str(rate.get(key) or "") for key in (
+        "contract_tag", "carrier_key", "carrier_label",
+    )).lower()
+    door = "door" in text or rate.get("carrier_key") == "msc-inline"
+    quay = bool(re.search(r"quay[\s-]*to[\s-]*quay", text)) or str(rate.get("contract_tag") or "").upper() == "KEY"
+    mode = re.sub(r"[^a-z]", "", str(rate.get("service_mode") or "").lower())
+    if mode:
+        if mode in {"sdcy", "doorcy", "doortoquay"}:
+            door = True
+        elif mode in {"cycy", "quaytoquay"}:
+            quay = True
+        else:
+            return "unknown"
+    if door == quay:
+        return "unknown"
+    return "door" if door else "quay"
+
+
+def quote_collection(rate: dict[str, Any]) -> str:
+    return first_present(rate.get("collection_location_name"), rate.get("place_of_receipt"), rate.get("origin")) or ""
+
+
+def is_priced_quote(rate: dict[str, Any]) -> bool:
+    total = rate.get("all_in_usd")
+    return (
+        rate.get("pricing_complete") is True
+        and isinstance(total, (float, int)) and math.isfinite(total) and total >= 0
+    )
+
+
+def is_cosco_quote(rate: dict[str, Any]) -> bool:
+    return "cosco" in str(first_present(rate.get("carrier_name"), rate.get("provider_name")) or "").lower()
+
+
+def assemble_quote_routes(
+    rates: list[dict[str, Any]],
+    all_summaries: list[dict[str, Any]],
+    *,
+    collection: str | None,
+    quay_only: bool,
+    material: str | None,
+    valid_on: str | None,
+) -> list[dict[str, Any]]:
+    # Only the dedicated COSCO source is approved for combination. The legacy
+    # UK Inland Haulage slot is not a fallback for COSCO or any other carrier.
+    haulage_by_port: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    if not quay_only:
+        for haulage in filter_rate_summaries(all_summaries, material=material, valid_on=valid_on):
+            if not (is_haulage_rate(haulage) and haulage_source_key(haulage) == "cosco-haulage"):
+                continue
+            if not is_priced_quote(haulage) or is_spot_rate_result(haulage):
+                continue
+            pickup = quote_collection(haulage)
+            if not pickup or not haulage.get("pol") or not haulage.get("equipment_type"):
+                continue
+            if collection and normalize_location_key(pickup) != normalize_location_key(collection):
+                continue
+            key = (normalize_location_key(haulage["pol"]), canonical_equipment_type(haulage["equipment_type"]))
+            haulage_by_port.setdefault(key, []).append(haulage)
+
+    results = []
+    for rate in rates:
+        if is_spot_rate_result(rate) or not is_priced_quote(rate):
+            continue
+        kind = quote_service_kind(rate)
+        destination = first_present(rate.get("destination_location_name"), rate.get("final_destination"), rate.get("pod"))
+        if not destination:
+            continue
+        if quay_only:
+            if kind == "quay" and rate.get("pol"):
+                results.append({**rate, "quote_id": rate["offer_id"], "quote_kind": "quay"})
+            continue
+        if kind == "door":
+            pickup = quote_collection(rate)
+            if pickup and (not collection or normalize_location_key(pickup) == normalize_location_key(collection)):
+                results.append({**rate, "quote_id": rate["offer_id"], "quote_kind": "door"})
+            continue
+        if kind != "quay" or not is_cosco_quote(rate):
+            continue
+        key = (normalize_location_key(rate.get("pol") or ""), canonical_equipment_type(rate.get("equipment_type")))
+        for haulage in haulage_by_port.get(key, []):
+            ocean_materials = {item.lower() for item in rate.get("materials", [])}
+            haulage_materials = {item.lower() for item in haulage.get("materials", [])}
+            if ocean_materials and haulage_materials and not ocean_materials & haulage_materials:
+                continue
+            starts = [value for value in (rate.get("valid_from"), haulage.get("valid_from")) if value]
+            ends = [value for value in (rate.get("valid_to"), haulage.get("valid_to")) if value]
+            start, end = max(starts, default=None), min(ends, default=None)
+            if start and end and start > end:
+                continue
+            inland = haulage["all_in_usd"]
+            results.append({
+                **rate,
+                "quote_id": f"{rate['offer_id']}::haulage::{haulage['offer_id']}",
+                "quote_kind": "combined",
+                "collection_location_name": quote_collection(haulage),
+                "collection_location_code": haulage.get("collection_location_code"),
+                "valid_from": start, "valid_to": end,
+                "ocean_all_in_usd": rate["all_in_usd"],
+                "all_in_usd": round(rate["all_in_usd"] + inland, 2),
+                # Do not advertise the ocean-only source-currency amount as the combined total.
+                "all_in_amount": None,
+                "inland_usd": inland,
+                "haulage": {
+                    "offer_id": haulage["offer_id"],
+                    "source_file_name": haulage.get("source_file_name"),
+                    "provider_name": "COSCO Haulage",
+                    "amount": haulage["all_in_amount"],
+                    "currency": haulage["base_currency"],
+                    "usd_amount": inland,
+                },
+            })
+    return results
 
 
 def get_rate_offer_detail(
@@ -858,6 +957,12 @@ def compact_rate_summary(rate: dict[str, Any]) -> dict[str, Any]:
         key: rate.get(key)
         for key in (
             "offer_id",
+            "quote_id",
+            "quote_kind",
+            "haulage",
+            "ocean_all_in_usd",
+            "inland_usd",
+            "per_booking_usd",
             "rate_card_id",
             "provider_name",
             "carrier_name",
@@ -1273,7 +1378,8 @@ def build_rate_desk_metadata(
     haulage_rates = [
         rate
         for rate in summaries
-        if is_haulage_rate(rate) and not is_spot_rate_result(rate)
+        if is_haulage_rate(rate) and haulage_source_key(rate) == "cosco-haulage"
+        and not is_spot_rate_result(rate)
     ]
     origin_map: dict[str, str] = {}
     destination_map: dict[str, str] = {}
@@ -1294,7 +1400,7 @@ def build_rate_desk_metadata(
             rate.get("place_of_receipt"),
             rate.get("origin"),
         )
-        if value:
+        if value and quote_service_kind(rate) == "door":
             collection_map.setdefault(normalize_location_key(value), value)
     tariffs, pickups, haulage_currency = build_haulage_lookup(haulage_rates)
     haulage_tariffs_by_source, haulage_currencies_by_source = build_haulage_source_lookups(
@@ -1377,8 +1483,13 @@ def analyze_charge_collection(
     }
     matched_count = 0
     unmatched_count = 0
+    per_booking_usd = {key: 0.0 for key in grouped}
 
     has_base_line = any(is_base_charge(charge) for charge in charges)
+    pricing_complete = (
+        (base_amount is not None or has_base_line)
+        and (base_currency or "USD").upper() in FX_RATES
+    )
     if charges:
         for charge in charges:
             bucket, matched_by = classify_charge_bucket(charge)
@@ -1405,6 +1516,10 @@ def analyze_charge_collection(
                 grouped[bucket]["lines"].append(line)
             if line["counts_toward_total"]:
                 grouped[bucket]["subtotal_usd"] += usd_unit_amount
+                if line["quantity_rule"] in {"per_bill_of_lading", "percent"}:
+                    per_booking_usd[bucket] += usd_unit_amount
+                if charge.amount is None or line["currency"] not in FX_RATES:
+                    pricing_complete = False
             if bucket == "unmatched":
                 unmatched_count += 1
             else:
@@ -1452,6 +1567,8 @@ def analyze_charge_collection(
     unmatched_group = grouped["unmatched"]
     return {
         "fx_source": "static_demo_fx_v1",
+        "pricing_complete": pricing_complete,
+        "per_booking_usd": {key: round(value, 6) for key, value in per_booking_usd.items()},
         "groups": ordered_groups,
         "unmatched_lines": unmatched_group["lines"],
         "matched_charge_count": matched_count,

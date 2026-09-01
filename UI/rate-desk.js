@@ -11,12 +11,10 @@ const deskState = {
   loaded: false,
   expandedId: null,
   connectedRates: [],
-  initialConnectedRates: [],
   filters: {},
-  haulageTariffs: {},
-  haulageTariffsBySource: {},
-  haulageCurrenciesBySource: {},
-  haulageCurrency: "USD",
+  resultType: "collection",
+  hiddenExpired: 0,
+  searchError: null,
   sort: null,
   pageOffset: 0,
   pageSize: 50,
@@ -48,6 +46,7 @@ const elements = {
   demoBadge: document.getElementById("demoBadge"),
   deskAlert: document.getElementById("deskAlert"),
   figuresNote: document.getElementById("figuresNote"),
+  priceScopeLabel: document.getElementById("priceScopeLabel"),
   sortButtons: [...document.querySelectorAll("[data-sort-key]")],
   paginationControls: document.getElementById("paginationControls"),
   previousPageButton: document.getElementById("previousPageButton"),
@@ -57,7 +56,7 @@ const elements = {
 
 [elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.carrierSelect, elements.equipmentSelect, elements.materialSelect]
   .forEach((element) => element.addEventListener("change", resetAndRender));
-elements.showExpiredToggle.addEventListener("change", renderDesk);
+elements.showExpiredToggle.addEventListener("change", resetAndRender);
 elements.showAllQuotesButton.addEventListener("click", showAllQuotes);
 elements.previousPageButton.addEventListener("click", () => changePage(-1));
 elements.nextPageButton.addEventListener("click", () => changePage(1));
@@ -110,16 +109,12 @@ async function bootRateDesk() {
     if (!metaResponse.ok) throw new Error("The approved-rate service did not respond.");
     const metadata = await metaResponse.json();
     deskState.filters = metadata.filters || {};
-    deskState.haulageTariffs = metadata.haulage_tariffs || {};
-    deskState.haulageTariffsBySource = metadata.haulage_tariffs_by_source || {};
-    deskState.haulageCurrenciesBySource = metadata.haulage_currencies_by_source || {};
-    deskState.haulageCurrency = metadata.haulage_currency || "USD";
     deskState.loaded = true;
     populateConnectedFilters();
     elements.refreshText.textContent = metadata.last_refreshed
       ? `Rates refreshed ${shortDateTime(metadata.last_refreshed)}`
       : "Rates refreshed from approved data";
-    await refreshConnectedRates(true);
+    await refreshConnectedRates();
   } catch (error) {
     deskState.loaded = true;
     showAlert(`Could not load approved rates: ${error.message}`);
@@ -133,7 +128,7 @@ function populateDemoFilters() {
   const origins = unique(quote.rates.flatMap((rate) => rate.origins));
   const destinations = unique(quote.rates.flatMap((rate) => rate.destinations));
   const carriers = unique(quote.rates.map((rate) => rate.carrier));
-  populateSelect(elements.collectionSelect, Object.keys(quote.haulage), "None — port drop-off", "Abbots Bromley", true);
+  populateSelect(elements.collectionSelect, unique(quote.rates.flatMap((rate) => rate.collections || [])), "No collection selected", "Abbots Bromley", true);
   populateSelect(elements.originSelect, origins, "Any origin", "Felixstowe", true);
   populateSelect(elements.destinationSelect, destinations, "Any destination", "Laem Chabang", true);
   populateSelect(elements.carrierSelect, carriers, "Any carrier", "", true);
@@ -152,18 +147,8 @@ function populateConnectedFilters() {
   const carriers = unique(metadata.carriers || rates.map((rate) => firstPresent(rate.carrier_name, rate.provider_name)));
   const equipment = unique(metadata.equipment_types || rates.map((rate) => rate.equipment_type));
   const materials = unique(metadata.materials || rates.flatMap((rate) => rate.materials || []));
-  const pickups = Array.isArray(deskState.filters.door_pickups) ? deskState.filters.door_pickups : [];
-  const doorCollections = uniqueLocations(
-    rates
-      .filter((rate) => isDoorRate(rate))
-      .map(rateCollection)
-      .filter(Boolean)
-  );
-
-  // Keep the optional lane filters genuinely open on first load. A hidden
-  // first-port/first-destination default makes a carrier filter look as if it
-  // only has one routing option (particularly noticeable for COSCO, where
-  // collection is selected separately to attach haulage).
+  // Empty lane filters browse complete collection routes. Selecting both ports
+  // without a collection switches to published quay-to-quay prices.
   populateSelect(elements.originSelect, origins, "Any origin", "", true);
   populateSelect(elements.destinationSelect, destinations, "Any destination", "", true);
   populateSelect(elements.carrierSelect, carriers, "Any carrier", "", true);
@@ -186,10 +171,10 @@ function refreshCollectionOptions() {
   const pickupNames = uniqueLocations([...haulagePickupNames, ...doorCollections]);
 
   if (pickupNames.length) {
-    populateSelect(elements.collectionSelect, pickupNames, "None — not filtered", current, true);
+    populateSelect(elements.collectionSelect, pickupNames, "No collection selected", current, true);
     setCollectionVisibility(true);
   } else {
-    elements.collectionSelect.innerHTML = '<option value="">None — not filtered</option>';
+    elements.collectionSelect.innerHTML = '<option value="">No collection selected</option>';
     elements.collectionSelect.value = "";
     elements.collectionSelect.disabled = true;
     setCollectionVisibility(false);
@@ -239,7 +224,7 @@ function scheduleRefresh() {
   deskState.searchTimer = setTimeout(() => refreshConnectedRates(), 220);
 }
 
-async function refreshConnectedRates(initial = false) {
+async function refreshConnectedRates() {
   const collection = elements.collectionSelect.value;
   const origin = elements.originSelect.value;
   const destination = elements.destinationSelect.value;
@@ -248,6 +233,7 @@ async function refreshConnectedRates(initial = false) {
   const params = new URLSearchParams({
     limit: String(deskState.pageSize),
     offset: String(deskState.pageOffset),
+    include_expired: String(elements.showExpiredToggle.checked),
   });
   if (collection) params.set("collection", collection);
   if (origin) params.set("pol", origin);
@@ -267,15 +253,20 @@ async function refreshConnectedRates(initial = false) {
     if (!response.ok) throw new Error("The approved-rate service did not respond.");
     const payload = await response.json();
     if (controller.signal.aborted) return;
-    deskState.connectedRates = (Array.isArray(payload.rates) ? payload.rates : []).filter((rate) => !isSpotRate(rate));
-    deskState.initialConnectedRates = deskState.connectedRates;
-    deskState.totalMatches = Number(payload.pagination?.total || deskState.connectedRates.length);
+    deskState.connectedRates = Array.isArray(payload.rates) ? payload.rates : [];
+    deskState.resultType = payload.result_type;
+    deskState.hiddenExpired = Number(payload.hidden_expired || 0);
+    deskState.searchError = null;
+    deskState.totalMatches = Number(payload.pagination?.total ?? deskState.connectedRates.length);
     deskState.hasMore = Boolean(payload.pagination?.has_more);
     renderDesk();
   } catch (error) {
     if (error.name === "AbortError" || controller.signal.aborted) return;
-    showAlert(`Could not update quotes: ${error.message}`);
-    if (!initial) deskState.connectedRates = deskState.initialConnectedRates;
+    deskState.searchError = `Could not update quotes: ${error.message}`;
+    deskState.connectedRates = [];
+    deskState.totalMatches = 0;
+    deskState.hiddenExpired = 0;
+    deskState.hasMore = false;
     renderDesk();
   } finally {
     if (deskState.searchController === controller) deskState.searchController = null;
@@ -292,13 +283,16 @@ function changePage(direction) {
 
 function renderDesk() {
   if (!deskState.loaded) return;
-  hideAlert();
+  if (deskState.searchError) showAlert(deskState.searchError);
+  else hideAlert();
   updateSortHeaders();
   updatePagination();
 
   const quantity = clampQuantity(elements.qtyInput.value);
   elements.qtyInput.value = quantity;
   const rows = RATE_DESK_DEMO_MODE ? buildDemoRows(quantity) : buildConnectedRows(quantity);
+  const quayOnly = RATE_DESK_DEMO_MODE ? isQuaySearch() : deskState.resultType === "quay";
+  elements.priceScopeLabel.textContent = quayOnly ? "excl. inland" : "incl. inland";
 
   const collection = elements.collectionSelect.value;
   const laneParts = [
@@ -312,6 +306,7 @@ function renderDesk() {
   elements.figuresNote.textContent = quantity > 1
     ? `Figures are USD equivalents for the whole booking (${quantity} × ${formatEquipment(elements.equipmentSelect.value)}). Per-B/L charges are not multiplied.`
     : `Figures are USD equivalents per ${formatEquipment(elements.equipmentSelect.value)}.`;
+  if (quayOnly) elements.figuresNote.textContent += " Quay-to-quay prices exclude collection.";
 
   if (!rows.length) {
     const hasExpiredHidden = !elements.showExpiredToggle.checked && hasExpiredMatches();
@@ -319,9 +314,11 @@ function renderDesk() {
       ? "no approved quotes match the current filters"
       : "no parsed rates on this lane";
     elements.rateRows.innerHTML = `<div class="rate-empty">${
-      hasExpiredHidden
+      deskState.searchError ? "Quotes could not be refreshed. Change a filter to retry." : hasExpiredHidden
         ? "No current rates match these filters. Turn on Show expired to inspect expired quotes."
-        : "No parsed rates match the current filters."
+        : quayOnly
+          ? "No published quay-to-quay rates match these ports. Select a collection to search complete routes."
+          : "No fully priced collection routes match these filters. Select both ports without a collection to search quay-to-quay rates."
     }</div>`;
     return;
   }
@@ -329,10 +326,10 @@ function renderDesk() {
   const best = rows.filter((row) => !row.poa).sort(compareAllInUsdRows)[0];
   const expiredCount = rows.filter((row) => row.expired).length;
   const hiddenExpiredCount = !elements.showExpiredToggle.checked ? countHiddenExpiredMatches() : 0;
-  const scopeLabel = collection ? "routing option" : "contract rate";
-  const visibleCount = RATE_DESK_DEMO_MODE ? rows.length : deskState.totalMatches || rows.length;
+  const scopeLabel = quayOnly ? "quay-to-quay rate" : "collection route";
+  const visibleCount = RATE_DESK_DEMO_MODE ? rows.length : deskState.totalMatches;
   const countLabel = `${visibleCount} ${scopeLabel}${visibleCount === 1 ? "" : "s"}`;
-  const bestLabel = best ? ` · best ${formatUsd(best.totalUsd)} all-in` : "";
+  const bestLabel = best ? ` · best on page ${formatUsd(best.totalUsd)} all-in` : "";
   const expiredLabel = expiredCount ? ` · ${expiredCount} expired` : "";
   const hiddenLabel = hiddenExpiredCount ? ` · ${hiddenExpiredCount} expired hidden` : "";
   elements.laneSummary.textContent = `${countLabel}${bestLabel}${expiredLabel}${hiddenLabel}`;
@@ -400,27 +397,30 @@ function buildDemoRows(quantity) {
 
   const rows = [];
   baseRates.forEach((rate) => {
-    if (!collection) {
+    if (isQuaySearch()) {
       if (rate.service === "Quay-to-quay") {
-        rows.push(makeDemoVariant(rate, "quay", quantity, origin, ""));
+        rows.push(makeDemoVariant(rate, "quay", quantity, origin, "", destination));
       }
       return;
     }
-    if (rate.service === "Door-to-quay" || rate.carrier === "Maersk") {
-      rows.push(makeDemoVariant(rate, "door", quantity, origin, collection));
-    }
-    if (rate.service === "Quay-to-quay") {
-      rows.push(makeDemoVariant(rate, "haulier", quantity, origin, collection));
+    if (rate.service === "Door-to-quay") {
+      for (const pickup of (rate.collections || []).filter((value) => !collection || locationsMatch(value, collection))) {
+        for (const port of rate.origins.filter((value) => matchesFilter(value, origin))) {
+          for (const pod of rate.destinations.filter((value) => matchesFilter(value, destination))) {
+            rows.push(makeDemoVariant(rate, "door", quantity, port, pickup, pod));
+          }
+        }
+      }
     }
   });
   return sortViewRows(rows);
 }
 
-function makeDemoVariant(rate, mode, quantity, origin, collection) {
+function makeDemoVariant(rate, mode, quantity, origin, collection, destination) {
   const quote = window.RATE_DESK_DEMO.quote;
   const fx = quote.fx;
   const routeOrigin = firstPresent(origin, (rate.origins || [])[0]);
-  const routeDestination = firstPresent(elements.destinationSelect.value, (rate.destinations || [])[0]);
+  const routeDestination = destination;
   const originLines = rate.origin.map((line) => makeDemoLine(line, quantity, fx));
   let freightLines = rate.freight.map((line) => makeDemoLine(line, quantity, fx));
   const destinationLines = rate.destination.map((line) => makeDemoLine(line, quantity, fx));
@@ -433,14 +433,6 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
   let fineprint = "";
 
   if (mode === "door") {
-    const isPublishedDoorRate = rate.service === "Door-to-quay";
-    if (!isPublishedDoorRate) {
-      const uplift = quote.doorUplift[collection] || 0;
-      freightLines = freightLines.map((line) => line.name === "Basic Ocean Freight"
-        ? makeLineView({ ...line, name: "Basic Ocean Freight — door-to-quay", unit: line.unit + uplift }, quantity, fx)
-        : line);
-      sourceFile = "MAERSK_DOOR_299077037_JUL.xlsx";
-    }
     inlandLines = [makeLineView({
       name: `Inland Haulage Export — ${collection}`,
       basis: "Container",
@@ -454,25 +446,6 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
     fineprint = `Inland haulage from ${collection} is included in the freight price — ${rate.carrier} door rates do not itemise it.`;
   }
 
-  if (mode === "haulier") {
-    const tariff = quote.haulage[collection]?.[origin];
-    poa = !tariff;
-    inlandLines = [makeLineView({
-      name: `Inland Haulage — ${collection} → ${origin} (UK Inland Haulage)`,
-      basis: "Container",
-      ccy: "GBP",
-      unit: tariff || 0,
-      poa,
-    }, quantity, fx)];
-    routing = "Quay to quay + your haulier";
-    routingDetail = poa
-      ? "Quay to quay + your haulier · no tariff rate on this corridor"
-      : `Quay to quay + your haulier · £${formatNumber(tariff)}/ctn · separate haulier booking`;
-    if (poa) {
-      fineprint = `UK Inland Haulage has no ${collection} → ${origin} rate — request a haulage quote to price this routing.`;
-    }
-  }
-
   const groups = [
     ...(inlandLines.length ? [makeGroup("inland", "Inland haulage", inlandLines)] : []),
     makeGroup("origin", "Origin", originLines),
@@ -481,14 +454,11 @@ function makeDemoVariant(rate, mode, quantity, origin, collection) {
   ];
   const totalUsd = sumGroups(groups);
   const services = [{ label: service, file: sourceFile }];
-  if (mode === "haulier") {
-    services.push({ label: "+ UK Inland Haulage", file: "UK Haulage — Export Haulage all UK POLs, Q2 2026 validity.xlsx" });
-  }
   return {
-    id: `${rate.id}-${mode}`,
+    id: `${rate.id}-${mode}-${slugify(collection)}-${slugify(origin)}-${slugify(destination)}`,
     type: "CONTRACT",
     routeLane: formatRouteLane(
-      ...(mode === "door" || mode === "haulier" ? [collection] : []),
+      ...(mode === "door" ? [collection] : []),
       routeOrigin,
       routeDestination,
     ),
@@ -525,20 +495,20 @@ function makeDemoLine(tuple, quantity, fx) {
 }
 
 function buildConnectedRows(quantity) {
-  const collection = elements.collectionSelect.value;
-  const portRates = filterConnectedRates({ includeExpired: elements.showExpiredToggle.checked, kind: "port" })
-    .map((rate) => makeConnectedRow(rate, quantity));
-  const doorRates = filterConnectedRates({ includeExpired: elements.showExpiredToggle.checked, kind: "door" })
-    .map((rate) => makeConnectedDoorRow(rate, quantity));
-  const haulageRates = collection
-    ? filterConnectedRates({ includeExpired: elements.showExpiredToggle.checked, kind: "port" })
-      .filter((rate) => canAttachMerchantHaulage(rate))
-      .map((rate) => makeConnectedHaulierRow(rate, quantity, collection))
-    : [];
+  // Search already classified, combined, filtered and paginated these quotes.
+  return sortViewRows(deskState.connectedRates.map((rate) => {
+    if (rate.quote_kind === "combined") return makeConnectedHaulierRow(rate, quantity);
+    if (rate.quote_kind === "door") return makeConnectedDoorRow(rate, quantity);
+    return makeConnectedRow(rate, quantity);
+  }));
+}
 
-  return sortViewRows(collection
-    ? [...doorRates, ...haulageRates]
-    : [...portRates, ...doorRates]);
+function summaryAmount(rate, key, quantity) {
+  const booking = rate.per_booking_usd || {};
+  const fixed = key === "all_in_usd"
+    ? Object.values(booking).reduce((sum, value) => sum + (numberValue(value) || 0), 0)
+    : numberValue(booking[key.replace(/_usd$/, "")]) || 0;
+  return (numberValue(rate[key]) || 0) * quantity - fixed * (quantity - 1);
 }
 
 function makeConnectedRow(rate, quantity) {
@@ -546,12 +516,13 @@ function makeConnectedRow(rate, quantity) {
   const groups = detail ? connectedGroups({ ...rate, ...detail }, quantity) : [];
   const totalUsd = detail
     ? sumGroups(groups)
-    : (numberValue(rate.all_in_usd) || 0) * quantity;
+    : summaryAmount(rate, "all_in_usd", quantity);
   const sourceFile = rate.source_file_name || rate.raw_sheet_name || "Approved rate";
   const expired = isExpiredRate(rate);
   const carrier = carrierLabel(rate);
   return {
-    id: String(rate.offer_id || `${sourceFile}-${rate.raw_row_reference || "row"}`),
+    id: String(rate.quote_id || rate.offer_id),
+    detailId: rate.offer_id,
     type: "CONTRACT",
     routeLane: formatRouteLane(rateOrigin(rate), rateDestination(rate)),
     routing: formatRouting(rate),
@@ -565,9 +536,9 @@ function makeConnectedRow(rate, quantity) {
     freetime: extractFreetime(rate),
     groups,
     inlandUsd: detail ? groupTotal(groups, "inland") : 0,
-    originUsd: detail ? groupTotal(groups, "origin") : (numberValue(rate.origin_usd) || 0) * quantity,
-    freightUsd: detail ? groupTotal(groups, "freight") : (numberValue(rate.freight_usd) || 0) * quantity,
-    destinationUsd: detail ? groupTotal(groups, "destination") : (numberValue(rate.destination_usd) || 0) * quantity,
+    originUsd: detail ? groupTotal(groups, "origin") : summaryAmount(rate, "origin_usd", quantity),
+    freightUsd: detail ? groupTotal(groups, "freight") : summaryAmount(rate, "freight_usd", quantity),
+    destinationUsd: detail ? groupTotal(groups, "destination") : summaryAmount(rate, "destination_usd", quantity),
     totalUsd,
     poa: false,
     expired,
@@ -604,7 +575,7 @@ function makeConnectedDoorRow(rate, quantity) {
     type: "CONTRACT",
     routeLane: formatRouteLane(
       rateCollection(rate),
-      rate.pol,
+      rate.pol || "Origin port not specified",
       rateDestination(rate),
     ),
     routing: "Door to quay",
@@ -620,42 +591,32 @@ function makeConnectedDoorRow(rate, quantity) {
   };
 }
 
-function makeConnectedHaulierRow(rate, quantity, collection) {
-  const row = makeConnectedRow(rate, quantity);
-  const detailId = row.id;
-  const port = merchantHaulagePort(rate);
-  const tariff = findHaulageTariff(collection, port, rate);
-  const haulageLabel = haulageProviderLabel(rate);
-  const haulageCurrency = haulageCurrencyFor(rate);
-  const poa = tariff == null;
+function makeConnectedHaulierRow(rate, quantity) {
+  const row = makeConnectedRow({ ...rate, all_in_usd: rate.ocean_all_in_usd }, quantity);
+  const collection = rateCollection(rate);
+  const port = rate.pol;
+  const haulage = rate.haulage;
   const inlandLines = [makeLineView({
-    name: `Inland Haulage — ${collection} → ${port} (${haulageLabel})`,
+    name: `Inland Haulage — ${collection} → ${port} (${haulage.provider_name})`,
     basis: "Container",
-    ccy: haulageCurrency,
-    unit: tariff || 0,
-    poa,
+    ccy: haulage.currency,
+    unit: haulage.amount,
+    usdUnit: haulage.usd_amount,
   }, quantity, DEFAULT_FX)];
   const groups = orderGroups([makeGroup("inland", "Inland haulage", inlandLines), ...row.groups]);
   return {
     ...row,
-    id: `${row.id}-haulage-${slugify(collection)}`,
-    detailId,
     type: "CONTRACT",
     routeLane: formatRouteLane(collection, port, rateDestination(rate)),
-    routing: "Quay to quay + your haulier",
-    routingDetail: poa
-      ? `${collection} → ${port} → ${rateDestination(rate)} · no ${haulageLabel} tariff for ${collection} → ${port}`
-      : `${collection} → ${port} → ${rateDestination(rate)} · ${formatMoney(tariff, haulageCurrency)}/ctn · separate haulier booking`,
-    services: [...row.services, { label: `+ ${haulageLabel}`, file: haulageLabel }],
+    routing: "Collection to quay",
+    routingDetail: `${collection} → ${port} → ${rateDestination(rate)} · ${haulage.provider_name} included`,
+    services: [...row.services, { label: `+ ${haulage.provider_name}`, file: haulage.source_file_name || haulage.provider_name }],
     groups,
     inlandUsd: groupTotal(groups, "inland"),
     totalUsd: row.detailLoaded
       ? sumGroups(groups)
       : row.totalUsd + groupTotal(groups, "inland"),
-    poa,
-    fineprint: poa
-      ? `${haulageLabel} has no ${collection} → ${port} tariff in the approved sheet — request a haulage quote.`
-      : row.fineprint,
+    fineprint: "The complete price combines the published ocean rate and COSCO collection tariff.",
   };
 }
 
@@ -999,6 +960,7 @@ function groupTotal(groups, key) {
 }
 
 function formatRouting(rate) {
+  if (rate.quote_kind) return rate.quote_kind === "quay" ? "Quay to quay" : "Door to quay";
   const mode = normalized(rate.service_mode);
   if (isDoorServiceMode(mode)) return "Door to quay";
   return "Quay to quay";
@@ -1089,6 +1051,7 @@ function isSpotRate(rate) {
 }
 
 function isDoorRate(rate) {
+  if (rate.quote_kind) return rate.quote_kind === "door";
   return [rate.contract_tag, rate.carrier_key, rate.carrier_label, rate.service_mode]
     .filter(Boolean)
     .some((value) => {
@@ -1128,59 +1091,6 @@ function rateDestination(rate) {
     rate.final_destination,
     rate.pod,
   );
-}
-
-function merchantHaulagePort(rate) {
-  const pol = firstPresent(rate.pol, "");
-  return supportedHaulagePort(pol, haulageSourceForRate(rate)) ? pol : "";
-}
-
-function canAttachMerchantHaulage(rate) {
-  return Boolean(haulageSourceForRate(rate) && merchantHaulagePort(rate));
-}
-
-function supportedHaulagePort(value, sourceKey) {
-  if (!value) return false;
-  const target = locationKey(value);
-  const tariffs = Object.keys(deskState.haulageTariffsBySource || {}).length
-    ? deskState.haulageTariffsBySource[sourceKey] || {}
-    : deskState.haulageTariffs || {};
-  return Object.values(tariffs).some((portMap) =>
-    Object.keys(portMap || {}).some((port) => locationKey(port) === target));
-}
-
-function findHaulageTariff(collection, port, rate) {
-  const sourceKey = haulageSourceForRate(rate);
-  const tariffs = Object.keys(deskState.haulageTariffsBySource || {}).length
-    ? deskState.haulageTariffsBySource[sourceKey] || {}
-    : deskState.haulageTariffs || {};
-  const collectionEntry = Object.entries(tariffs)
-    .find(([name]) => locationsMatch(name, collection));
-  if (!collectionEntry) return null;
-  const portEntry = Object.entries(collectionEntry[1] || {})
-    .find(([name]) => locationsMatch(name, port));
-  return portEntry ? portEntry[1] : null;
-}
-
-function isCoscoRate(rate) {
-  return normalized(firstPresent(rate.carrier_name, rate.provider_name)).includes("cosco");
-}
-
-function haulageSourceForRate(rate) {
-  if (isCoscoRate(rate)) {
-    return isDoorRate(rate) ? "" : "cosco-haulage";
-  }
-  return "haulage-q2";
-}
-
-function haulageProviderLabel(rate) {
-  return haulageSourceForRate(rate) === "cosco-haulage" ? "COSCO Haulage" : "UK Inland Haulage";
-}
-
-function haulageCurrencyFor(rate) {
-  const sourceKey = haulageSourceForRate(rate);
-  return deskState.haulageCurrenciesBySource?.[sourceKey]
-    || (sourceKey === "cosco-haulage" ? "USD" : deskState.haulageCurrency || "USD");
 }
 
 function canonicalEquipment(value) {
@@ -1286,40 +1196,15 @@ function allQuotesTitle() {
 }
 
 function countHiddenExpiredMatches() {
-  const kind = elements.collectionSelect.value ? "all" : "port";
-  return filterConnectedRates({ includeExpired: true, kind }).filter((rate) => isExpiredRate(rate)).length;
+  return RATE_DESK_DEMO_MODE ? 0 : deskState.hiddenExpired;
 }
 
 function hasExpiredMatches() {
   return countHiddenExpiredMatches() > 0;
 }
 
-function filterConnectedRates({ includeExpired, kind }) {
-  const origin = elements.originSelect.value;
-  const destination = elements.destinationSelect.value;
-  const carrier = elements.carrierSelect.value;
-  const equipment = elements.equipmentSelect.value;
-  const material = elements.materialSelect.value;
-  const collection = elements.collectionSelect.value;
-  return deskState.connectedRates
-    .filter((rate) => {
-      if (isHaulageRate(rate)) return false;
-      const doorRate = isDoorRate(rate);
-      if (kind === "port" && doorRate) return false;
-      if (kind === "door" && !doorRate) return false;
-      if (!includeExpired && isExpiredRate(rate)) return false;
-      if (!matchesFilter(firstPresent(rate.carrier_name, rate.provider_name, rate.carrier), carrier)) return false;
-      if (!matchesFilter(rateDestination(rate), destination)) return false;
-      if (equipment && canonicalEquipment(rate.equipment_type) !== equipment) return false;
-      if (!(material === "All materials" || (rate.materials || []).some((item) => sameValue(item, material)))) return false;
-      if (doorRate) {
-        if (collection && !locationsMatch(rateCollection(rate), collection)) return false;
-        const explicitPort = rate.pol || "";
-        if (origin && explicitPort && !matchesFilter(explicitPort, origin)) return false;
-        return true;
-      }
-      return matchesFilter(rateOrigin(rate), origin);
-    });
+function isQuaySearch() {
+  return !elements.collectionSelect.value && Boolean(elements.originSelect.value && elements.destinationSelect.value);
 }
 
 function firstPresent(...values) {

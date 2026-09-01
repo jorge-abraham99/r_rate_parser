@@ -261,6 +261,7 @@ def api_rate_desk_search(
     equipment_type: str | None = None,
     material: str | None = None,
     valid_on: str | None = None,
+    include_expired: bool = True,
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
@@ -274,6 +275,7 @@ def api_rate_desk_search(
         equipment_type=equipment_type,
         material=material,
         valid_on=valid_on,
+        include_expired=include_expired,
         limit=min(max(limit, 1), 50),
         offset=max(offset, 0),
         organization_id=context.organization_id,

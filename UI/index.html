@@ -94,7 +94,7 @@
           <span class="number" role="columnheader"><button class="quote-sort" type="button" data-sort-key="originUsd" data-sort-label="Origin cost"><span>Origin</span><span class="sort-indicator" aria-hidden="true"></span></button></span>
           <span class="number" role="columnheader"><button class="quote-sort" type="button" data-sort-key="freightUsd" data-sort-label="Freight cost"><span>Freight</span><span class="sort-indicator" aria-hidden="true"></span></button></span>
           <span class="number" role="columnheader"><button class="quote-sort" type="button" data-sort-key="destinationUsd" data-sort-label="Destination cost"><span>Destination</span><span class="sort-indicator" aria-hidden="true"></span></button></span>
-          <span class="number" role="columnheader"><button class="quote-sort" type="button" data-sort-key="totalUsd" data-sort-label="All-in USD"><span>All-in USD<br><small>incl. inland</small></span><span class="sort-indicator" aria-hidden="true"></span></button></span>
+          <span class="number" role="columnheader"><button class="quote-sort" type="button" data-sort-key="totalUsd" data-sort-label="All-in USD"><span>All-in USD<br><small id="priceScopeLabel">incl. inland</small></span><span class="sort-indicator" aria-hidden="true"></span></button></span>
           <span class="number" role="columnheader"><button class="quote-sort" type="button" data-sort-key="validity" data-sort-label="Validity"><span>Validity</span><span class="sort-indicator" aria-hidden="true"></span></button></span>
         </div>
         <div id="rateRows">
@@ -102,7 +102,7 @@
         </div>
         <div class="quote-footer-strip">
           <p><strong>Contract</strong> — published carrier rate sheet, valid for the displayed period.</p>
-          <p><strong>Inland haulage</strong> — flat per container. POA means no published rate for that corridor.</p>
+          <p><strong>Inland haulage</strong> — included in collection routes; excluded from quay-to-quay prices.</p>
         </div>
       </section>
 
