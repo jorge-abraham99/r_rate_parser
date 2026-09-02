@@ -7,7 +7,7 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -25,6 +25,7 @@ from rate_ingest.services import (
     get_rate_desk_metadata,
     get_rate_offer_detail,
     get_import_detail,
+    export_rate_desk_csv,
     import_source_file,
     list_imports,
     reject_import_by_id,
@@ -295,6 +296,44 @@ def api_rate_offer_detail(
     if detail is None:
         raise HTTPException(status_code=404, detail="Approved rate offer not found")
     return detail
+
+
+@app.get("/api/rate-desk/export")
+def api_rate_desk_export(
+    context: Annotated[RequestContext, Depends(require_organization_member)],
+    provider_name: str | None = None,
+    carrier_name: str | None = None,
+    collection: str | None = None,
+    pol: str | None = None,
+    pod: str | None = None,
+    equipment_type: str | None = None,
+    material: str | None = None,
+    include_expired: bool = True,
+    containers: int = 1,
+    margin_usd: float = 0.0,
+) -> Response:
+    try:
+        csv_body = export_rate_desk_csv(
+            settings(),
+            provider_name=provider_name,
+            carrier_name=carrier_name,
+            collection=collection,
+            pol=pol,
+            pod=pod,
+            equipment_type=equipment_type,
+            material=material,
+            include_expired=include_expired,
+            containers=containers,
+            margin_usd=margin_usd,
+            organization_id=context.organization_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return Response(
+        content=csv_body,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="rate-desk-export.csv"'},
+    )
 
 
 @app.get("/api/rate-desk")

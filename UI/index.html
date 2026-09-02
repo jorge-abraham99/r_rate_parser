@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/ui/styles.css?v=19">
+  <link rel="stylesheet" href="/ui/styles.css?v=20">
 </head>
 <body>
   <div class="app-shell">
@@ -57,6 +57,10 @@
         <label for="qtyInput">Containers</label>
         <input id="qtyInput" type="number" min="1" max="999" value="1" inputmode="numeric">
       </div>
+      <div class="lookup-field quote-margin">
+        <label for="marginInput">Margin / container (USD)</label>
+        <input id="marginInput" type="number" min="0" step="0.01" value="0" inputmode="decimal">
+      </div>
       <div class="lookup-field quote-material">
         <label for="materialSelect">Material</label>
         <select id="materialSelect" disabled><option>Loading…</option></select>
@@ -67,6 +71,7 @@
           <span>Show expired</span>
         </label>
         <button id="showAllQuotesButton" class="quote-reset" type="button">Show all quotes</button>
+        <button id="downloadCsvButton" class="quote-reset" type="button">Download CSV</button>
       </div>
     </section>
 
@@ -117,6 +122,6 @@
   <script src="/ui/auth.js?v=1"></script>
   <script src="/ui/config.js?v=4"></script>
   <script src="/ui/demo-data.js?v=2"></script>
-  <script src="/ui/rate-desk.js?v=22"></script>
+  <script src="/ui/rate-desk.js?v=23"></script>
 </body>
 </html>

@@ -229,6 +229,7 @@ def test_public_endpoints_do_not_require_auth(monkeypatch):
         ("get", "/api/search", {}),
         ("get", "/api/rate-desk/meta", {}),
         ("get", "/api/rate-desk/search", {}),
+        ("get", "/api/rate-desk/export", {}),
         ("get", "/api/rate-desk/offers/missing", {}),
         ("get", "/api/rate-desk", {}),
     ],
@@ -402,7 +403,12 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert "/api/rate-desk/search?" in rate_desk_js
     assert 'id="carrierSelect"' in quote_html
     assert "carrierSelect" in rate_desk_js
-    assert 'params.set("carrier_name", carrier)' in rate_desk_js
+    assert '["carrier_name", elements.carrierSelect.value]' in rate_desk_js
+    assert 'id="marginInput"' in quote_html
+    assert 'id="downloadCsvButton"' in quote_html
+    assert "/api/rate-desk/export?" in rate_desk_js
+    assert 'params.set("margin_usd", margin.toFixed(2))' in rate_desk_js
+    assert 'params.set("containers", String(containers))' in rate_desk_js
     assert 'populateSelect(elements.originSelect, origins, "Any origin", "", true)' in rate_desk_js
     assert 'populateSelect(elements.destinationSelect, destinations, "Any destination", "", true)' in rate_desk_js
     assert 'data-detail-id="${escapeAttr(row.detailId)}"' in rate_desk_js
