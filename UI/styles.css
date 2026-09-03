@@ -366,16 +366,100 @@ label:focus-within {
   font-weight: 600;
 }
 
-.lookup-field select[multiple] {
-  height: auto;
-  min-height: 38px;
-  max-height: 104px;
-  padding-block: 4px;
-  overflow-y: auto;
+.multi-filter-control {
+  position: relative;
+  min-width: 170px;
 }
 
-.lookup-field select[multiple] option {
-  padding: 2px 0;
+.multi-filter-toggle {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1.5px solid var(--ink);
+  border-radius: 5px;
+  padding: 7px 10px;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.multi-filter-toggle:disabled {
+  border-color: #b6c5d8;
+  color: var(--quiet);
+  cursor: not-allowed;
+}
+
+.multi-filter-chevron {
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.multi-filter-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 5px);
+  left: 0;
+  width: 100%;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 5px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(10, 25, 45, 0.18);
+}
+
+.multi-filter-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 6px;
+  border-radius: 4px;
+  color: var(--body);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.multi-filter-option:hover {
+  background: var(--page);
+}
+
+.multi-filter-option input {
+  accent-color: var(--bright-blue);
+}
+
+.multi-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.multi-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #b8cbe1;
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: #edf4fc;
+  color: var(--body);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.multi-filter-chip:hover {
+  border-color: var(--bright-blue);
+  background: #e0edfb;
 }
 
 .lookup-field select:disabled {
@@ -384,15 +468,15 @@ label:focus-within {
   cursor: not-allowed;
 }
 
-.collection-field select {
+.collection-field .multi-filter-control {
   min-width: 190px;
 }
 
-.quote-search-band > .lookup-field:not(.quote-qty, .quote-size, .quote-material, .collection-field) select {
+.quote-search-band > .lookup-field:not(.quote-qty, .quote-size, .quote-material, .collection-field) .multi-filter-control {
   min-width: 170px;
 }
 
-.quote-destination select {
+.quote-destination .multi-filter-control {
   min-width: 210px !important;
 }
 
@@ -1578,7 +1662,7 @@ label:focus-within {
     gap: 10px;
   }
 
-  .collection-field select {
+  .collection-field .multi-filter-control {
     min-width: 170px;
   }
 
@@ -1631,6 +1715,7 @@ label:focus-within {
   }
 
   .quote-search-band .lookup-field select,
+  .quote-search-band .lookup-field .multi-filter-control,
   .quote-search-band .lookup-field input {
     width: 100%;
     min-width: 0 !important;

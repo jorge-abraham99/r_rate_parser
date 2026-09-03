@@ -440,11 +440,15 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert '"/api/rate-desk/meta"' in rate_desk_js
     assert "/api/rate-desk/search?" in rate_desk_js
     assert 'id="carrierSelect"' in quote_html
-    assert 'id="collectionSelect" multiple' in quote_html
-    assert 'id="originSelect" multiple' in quote_html
-    assert 'id="destinationSelect" multiple' in quote_html
-    assert 'id="carrierSelect" multiple' in quote_html
+    assert quote_html.count('data-multi-select') == 4
+    assert 'id="collectionSelect" multiple hidden' in quote_html
+    assert 'id="originSelect" multiple hidden' in quote_html
+    assert 'id="destinationSelect" multiple hidden' in quote_html
+    assert 'id="carrierSelect" multiple hidden' in quote_html
+    assert 'data-multi-chips' in quote_html
     assert "carrierSelect" in rate_desk_js
+    assert "setupMultiSelect" in rate_desk_js
+    assert "data-multi-remove" in rate_desk_js
     assert '["carrier_name", selectedValues(elements.carrierSelect)]' in rate_desk_js
     assert "params.append(key, item)" in rate_desk_js
     assert 'id="marginInput"' in quote_html
