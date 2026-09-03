@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -217,10 +217,10 @@ def api_delete_import(
 def api_search(
     context: Annotated[RequestContext, Depends(require_organization_member)],
     provider_name: str | None = None,
-    carrier_name: str | None = None,
-    collection: str | None = None,
-    pol: str | None = None,
-    pod: str | None = None,
+    carrier_name: list[str] | None = Query(default=None),
+    collection: list[str] | None = Query(default=None),
+    pol: list[str] | None = Query(default=None),
+    pod: list[str] | None = Query(default=None),
     equipment_type: str | None = None,
     material: str | None = None,
     valid_on: str | None = None,
@@ -255,10 +255,10 @@ def api_rate_desk_metadata(
 def api_rate_desk_search(
     context: Annotated[RequestContext, Depends(require_organization_member)],
     provider_name: str | None = None,
-    carrier_name: str | None = None,
-    collection: str | None = None,
-    pol: str | None = None,
-    pod: str | None = None,
+    carrier_name: list[str] | None = Query(default=None),
+    collection: list[str] | None = Query(default=None),
+    pol: list[str] | None = Query(default=None),
+    pod: list[str] | None = Query(default=None),
     equipment_type: str | None = None,
     material: str | None = None,
     valid_on: str | None = None,
@@ -302,10 +302,10 @@ def api_rate_offer_detail(
 def api_rate_desk_export(
     context: Annotated[RequestContext, Depends(require_organization_member)],
     provider_name: str | None = None,
-    carrier_name: str | None = None,
-    collection: str | None = None,
-    pol: str | None = None,
-    pod: str | None = None,
+    carrier_name: list[str] | None = Query(default=None),
+    collection: list[str] | None = Query(default=None),
+    pol: list[str] | None = Query(default=None),
+    pod: list[str] | None = Query(default=None),
     equipment_type: str | None = None,
     material: str | None = None,
     include_expired: bool = True,

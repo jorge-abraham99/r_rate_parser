@@ -366,6 +366,18 @@ label:focus-within {
   font-weight: 600;
 }
 
+.lookup-field select[multiple] {
+  height: auto;
+  min-height: 38px;
+  max-height: 104px;
+  padding-block: 4px;
+  overflow-y: auto;
+}
+
+.lookup-field select[multiple] option {
+  padding: 2px 0;
+}
+
 .lookup-field select:disabled {
   border-color: #b6c5d8;
   color: var(--quiet);

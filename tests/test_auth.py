@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import rate_ingest.auth as auth_module
+import rate_ingest.api as api_module
 from rate_ingest.api import app
 from rate_ingest.auth import (
     AuthenticationError,
@@ -318,6 +319,43 @@ def test_all_membership_roles_can_read(role, token_tools, monkeypatch, tmp_path)
     assert client.get("/api/rate-desk", headers=bearer(make_token())).status_code == 200
 
 
+def test_rate_desk_accepts_repeated_filter_query_values(token_tools, monkeypatch):
+    verifier, make_token = token_tools
+    use_auth(monkeypatch, verifier, (membership(),))
+    captured = {}
+
+    def fake_search(_settings, **filters):
+        captured.update(filters)
+        return {
+            "result_type": "collection",
+            "hidden_expired": 0,
+            "rates": [],
+            "pagination": {"limit": 50, "offset": 0, "total": 0, "has_more": False},
+        }
+
+    monkeypatch.setattr(api_module, "search_rate_summaries", fake_search)
+    response = TestClient(app).get(
+        "/api/rate-desk/search",
+        params=[
+            ("collection", "Bristol"),
+            ("collection", "Leeds"),
+            ("pol", "Felixstowe"),
+            ("pol", "Southampton"),
+            ("pod", "Mundra"),
+            ("pod", "Singapore"),
+            ("carrier_name", "COSCO"),
+            ("carrier_name", "MSC"),
+        ],
+        headers=bearer(make_token()),
+    )
+
+    assert response.status_code == 200
+    assert captured["collection"] == ["Bristol", "Leeds"]
+    assert captured["pol"] == ["Felixstowe", "Southampton"]
+    assert captured["pod"] == ["Mundra", "Singapore"]
+    assert captured["carrier_name"] == ["COSCO", "MSC"]
+
+
 def test_viewer_cannot_mutate(token_tools, monkeypatch):
     verifier, make_token = token_tools
     use_auth(monkeypatch, verifier, (membership("viewer"),))
@@ -402,8 +440,13 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert '"/api/rate-desk/meta"' in rate_desk_js
     assert "/api/rate-desk/search?" in rate_desk_js
     assert 'id="carrierSelect"' in quote_html
+    assert 'id="collectionSelect" multiple' in quote_html
+    assert 'id="originSelect" multiple' in quote_html
+    assert 'id="destinationSelect" multiple' in quote_html
+    assert 'id="carrierSelect" multiple' in quote_html
     assert "carrierSelect" in rate_desk_js
-    assert '["carrier_name", elements.carrierSelect.value]' in rate_desk_js
+    assert '["carrier_name", selectedValues(elements.carrierSelect)]' in rate_desk_js
+    assert "params.append(key, item)" in rate_desk_js
     assert 'id="marginInput"' in quote_html
     assert 'id="downloadCsvButton"' in quote_html
     assert "/api/rate-desk/export?" in rate_desk_js
