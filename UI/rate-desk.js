@@ -56,6 +56,13 @@ const elements = {
   paginationSummary: document.getElementById("paginationSummary"),
 };
 
+[
+  [elements.collectionSelect, "No collection selected"],
+  [elements.originSelect, "Any origin"],
+  [elements.destinationSelect, "Any destination"],
+  [elements.carrierSelect, "Any carrier"],
+].forEach(([select, emptyLabel]) => setupMultiSelect(select, emptyLabel));
+
 [elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.carrierSelect, elements.equipmentSelect, elements.materialSelect]
   .forEach((element) => element.addEventListener("change", () => {
     normalizeMultiSelection(element);
@@ -204,6 +211,7 @@ function populateSelect(select, values, emptyLabel, preferred = [], includeBlank
   if (!clean.length && !includeBlank) {
     select.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>`;
     select.disabled = true;
+    renderMultiSelect(select);
     return;
   }
   const preferredValues = Array.isArray(preferred) ? preferred : preferred ? [preferred] : [];
@@ -220,6 +228,7 @@ function populateSelect(select, values, emptyLabel, preferred = [], includeBlank
     select.value = select.multiple ? (nextValues[0] || "") : nextValues;
   }
   select.disabled = false;
+  renderMultiSelect(select);
 }
 
 function selectedValues(select) {
@@ -241,6 +250,7 @@ function setSelectedValues(select, values) {
   } else {
     select.value = values[0] || "";
   }
+  renderMultiSelect(select);
 }
 
 function normalizeMultiSelection(select) {
@@ -250,6 +260,66 @@ function normalizeMultiSelection(select) {
   if (blank && blank.selected && options.some((option) => option.value && option.selected)) {
     blank.selected = false;
   }
+}
+
+function setupMultiSelect(select, emptyLabel) {
+  const control = select?.closest?.("[data-multi-select]");
+  if (!control) return;
+  const toggle = control.querySelector("[data-multi-toggle]");
+  const menu = control.querySelector("[data-multi-menu]");
+  const chips = control.querySelector("[data-multi-chips]");
+  if (!toggle || !menu || !chips) return;
+  select.multiEmptyLabel = emptyLabel;
+  select.hidden = true;
+  select.tabIndex = -1;
+  toggle.addEventListener("click", () => {
+    menu.hidden = !menu.hidden;
+    toggle.setAttribute("aria-expanded", String(!menu.hidden));
+  });
+  menu.addEventListener("change", (event) => {
+    const checkbox = event.target?.closest?.("[data-multi-option]");
+    if (!checkbox) return;
+    const checkboxes = [...menu.querySelectorAll("[data-multi-option]")];
+    if (checkbox.value === "") {
+      checkboxes.forEach((item) => { item.checked = item === checkbox; });
+    } else {
+      const blank = checkboxes.find((item) => item.value === "");
+      if (blank) blank.checked = false;
+    }
+    setSelectedValues(select, checkboxes.filter((item) => item.checked).map((item) => item.value).filter(Boolean));
+    resetAndRender();
+  });
+  chips.addEventListener("click", (event) => {
+    const remove = event.target?.closest?.("[data-multi-remove]");
+    if (!remove) return;
+    const next = selectedValues(select).filter((value) => value !== remove.dataset.multiRemove);
+    setSelectedValues(select, next);
+    resetAndRender();
+  });
+  renderMultiSelect(select);
+}
+
+function renderMultiSelect(select) {
+  const control = select?.closest?.("[data-multi-select]");
+  if (!control) return;
+  const toggle = control.querySelector("[data-multi-toggle]");
+  const menu = control.querySelector("[data-multi-menu]");
+  const chips = control.querySelector("[data-multi-chips]");
+  if (!toggle || !menu || !chips) return;
+  const values = selectedValues(select);
+  const options = [...(select.options || [])];
+  const emptyLabel = select.multiEmptyLabel || "Any";
+  const label = values.length === 1 ? values[0] : values.length ? `${values.length} selected` : emptyLabel;
+  const labelNode = toggle.querySelector("[data-multi-label]");
+  if (labelNode) labelNode.textContent = label;
+  toggle.disabled = select.disabled;
+  menu.innerHTML = options.map((option) => {
+    const checked = option.value ? values.includes(option.value) : !values.length;
+    return `<label class="multi-filter-option"><input type="checkbox" data-multi-option value="${escapeAttr(option.value)}"${checked ? " checked" : ""}><span>${escapeHtml(option.textContent)}</span></label>`;
+  }).join("");
+  chips.innerHTML = values.map((value) =>
+    `<button class="multi-filter-chip" data-multi-remove="${escapeAttr(value)}" type="button" aria-label="Remove ${escapeAttr(value)}">${escapeHtml(value)} <span aria-hidden="true">×</span></button>`
+  ).join("");
 }
 
 function setCollectionVisibility(visible) {
