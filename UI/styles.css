@@ -392,6 +392,10 @@ label:focus-within {
   width: 74px;
 }
 
+.quote-margin input {
+  width: 116px;
+}
+
 .quote-material select {
   min-width: 130px;
 }

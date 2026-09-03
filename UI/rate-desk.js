@@ -37,6 +37,8 @@ const elements = {
   equipmentSelect: document.getElementById("equipmentSelect"),
   qtyInput: document.getElementById("qtyInput"),
   materialSelect: document.getElementById("materialSelect"),
+  marginInput: document.getElementById("marginInput"),
+  downloadCsvButton: document.getElementById("downloadCsvButton"),
   showExpiredToggle: document.getElementById("showExpiredToggle"),
   showAllQuotesButton: document.getElementById("showAllQuotesButton"),
   rateRows: document.getElementById("rateRows"),
@@ -58,6 +60,7 @@ const elements = {
   .forEach((element) => element.addEventListener("change", resetAndRender));
 elements.showExpiredToggle.addEventListener("change", resetAndRender);
 elements.showAllQuotesButton.addEventListener("click", showAllQuotes);
+elements.downloadCsvButton.addEventListener("click", downloadFilteredCsv);
 elements.previousPageButton.addEventListener("click", () => changePage(-1));
 elements.nextPageButton.addEventListener("click", () => changePage(1));
 elements.sortButtons.forEach((button) => {
@@ -225,24 +228,7 @@ function scheduleRefresh() {
 }
 
 async function refreshConnectedRates() {
-  const collection = elements.collectionSelect.value;
-  const origin = elements.originSelect.value;
-  const destination = elements.destinationSelect.value;
-  const carrier = elements.carrierSelect.value;
-  const equipment = elements.equipmentSelect.value;
-  const params = new URLSearchParams({
-    limit: String(deskState.pageSize),
-    offset: String(deskState.pageOffset),
-    include_expired: String(elements.showExpiredToggle.checked),
-  });
-  if (collection) params.set("collection", collection);
-  if (origin) params.set("pol", origin);
-  if (destination) params.set("pod", destination);
-  if (carrier) params.set("carrier_name", carrier);
-  if (equipment) params.set("equipment_type", equipment);
-  if (elements.materialSelect.value && elements.materialSelect.value !== "All materials") {
-    params.set("material", elements.materialSelect.value);
-  }
+  const params = buildSearchParams(deskState.pageSize, deskState.pageOffset);
 
   if (deskState.searchController) deskState.searchController.abort();
   const controller = new AbortController();
@@ -270,6 +256,61 @@ async function refreshConnectedRates() {
     renderDesk();
   } finally {
     if (deskState.searchController === controller) deskState.searchController = null;
+  }
+}
+
+function buildSearchParams(limit = deskState.pageSize, offset = deskState.pageOffset) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    include_expired: String(elements.showExpiredToggle.checked),
+  });
+  const filters = [
+    ["collection", elements.collectionSelect.value],
+    ["pol", elements.originSelect.value],
+    ["pod", elements.destinationSelect.value],
+    ["carrier_name", elements.carrierSelect.value],
+    ["equipment_type", elements.equipmentSelect.value],
+  ];
+  filters.forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  if (elements.materialSelect.value && elements.materialSelect.value !== "All materials") {
+    params.set("material", elements.materialSelect.value);
+  }
+  return params;
+}
+
+async function downloadFilteredCsv() {
+  const margin = numberValue(elements.marginInput.value);
+  const containers = clampQuantity(elements.qtyInput.value);
+  if (margin == null || margin < 0) {
+    showAlert("Enter a valid non-negative margin per container.");
+    elements.marginInput.focus();
+    return;
+  }
+  elements.downloadCsvButton.disabled = true;
+  elements.downloadCsvButton.textContent = "Preparing CSV…";
+  try {
+    const params = buildSearchParams(1, 0);
+    params.set("containers", String(containers));
+    params.set("margin_usd", margin.toFixed(2));
+    const response = await window.RATE_DESK_AUTH.apiFetch(`/api/rate-desk/export?${params.toString()}`);
+    if (!response.ok) throw new Error("The CSV export could not be generated.");
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `rate-desk-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    showAlert(`Could not download CSV: ${error.message}`);
+  } finally {
+    elements.downloadCsvButton.disabled = false;
+    elements.downloadCsvButton.textContent = "Download CSV";
   }
 }
 

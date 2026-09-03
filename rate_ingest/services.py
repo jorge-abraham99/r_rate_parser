@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import json
+from io import StringIO
 import math
 import re
 import shutil
@@ -762,7 +764,7 @@ def search_rate_summaries(
     material: str | None = None,
     valid_on: str | None = None,
     include_expired: bool = True,
-    limit: int = 50,
+    limit: int | None = 50,
     offset: int = 0,
     repository: RateRepository | None = None,
     organization_id: OrganizationId | None = None,
@@ -794,7 +796,7 @@ def search_rate_summaries(
         results = [rate for rate in results if not rate.get("valid_to") or rate["valid_to"] >= today]
     results.sort(key=lambda rate: (*summary_sort_key(rate), rate["quote_id"]))
     total = len(results)
-    page_limit = min(max(limit, 1), 50)
+    page_limit = len(results) if limit is None else min(max(limit, 1), 50)
     page_offset = max(offset, 0)
     page = results[page_offset : page_offset + page_limit]
     return {
@@ -808,6 +810,94 @@ def search_rate_summaries(
             "has_more": page_offset + page_limit < total,
         },
     }
+
+
+def export_rate_desk_csv(
+    settings: Settings,
+    *,
+    provider_name: str | None = None,
+    carrier_name: str | None = None,
+    collection: str | None = None,
+    pol: str | None = None,
+    pod: str | None = None,
+    equipment_type: str | None = None,
+    material: str | None = None,
+    include_expired: bool = True,
+    containers: int = 1,
+    margin_usd: float = 0.0,
+    repository: RateRepository | None = None,
+    organization_id: OrganizationId | None = None,
+) -> str:
+    """Build a complete filtered rate export, including all result pages.
+
+    Rate Desk totals are normalized to USD so ocean and haulage legs can be
+    combined even when their source sheets use different currencies. The
+    margin is a USD amount per container, and the exported total is for the
+    requested booking quantity.
+    """
+    if containers < 1:
+        raise ValueError("containers must be at least 1")
+    if margin_usd < 0 or not math.isfinite(margin_usd):
+        raise ValueError("margin_usd must be a non-negative number")
+
+    payload = search_rate_summaries(
+        settings,
+        provider_name=provider_name,
+        carrier_name=carrier_name,
+        collection=collection,
+        pol=pol,
+        pod=pod,
+        equipment_type=equipment_type,
+        material=material,
+        include_expired=include_expired,
+        limit=None,
+        repository=repository,
+        organization_id=organization_id,
+    )
+    output = StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(["collection", "port_of_loading", "port_of_delivery", "total_cost"])
+    for rate in payload["rates"]:
+        base_total = rate.get("all_in_usd")
+        if not isinstance(base_total, (int, float)) or not math.isfinite(base_total):
+            # POA or otherwise incomplete routes cannot produce a numeric CSV
+            # total, so they are intentionally omitted from the export.
+            continue
+        currency = str(rate.get("base_currency") or "").upper()
+        native_total = rate.get("all_in_amount")
+        fx = FX_RATES.get(currency)
+        native_is_complete = (
+            rate.get("quote_kind") != "combined"
+            and isinstance(native_total, (int, float))
+            and math.isfinite(native_total)
+            and fx is not None
+            and abs(float(native_total) * fx - float(base_total)) < 0.01
+        )
+        if native_is_complete:
+            # The margin is entered in USD, so convert it into the rate's
+            # native currency before applying it per container.
+            total = (float(native_total) + margin_usd / fx) * containers
+            total_cost = f"{total:.2f} {currency}"
+        else:
+            total = (float(base_total) + margin_usd) * containers
+            total_cost = f"{total:.2f} USD"
+        collection_name = first_present(
+            rate.get("collection_location_name"),
+            rate.get("place_of_receipt"),
+            rate.get("origin"),
+        )
+        delivery = first_present(
+            rate.get("destination_location_name"),
+            rate.get("final_destination"),
+            rate.get("pod"),
+        )
+        writer.writerow([
+            collection_name,
+            rate.get("pol") or "",
+            delivery,
+            total_cost,
+        ])
+    return output.getvalue()
 
 
 def quote_service_kind(rate: dict[str, Any]) -> str:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import json
+from io import StringIO
 from pathlib import Path
 import shutil
 import subprocess
@@ -143,6 +145,62 @@ def test_pagination_uses_complete_prices_and_distinct_combinations(quotes):
     assert len({row["quote_id"] for row in rows}) == 120
     assert [row["all_in_usd"] for row in rows] == [300] * 60 + [1050] * 60
     assert pages[1] == quotes.search(limit=50, offset=50)
+
+    exported = services.export_rate_desk_csv(
+        quotes.settings,
+        carrier_name="COSCO",
+        containers=2,
+        margin_usd=50,
+        repository=quotes.repository(),
+    )
+    export_rows = list(csv.DictReader(StringIO(exported)))
+    assert len(export_rows) == 120
+    assert export_rows[0]["total_cost"] == "700.00 USD"
+    assert export_rows[-1]["total_cost"] == "2200.00 USD"
+
+
+def test_csv_export_contains_combined_route_and_margin(mixed):
+    exported = services.export_rate_desk_csv(
+        mixed.settings,
+        carrier_name="COSCO",
+        collection="Bristol",
+        containers=2,
+        margin_usd=50,
+        repository=mixed.repository(),
+    )
+    rows = list(csv.DictReader(StringIO(exported)))
+
+    assert list(rows[0]) == ["collection", "port_of_loading", "port_of_delivery", "total_cost"]
+    assert {(row["collection"], row["port_of_loading"], row["port_of_delivery"])
+            for row in rows} == {
+                ("Bristol, GB", "Felixstowe", "Mundra, IN"),
+                ("Bristol, GB", "Southampton", "Mundra, IN"),
+                ("Bristol, GB", "Felixstowe", "Singapore"),
+            }
+    assert {row["total_cost"] for row in rows} == {"1000.00 USD", "1100.00 USD", "1560.00 USD"}
+
+
+def test_csv_export_keeps_native_currency_for_single_currency_rates(quotes):
+    quotes.add(
+        "cma-door-gbp",
+        carrier="CMA CGM",
+        key="cma-door",
+        mode="SD / CY",
+        collection="Bristol",
+        currency="GBP",
+        amount=100,
+    )
+    exported = services.export_rate_desk_csv(
+        quotes.settings,
+        carrier_name="CMA CGM",
+        collection="Bristol",
+        containers=2,
+        margin_usd=50,
+        repository=quotes.repository(),
+    )
+    rows = list(csv.DictReader(StringIO(exported)))
+
+    assert rows[0]["total_cost"] == "277.52 GBP"
 
 
 @pytest.mark.parametrize("change", [
