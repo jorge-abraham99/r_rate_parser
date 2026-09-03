@@ -9,6 +9,7 @@ import shutil
 from threading import Lock
 from time import monotonic
 from datetime import date, datetime, timezone
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -556,11 +557,11 @@ def delete_import_by_id(
 
 def search_approved_offers(
     settings: Settings,
-    provider_name: str | None = None,
-    carrier_name: str | None = None,
-    collection: str | None = None,
-    pol: str | None = None,
-    pod: str | None = None,
+    provider_name: str | Sequence[str] | None = None,
+    carrier_name: str | Sequence[str] | None = None,
+    collection: str | Sequence[str] | None = None,
+    pol: str | Sequence[str] | None = None,
+    pod: str | Sequence[str] | None = None,
     equipment_type: str | None = None,
     valid_on: str | None = None,
     material: str | None = None,
@@ -606,11 +607,11 @@ def search_approved_offers(
             continue
         if offer_id and offer.id != offer_id:
             continue
-        if provider_name and not contains_text(card.provider_name, provider_name):
+        if not matches_any_text(card.provider_name, provider_name):
             continue
-        if carrier_name and not contains_text(card.carrier_name, carrier_name):
+        if not matches_any_text(card.carrier_name, carrier_name):
             continue
-        if collection and not contains_text(
+        if not matches_any_text(
             first_present(
                 offer.collection_location_name,
                 offer.place_of_receipt,
@@ -619,9 +620,9 @@ def search_approved_offers(
             collection,
         ):
             continue
-        if pol and not contains_text(offer.pol, pol):
+        if not matches_any_text(offer.pol, pol):
             continue
-        if pod and not contains_text(
+        if not matches_any_text(
             first_present(
                 offer.destination_location_name,
                 offer.final_destination,
@@ -755,11 +756,11 @@ def search_approved_offers(
 def search_rate_summaries(
     settings: Settings,
     *,
-    provider_name: str | None = None,
-    carrier_name: str | None = None,
-    collection: str | None = None,
-    pol: str | None = None,
-    pod: str | None = None,
+    provider_name: str | Sequence[str] | None = None,
+    carrier_name: str | Sequence[str] | None = None,
+    collection: str | Sequence[str] | None = None,
+    pol: str | Sequence[str] | None = None,
+    pod: str | Sequence[str] | None = None,
     equipment_type: str | None = None,
     material: str | None = None,
     valid_on: str | None = None,
@@ -785,9 +786,12 @@ def search_rate_summaries(
         material=material,
         valid_on=valid_on,
     )
-    quay_only = not collection and bool(pol and pod)
+    collection_values = selected_filter_values(collection)
+    quay_only = not collection_values and bool(
+        selected_filter_values(pol) and selected_filter_values(pod)
+    )
     results = assemble_quote_routes(
-        all_rates, snapshot["summaries"], collection=collection,
+        all_rates, snapshot["summaries"], collection=collection_values,
         quay_only=quay_only, material=material, valid_on=valid_on,
     )
     today = datetime.now(timezone.utc).date().isoformat()
@@ -815,11 +819,11 @@ def search_rate_summaries(
 def export_rate_desk_csv(
     settings: Settings,
     *,
-    provider_name: str | None = None,
-    carrier_name: str | None = None,
-    collection: str | None = None,
-    pol: str | None = None,
-    pod: str | None = None,
+    provider_name: str | Sequence[str] | None = None,
+    carrier_name: str | Sequence[str] | None = None,
+    collection: str | Sequence[str] | None = None,
+    pol: str | Sequence[str] | None = None,
+    pod: str | Sequence[str] | None = None,
     equipment_type: str | None = None,
     material: str | None = None,
     include_expired: bool = True,
@@ -942,11 +946,13 @@ def assemble_quote_routes(
     rates: list[dict[str, Any]],
     all_summaries: list[dict[str, Any]],
     *,
-    collection: str | None,
+    collection: str | Sequence[str] | None,
     quay_only: bool,
     material: str | None,
     valid_on: str | None,
 ) -> list[dict[str, Any]]:
+    collection_values = selected_filter_values(collection)
+    collection_keys = {normalize_location_key(value) for value in collection_values}
     # Only the dedicated COSCO source is approved for combination. The legacy
     # UK Inland Haulage slot is not a fallback for COSCO or any other carrier.
     haulage_by_port: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -959,7 +965,7 @@ def assemble_quote_routes(
             pickup = quote_collection(haulage)
             if not pickup or not haulage.get("pol") or not haulage.get("equipment_type"):
                 continue
-            if collection and normalize_location_key(pickup) != normalize_location_key(collection):
+            if collection_keys and normalize_location_key(pickup) not in collection_keys:
                 continue
             key = (normalize_location_key(haulage["pol"]), canonical_equipment_type(haulage["equipment_type"]))
             haulage_by_port.setdefault(key, []).append(haulage)
@@ -978,7 +984,7 @@ def assemble_quote_routes(
             continue
         if kind == "door":
             pickup = quote_collection(rate)
-            if pickup and (not collection or normalize_location_key(pickup) == normalize_location_key(collection)):
+            if pickup and (not collection_keys or normalize_location_key(pickup) in collection_keys):
                 results.append({**rate, "quote_id": rate["offer_id"], "quote_kind": "door"})
             continue
         if kind != "quay" or not is_cosco_quote(rate):
@@ -1402,11 +1408,11 @@ def latest_approved_timestamp(
 def filter_rate_summaries(
     rates: list[dict[str, Any]],
     *,
-    provider_name: str | None = None,
-    carrier_name: str | None = None,
-    collection: str | None = None,
-    pol: str | None = None,
-    pod: str | None = None,
+    provider_name: str | Sequence[str] | None = None,
+    carrier_name: str | Sequence[str] | None = None,
+    collection: str | Sequence[str] | None = None,
+    pol: str | Sequence[str] | None = None,
+    pod: str | Sequence[str] | None = None,
     equipment_type: str | None = None,
     material: str | None = None,
     valid_on: str | None = None,
@@ -1415,11 +1421,11 @@ def filter_rate_summaries(
     material_key = material.lower() if material else None
     results: list[dict[str, Any]] = []
     for rate in rates:
-        if provider_name and not contains_text(rate.get("provider_name"), provider_name):
+        if not matches_any_text(rate.get("provider_name"), provider_name):
             continue
-        if carrier_name and not contains_text(rate.get("carrier_name"), carrier_name):
+        if not matches_any_text(rate.get("carrier_name"), carrier_name):
             continue
-        if collection and not contains_text(
+        if not matches_any_text(
             first_present(
                 rate.get("collection_location_name"),
                 rate.get("place_of_receipt"),
@@ -1428,9 +1434,9 @@ def filter_rate_summaries(
             collection,
         ):
             continue
-        if pol and not contains_text(rate.get("pol"), pol):
+        if not matches_any_text(rate.get("pol"), pol):
             continue
-        if pod and not contains_text(
+        if not matches_any_text(
             first_present(
                 rate.get("destination_location_name"),
                 rate.get("final_destination"),
@@ -1782,6 +1788,20 @@ def read_json_if_exists(path: Path) -> Any:
 
 def contains_text(value: str | None, search: str) -> bool:
     return search.lower() in (value or "").lower()
+
+
+def selected_filter_values(value: str | Sequence[str] | None) -> list[str]:
+    """Normalize legacy scalar filters and repeated query values alike."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    return [item for item in value if isinstance(item, str) and item.strip()]
+
+
+def matches_any_text(value: str | None, selected: str | Sequence[str] | None) -> bool:
+    values = selected_filter_values(selected)
+    return not values or any(contains_text(value, item) for item in values)
 
 
 def infer_materials(

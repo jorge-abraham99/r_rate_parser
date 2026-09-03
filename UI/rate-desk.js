@@ -57,7 +57,10 @@ const elements = {
 };
 
 [elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.carrierSelect, elements.equipmentSelect, elements.materialSelect]
-  .forEach((element) => element.addEventListener("change", resetAndRender));
+  .forEach((element) => element.addEventListener("change", () => {
+    normalizeMultiSelection(element);
+    resetAndRender();
+  }));
 elements.showExpiredToggle.addEventListener("change", resetAndRender);
 elements.showAllQuotesButton.addEventListener("click", showAllQuotes);
 elements.downloadCsvButton.addEventListener("click", downloadFilteredCsv);
@@ -131,9 +134,9 @@ function populateDemoFilters() {
   const origins = unique(quote.rates.flatMap((rate) => rate.origins));
   const destinations = unique(quote.rates.flatMap((rate) => rate.destinations));
   const carriers = unique(quote.rates.map((rate) => rate.carrier));
-  populateSelect(elements.collectionSelect, unique(quote.rates.flatMap((rate) => rate.collections || [])), "No collection selected", "Abbots Bromley", true);
-  populateSelect(elements.originSelect, origins, "Any origin", "Felixstowe", true);
-  populateSelect(elements.destinationSelect, destinations, "Any destination", "Laem Chabang", true);
+  populateSelect(elements.collectionSelect, unique(quote.rates.flatMap((rate) => rate.collections || [])), "No collection selected", ["Abbots Bromley"], true);
+  populateSelect(elements.originSelect, origins, "Any origin", ["Felixstowe"], true);
+  populateSelect(elements.destinationSelect, destinations, "Any destination", ["Laem Chabang"], true);
   populateSelect(elements.carrierSelect, carriers, "Any carrier", "", true);
   populateEquipment("40HC");
   populateSelect(elements.materialSelect, MATERIAL_OPTIONS, "No materials", "All materials");
@@ -170,7 +173,7 @@ function refreshCollectionOptions() {
   const pickups = Array.isArray(deskState.filters.door_pickups) ? deskState.filters.door_pickups : [];
   const haulagePickupNames = uniqueLocations(pickups.map((pickup) => pickup.name || pickup.location).filter(Boolean));
   const doorCollections = uniqueLocations(deskState.filters.collection_places || []);
-  const current = elements.collectionSelect.value || "";
+  const current = selectedValues(elements.collectionSelect);
   const pickupNames = uniqueLocations([...haulagePickupNames, ...doorCollections]);
 
   if (pickupNames.length) {
@@ -178,7 +181,7 @@ function refreshCollectionOptions() {
     setCollectionVisibility(true);
   } else {
     elements.collectionSelect.innerHTML = '<option value="">No collection selected</option>';
-    elements.collectionSelect.value = "";
+    setSelectedValues(elements.collectionSelect, []);
     elements.collectionSelect.disabled = true;
     setCollectionVisibility(false);
   }
@@ -192,7 +195,7 @@ function populateEquipment(preferred) {
   elements.equipmentSelect.disabled = false;
 }
 
-function populateSelect(select, values, emptyLabel, preferred = "", includeBlank = false) {
+function populateSelect(select, values, emptyLabel, preferred = [], includeBlank = false) {
   const clean = unique(values.filter(Boolean));
   select.innerHTML = [
     ...(includeBlank ? [`<option value="">${escapeHtml(emptyLabel)}</option>`] : []),
@@ -203,8 +206,50 @@ function populateSelect(select, values, emptyLabel, preferred = "", includeBlank
     select.disabled = true;
     return;
   }
-  select.value = [...(includeBlank ? [""] : []), ...clean].includes(preferred) ? preferred : (includeBlank ? "" : clean[0]);
+  const preferredValues = Array.isArray(preferred) ? preferred : preferred ? [preferred] : [];
+  const available = [...(includeBlank ? [""] : []), ...clean];
+  const selected = preferredValues.filter((value) => available.includes(value));
+  const nextValues = select.multiple
+    ? (selected.length ? selected : (includeBlank ? [] : clean.slice(0, 1)))
+    : (selected[0] || (includeBlank ? "" : clean[0]));
+  if (select.multiple && select.options) {
+    [...select.options].forEach((option) => {
+      option.selected = nextValues.includes(option.value);
+    });
+  } else {
+    select.value = select.multiple ? (nextValues[0] || "") : nextValues;
+  }
   select.disabled = false;
+}
+
+function selectedValues(select) {
+  if (select.multiple) {
+    const options = select.selectedOptions
+      ? [...select.selectedOptions]
+      : [...(select.options || [])].filter((option) => option.selected);
+    return options.map((option) => option.value).filter(Boolean);
+  }
+  return select.value ? [select.value] : [];
+}
+
+function setSelectedValues(select, values) {
+  const selected = new Set(values || []);
+  if (select.multiple && select.options) {
+    [...select.options].forEach((option) => {
+      option.selected = selected.has(option.value);
+    });
+  } else {
+    select.value = values[0] || "";
+  }
+}
+
+function normalizeMultiSelection(select) {
+  if (!select.multiple || !select.options) return;
+  const options = [...select.options];
+  const blank = options.find((option) => option.value === "");
+  if (blank && blank.selected && options.some((option) => option.value && option.selected)) {
+    blank.selected = false;
+  }
 }
 
 function setCollectionVisibility(visible) {
@@ -266,14 +311,18 @@ function buildSearchParams(limit = deskState.pageSize, offset = deskState.pageOf
     include_expired: String(elements.showExpiredToggle.checked),
   });
   const filters = [
-    ["collection", elements.collectionSelect.value],
-    ["pol", elements.originSelect.value],
-    ["pod", elements.destinationSelect.value],
-    ["carrier_name", elements.carrierSelect.value],
+    ["collection", selectedValues(elements.collectionSelect)],
+    ["pol", selectedValues(elements.originSelect)],
+    ["pod", selectedValues(elements.destinationSelect)],
+    ["carrier_name", selectedValues(elements.carrierSelect)],
     ["equipment_type", elements.equipmentSelect.value],
   ];
   filters.forEach(([key, value]) => {
-    if (value) params.set(key, value);
+    if (Array.isArray(value)) {
+      value.forEach((item) => params.append(key, item));
+    } else if (value) {
+      params.set(key, value);
+    }
   });
   if (elements.materialSelect.value && elements.materialSelect.value !== "All materials") {
     params.set("material", elements.materialSelect.value);
@@ -335,11 +384,13 @@ function renderDesk() {
   const quayOnly = RATE_DESK_DEMO_MODE ? isQuaySearch() : deskState.resultType === "quay";
   elements.priceScopeLabel.textContent = quayOnly ? "excl. inland" : "incl. inland";
 
-  const collection = elements.collectionSelect.value;
+  const collection = selectedValues(elements.collectionSelect);
+  const origin = selectedValues(elements.originSelect);
+  const destination = selectedValues(elements.destinationSelect);
   const laneParts = [
-    ...(collection ? [collection] : []),
-    elements.originSelect.value || "Any origin",
-    elements.destinationSelect.value || "Any destination",
+    ...(collection.length ? [selectionLabel(collection, "collections")] : []),
+    selectionLabel(origin, "origins"),
+    selectionLabel(destination, "destinations"),
   ];
   elements.laneTitle.textContent = isAllQuotesView()
     ? allQuotesTitle()
@@ -423,16 +474,16 @@ async function loadOfferDetail(offerId) {
 
 function buildDemoRows(quantity) {
   const quote = window.RATE_DESK_DEMO.quote;
-  const origin = elements.originSelect.value;
-  const destination = elements.destinationSelect.value;
-  const carrier = elements.carrierSelect.value;
+  const origins = selectedValues(elements.originSelect);
+  const destinations = selectedValues(elements.destinationSelect);
+  const carriers = selectedValues(elements.carrierSelect);
   const equipment = elements.equipmentSelect.value;
   const material = elements.materialSelect.value;
-  const collection = elements.collectionSelect.value;
+  const collections = selectedValues(elements.collectionSelect);
   const baseRates = quote.rates.filter((rate) =>
-    matchesFilter(rate.origins, origin)
-    && matchesFilter(rate.destinations, destination)
-    && matchesFilter(rate.carrier, carrier)
+    matchesFilter(rate.origins, origins)
+    && matchesFilter(rate.destinations, destinations)
+    && matchesFilter(rate.carrier, carriers)
     && (!equipment || canonicalEquipment(rate.equipment) === equipment)
     && (material === "All materials" || rate.materials.includes(material)));
 
@@ -440,14 +491,20 @@ function buildDemoRows(quantity) {
   baseRates.forEach((rate) => {
     if (isQuaySearch()) {
       if (rate.service === "Quay-to-quay") {
-        rows.push(makeDemoVariant(rate, "quay", quantity, origin, "", destination));
+        const matchingOrigins = rate.origins.filter((value) => matchesFilter(value, origins));
+        const matchingDestinations = rate.destinations.filter((value) => matchesFilter(value, destinations));
+        for (const origin of matchingOrigins) {
+          for (const destination of matchingDestinations) {
+            rows.push(makeDemoVariant(rate, "quay", quantity, origin, "", destination));
+          }
+        }
       }
       return;
     }
     if (rate.service === "Door-to-quay") {
-      for (const pickup of (rate.collections || []).filter((value) => !collection || locationsMatch(value, collection))) {
-        for (const port of rate.origins.filter((value) => matchesFilter(value, origin))) {
-          for (const pod of rate.destinations.filter((value) => matchesFilter(value, destination))) {
+      for (const pickup of (rate.collections || []).filter((value) => !collections.length || collections.some((selected) => locationsMatch(value, selected)))) {
+        for (const port of rate.origins.filter((value) => matchesFilter(value, origins))) {
+          for (const pod of rate.destinations.filter((value) => matchesFilter(value, destinations))) {
             rows.push(makeDemoVariant(rate, "door", quantity, port, pickup, pod));
           }
         }
@@ -1205,18 +1262,25 @@ function isExpiredRate(rate) {
 }
 
 function matchesFilter(valueOrValues, selected) {
-  if (!normalized(selected)) return true;
+  const selectedValuesList = Array.isArray(selected) ? selected.filter(Boolean) : selected ? [selected] : [];
+  if (!selectedValuesList.length) return true;
   if (Array.isArray(valueOrValues)) {
-    return valueOrValues.some((value) => sameValue(value, selected));
+    return valueOrValues.some((value) => selectedValuesList.some((item) => sameValue(value, item)));
   }
-  return sameValue(valueOrValues, selected);
+  return selectedValuesList.some((item) => sameValue(valueOrValues, item));
+}
+
+function selectionLabel(values, noun) {
+  if (!values.length) return `Any ${noun}`;
+  if (values.length === 1) return values[0];
+  return `${values.length} ${noun} selected`;
 }
 
 function showAllQuotes() {
-  elements.collectionSelect.value = "";
-  elements.originSelect.value = "";
-  elements.destinationSelect.value = "";
-  elements.carrierSelect.value = "";
+  setSelectedValues(elements.collectionSelect, []);
+  setSelectedValues(elements.originSelect, []);
+  setSelectedValues(elements.destinationSelect, []);
+  setSelectedValues(elements.carrierSelect, []);
   elements.equipmentSelect.value = "";
   elements.materialSelect.value = "All materials";
   elements.showExpiredToggle.checked = true;
@@ -1224,10 +1288,10 @@ function showAllQuotes() {
 }
 
 function isAllQuotesView() {
-  return !elements.collectionSelect.value
-    && !elements.originSelect.value
-    && !elements.destinationSelect.value
-    && !elements.carrierSelect.value
+  return !selectedValues(elements.collectionSelect).length
+    && !selectedValues(elements.originSelect).length
+    && !selectedValues(elements.destinationSelect).length
+    && !selectedValues(elements.carrierSelect).length
     && !elements.equipmentSelect.value
     && elements.materialSelect.value === "All materials";
 }
@@ -1245,7 +1309,9 @@ function hasExpiredMatches() {
 }
 
 function isQuaySearch() {
-  return !elements.collectionSelect.value && Boolean(elements.originSelect.value && elements.destinationSelect.value);
+  return !selectedValues(elements.collectionSelect).length
+    && selectedValues(elements.originSelect).length > 0
+    && selectedValues(elements.destinationSelect).length > 0;
 }
 
 function firstPresent(...values) {

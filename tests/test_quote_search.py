@@ -129,6 +129,52 @@ def test_only_published_port_prices_without_inventing_haulage(mixed):
     assert mixed.search(collection="Unknown collection")["rates"] == []
 
 
+def test_multiple_filter_values_use_or_within_each_dimension(mixed):
+    result = mixed.search(
+        carrier_name=["COSCO", "Maersk"],
+        pol=["Felixstowe", "Southampton"],
+        pod=["Mundra", "Singapore"],
+    )
+
+    assert result["result_type"] == "quay"
+    assert result["pagination"]["total"] == 4
+    assert {rate["carrier_name"] for rate in result["rates"]} == {"COSCO", "Maersk"}
+    assert {(rate["pol"], rate["pod"]) for rate in result["rates"]} == {
+        ("Felixstowe", "Mundra"),
+        ("Southampton", "Mundra"),
+        ("Felixstowe", "Singapore"),
+    }
+
+
+def test_multiple_collections_preserve_complete_route_assembly(mixed):
+    result = mixed.search(
+        collection=["Bristol", "Leeds"],
+        carrier_name=["COSCO", "MSC"],
+        pol=["Felixstowe", "Southampton"],
+        pod=["Mundra"],
+    )
+
+    assert result["pagination"]["total"] == 4
+    assert {rate["collection_location_name"] for rate in result["rates"]} == {
+        "Bristol, GB",
+        "Leeds, GB",
+    }
+    assert {rate["carrier_name"] for rate in result["rates"]} == {"COSCO", "MSC"}
+
+
+def test_multiple_filter_values_are_supported_by_csv_export(mixed):
+    exported = services.export_rate_desk_csv(
+        mixed.settings,
+        carrier_name=["COSCO", "Maersk"],
+        pol=["Felixstowe", "Southampton"],
+        pod=["Mundra", "Singapore"],
+        repository=mixed.repository(),
+    )
+    rows = list(csv.DictReader(StringIO(exported)))
+
+    assert len(rows) == 4
+
+
 def test_pagination_uses_complete_prices_and_distinct_combinations(quotes):
     # The cheaper ocean leg produces the more expensive complete route.
     quotes.add("cheap-ocean", amount=50)

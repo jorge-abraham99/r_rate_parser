@@ -106,6 +106,24 @@ function makeContext(demoMode = false) {
     assert.ok(elements.figuresNote.textContent.includes("exclude collection"));
     assert.equal(elements.priceScopeLabel.textContent, "excl. inland");
 
+    const selectMany = (element, ...values) => {
+      element.multiple = true;
+      element.selectedOptions = values.map(value => ({ value }));
+      element.value = values[0] || "";
+    };
+    selectMany(elements.originSelect, "Felixstowe", "Southampton");
+    selectMany(elements.destinationSelect, "Mundra", "Singapore");
+    selectMany(elements.carrierSelect, "COSCO", "Maersk");
+    selectMany(elements.collectionSelect, "Bristol", "Leeds");
+    await refreshConnectedRates();
+    const multiQuery = new URLSearchParams(lastUrl.split("?")[1]);
+    assert.equal(multiQuery.getAll("pol").join("|"), "Felixstowe|Southampton");
+    assert.equal(multiQuery.getAll("pod").join("|"), "Mundra|Singapore");
+    assert.equal(multiQuery.getAll("carrier_name").join("|"), "COSCO|Maersk");
+    assert.equal(multiQuery.getAll("collection").join("|"), "Bristol|Leeds");
+
+    elements.collectionSelect.multiple = false;
+    elements.collectionSelect.selectedOptions = undefined;
     elements.collectionSelect.value = "Bristol";
     window.RATE_DESK_AUTH.apiFetch = async () => ({ ok: true, json: async () => input.collection });
     await refreshConnectedRates();
