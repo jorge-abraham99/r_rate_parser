@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/ui/styles.css?v=21">
+  <link rel="stylesheet" href="/ui/styles.css?v=22">
 </head>
 <body>
   <div class="app-shell">
@@ -35,11 +35,10 @@
           <select id="collectionSelect" multiple hidden aria-hidden="true" disabled>
             <option>Loading…</option>
           </select>
-          <button class="multi-filter-toggle" data-multi-toggle type="button" aria-controls="collectionSelectMenu" aria-expanded="false" disabled>
-            <span data-multi-label>No collection selected</span><span class="multi-filter-chevron" aria-hidden="true">⌄</span>
+          <button class="multi-filter-toggle" data-multi-toggle type="button" aria-controls="collectionSelectMenu" aria-expanded="false" aria-haspopup="listbox" disabled>
+            <span class="multi-filter-toggle-value" data-multi-label>None — port drop-off</span><span class="multi-filter-chevron" aria-hidden="true">▼</span>
           </button>
           <div id="collectionSelectMenu" class="multi-filter-menu" data-multi-menu hidden></div>
-          <div class="multi-filter-chips" data-multi-chips aria-live="polite"></div>
         </div>
       </div>
       <div id="collectionArrow" class="route-arrow" aria-hidden="true">→</div>
@@ -47,11 +46,10 @@
         <label for="originSelect">Origin port (POL) <span>(select one or more)</span></label>
         <div class="multi-filter-control" data-multi-select>
           <select id="originSelect" multiple hidden aria-hidden="true" disabled><option>Loading…</option></select>
-          <button class="multi-filter-toggle" data-multi-toggle type="button" aria-controls="originSelectMenu" aria-expanded="false" disabled>
-            <span data-multi-label>Any origin</span><span class="multi-filter-chevron" aria-hidden="true">⌄</span>
+          <button class="multi-filter-toggle" data-multi-toggle type="button" aria-controls="originSelectMenu" aria-expanded="false" aria-haspopup="listbox" disabled>
+            <span class="multi-filter-toggle-value" data-multi-label>Any origin</span><span class="multi-filter-chevron" aria-hidden="true">▼</span>
           </button>
           <div id="originSelectMenu" class="multi-filter-menu" data-multi-menu hidden></div>
-          <div class="multi-filter-chips" data-multi-chips aria-live="polite"></div>
         </div>
       </div>
       <div class="route-arrow" aria-hidden="true">→</div>
@@ -59,22 +57,20 @@
         <label for="destinationSelect">Destination port (POD) <span>(select one or more)</span></label>
         <div class="multi-filter-control" data-multi-select>
           <select id="destinationSelect" multiple hidden aria-hidden="true" disabled><option>Loading…</option></select>
-          <button class="multi-filter-toggle" data-multi-toggle type="button" aria-controls="destinationSelectMenu" aria-expanded="false" disabled>
-            <span data-multi-label>Any destination</span><span class="multi-filter-chevron" aria-hidden="true">⌄</span>
+          <button class="multi-filter-toggle" data-multi-toggle type="button" aria-controls="destinationSelectMenu" aria-expanded="false" aria-haspopup="listbox" disabled>
+            <span class="multi-filter-toggle-value" data-multi-label>Any destination</span><span class="multi-filter-chevron" aria-hidden="true">▼</span>
           </button>
           <div id="destinationSelectMenu" class="multi-filter-menu" data-multi-menu hidden></div>
-          <div class="multi-filter-chips" data-multi-chips aria-live="polite"></div>
         </div>
       </div>
       <div class="lookup-field quote-carrier">
         <label for="carrierSelect">Carrier <span>(select one or more)</span></label>
         <div class="multi-filter-control" data-multi-select>
           <select id="carrierSelect" multiple hidden aria-hidden="true" disabled><option>Loading…</option></select>
-          <button class="multi-filter-toggle" data-multi-toggle type="button" aria-controls="carrierSelectMenu" aria-expanded="false" disabled>
-            <span data-multi-label>Any carrier</span><span class="multi-filter-chevron" aria-hidden="true">⌄</span>
+          <button class="multi-filter-toggle" data-multi-toggle type="button" aria-controls="carrierSelectMenu" aria-expanded="false" aria-haspopup="listbox" disabled>
+            <span class="multi-filter-toggle-value" data-multi-label>Any carrier</span><span class="multi-filter-chevron" aria-hidden="true">▼</span>
           </button>
           <div id="carrierSelectMenu" class="multi-filter-menu" data-multi-menu hidden></div>
-          <div class="multi-filter-chips" data-multi-chips aria-live="polite"></div>
         </div>
       </div>
       <div class="lookup-field quote-size">
@@ -91,7 +87,13 @@
       </div>
       <div class="lookup-field quote-material">
         <label for="materialSelect">Material</label>
-        <select id="materialSelect" disabled><option>Loading…</option></select>
+        <div class="multi-filter-control" data-multi-select>
+          <select id="materialSelect" multiple hidden aria-hidden="true" disabled><option>Loading…</option></select>
+          <button class="multi-filter-toggle" data-multi-toggle type="button" aria-controls="materialSelectMenu" aria-expanded="false" aria-haspopup="listbox" disabled>
+            <span class="multi-filter-toggle-value" data-multi-label>All materials</span><span class="multi-filter-chevron" aria-hidden="true">▼</span>
+          </button>
+          <div id="materialSelectMenu" class="multi-filter-menu" data-multi-menu hidden></div>
+        </div>
       </div>
       <div class="quote-actions">
         <label class="quote-toggle" for="showExpiredToggle">
@@ -100,6 +102,10 @@
         </label>
         <button id="showAllQuotesButton" class="quote-reset" type="button">Show all quotes</button>
         <button id="downloadCsvButton" class="quote-reset" type="button">Download CSV</button>
+      </div>
+      <div id="activeFilters" class="active-filters" aria-live="polite" hidden>
+        <span class="active-filters-label">Active</span>
+        <div id="activeFilterChips" class="active-filter-chips"></div>
       </div>
     </section>
 
@@ -150,6 +156,6 @@
   <script src="/ui/auth.js?v=1"></script>
   <script src="/ui/config.js?v=4"></script>
   <script src="/ui/demo-data.js?v=2"></script>
-  <script src="/ui/rate-desk.js?v=24"></script>
+  <script src="/ui/rate-desk.js?v=25"></script>
 </body>
 </html>
