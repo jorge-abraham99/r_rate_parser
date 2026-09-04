@@ -564,7 +564,7 @@ def search_approved_offers(
     pod: str | Sequence[str] | None = None,
     equipment_type: str | None = None,
     valid_on: str | None = None,
-    material: str | None = None,
+    material: str | Sequence[str] | None = None,
     offer_id: str | None = None,
     limit: int | None = 200,
     *,
@@ -598,6 +598,7 @@ def search_approved_offers(
         notes_by_card.setdefault(note.rate_card_id, []).append(note)
 
     valid_on_date = parse_iso_date(valid_on) if valid_on else None
+    material_values = selected_material_values(material)
     results: list[dict[str, Any]] = []
     location_catalogue = LocationCatalogue.default()
     for offer in offers:
@@ -674,9 +675,10 @@ def search_approved_offers(
             source_payload.get("file_name"),
             offer.raw_sheet_name,
         )
-        if material and material.lower() not in {"all", "all materials"}:
-            if not any(item.lower() == material.lower() for item in materials):
-                continue
+        if material_values and not material_values.intersection(
+            item.lower() for item in materials
+        ):
+            continue
         result = {
             "offer_id": offer.id,
             "rate_card_id": offer.rate_card_id,
@@ -762,7 +764,7 @@ def search_rate_summaries(
     pol: str | Sequence[str] | None = None,
     pod: str | Sequence[str] | None = None,
     equipment_type: str | None = None,
-    material: str | None = None,
+    material: str | Sequence[str] | None = None,
     valid_on: str | None = None,
     include_expired: bool = True,
     limit: int | None = 50,
@@ -825,7 +827,7 @@ def export_rate_desk_csv(
     pol: str | Sequence[str] | None = None,
     pod: str | Sequence[str] | None = None,
     equipment_type: str | None = None,
-    material: str | None = None,
+    material: str | Sequence[str] | None = None,
     include_expired: bool = True,
     containers: int = 1,
     margin_usd: float = 0.0,
@@ -948,7 +950,7 @@ def assemble_quote_routes(
     *,
     collection: str | Sequence[str] | None,
     quay_only: bool,
-    material: str | None,
+    material: str | Sequence[str] | None,
     valid_on: str | None,
 ) -> list[dict[str, Any]]:
     collection_values = selected_filter_values(collection)
@@ -1414,11 +1416,11 @@ def filter_rate_summaries(
     pol: str | Sequence[str] | None = None,
     pod: str | Sequence[str] | None = None,
     equipment_type: str | None = None,
-    material: str | None = None,
+    material: str | Sequence[str] | None = None,
     valid_on: str | None = None,
 ) -> list[dict[str, Any]]:
     valid_on_date = parse_iso_date(valid_on) if valid_on else None
-    material_key = material.lower() if material else None
+    material_keys = selected_material_values(material)
     results: list[dict[str, Any]] = []
     for rate in rates:
         if not matches_any_text(rate.get("provider_name"), provider_name):
@@ -1449,7 +1451,9 @@ def filter_rate_summaries(
             rate.get("equipment_type")
         ) != canonical_equipment_type(equipment_type):
             continue
-        if material_key and material_key not in {item.lower() for item in rate.get("materials", [])}:
+        if material_keys and not material_keys.intersection(
+            item.lower() for item in rate.get("materials", [])
+        ):
             continue
         if valid_on_date:
             start = parse_iso_date(rate.get("valid_from")) if rate.get("valid_from") else None
@@ -1797,6 +1801,17 @@ def selected_filter_values(value: str | Sequence[str] | None) -> list[str]:
     if isinstance(value, str):
         return [value] if value.strip() else []
     return [item for item in value if isinstance(item, str) and item.strip()]
+
+
+def selected_material_values(
+    value: str | Sequence[str] | None,
+) -> set[str]:
+    """Normalize material filters while preserving the legacy all-materials sentinel."""
+    return {
+        item.strip().lower()
+        for item in selected_filter_values(value)
+        if item.strip().lower() not in {"all", "all materials"}
+    }
 
 
 def matches_any_text(value: str | None, selected: str | Sequence[str] | None) -> bool:

@@ -6,7 +6,7 @@ const EQUIPMENT_OPTIONS = [
   { value: "40GP", label: "40′" },
   { value: "40HC", label: "40′ HC" },
 ];
-const MATERIAL_OPTIONS = ["All materials", "Paper", "Metal", "Tyres"];
+const MATERIAL_OPTIONS = ["Paper", "Metal", "Tyres"];
 const deskState = {
   loaded: false,
   expandedId: null,
@@ -54,14 +54,20 @@ const elements = {
   previousPageButton: document.getElementById("previousPageButton"),
   nextPageButton: document.getElementById("nextPageButton"),
   paginationSummary: document.getElementById("paginationSummary"),
+  activeFilters: document.getElementById("activeFilters"),
+  activeFilterChips: document.getElementById("activeFilterChips"),
 };
 
-[
-  [elements.collectionSelect, "No collection selected"],
-  [elements.originSelect, "Any origin"],
-  [elements.destinationSelect, "Any destination"],
-  [elements.carrierSelect, "Any carrier"],
-].forEach(([select, emptyLabel]) => setupMultiSelect(select, emptyLabel));
+const multiSelectConfigs = [
+  { select: elements.collectionSelect, emptyLabel: "None — port drop-off", category: "Collection", searchLabel: "collection places" },
+  { select: elements.originSelect, emptyLabel: "Any origin", category: "POL", searchLabel: "origins" },
+  { select: elements.destinationSelect, emptyLabel: "Any destination", category: "POD", searchLabel: "destinations" },
+  { select: elements.carrierSelect, emptyLabel: "Any carrier", category: "Carrier", searchLabel: "carriers" },
+  { select: elements.materialSelect, emptyLabel: "All materials", category: "Material", searchLabel: "materials" },
+];
+let openMultiSelectControl = null;
+
+multiSelectConfigs.forEach(setupMultiSelect);
 
 [elements.collectionSelect, elements.originSelect, elements.destinationSelect, elements.carrierSelect, elements.equipmentSelect, elements.materialSelect]
   .forEach((element) => element.addEventListener("change", () => {
@@ -71,6 +77,28 @@ const elements = {
 elements.showExpiredToggle.addEventListener("change", resetAndRender);
 elements.showAllQuotesButton.addEventListener("click", showAllQuotes);
 elements.downloadCsvButton.addEventListener("click", downloadFilteredCsv);
+elements.activeFilterChips.addEventListener("click", (event) => {
+  const remove = event.target?.closest?.("[data-active-filter-remove]");
+  if (!remove) return;
+  const config = multiSelectConfigs.find((item) => item.select.id === remove.dataset.filterId);
+  if (!config) return;
+  setSelectedValues(
+    config.select,
+    selectedValues(config.select).filter((value) => value !== remove.dataset.activeFilterRemove),
+  );
+  resetAndRender();
+});
+document.addEventListener("click", (event) => {
+  if (openMultiSelectControl && !event.target?.closest?.("[data-multi-select]")) {
+    closeMultiSelect(openMultiSelectControl);
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !openMultiSelectControl) return;
+  const select = openMultiSelectControl;
+  closeMultiSelect(select);
+  select.closest("[data-multi-select]")?.querySelector("[data-multi-toggle]")?.focus();
+});
 elements.previousPageButton.addEventListener("click", () => changePage(-1));
 elements.nextPageButton.addEventListener("click", () => changePage(1));
 elements.sortButtons.forEach((button) => {
@@ -141,12 +169,12 @@ function populateDemoFilters() {
   const origins = unique(quote.rates.flatMap((rate) => rate.origins));
   const destinations = unique(quote.rates.flatMap((rate) => rate.destinations));
   const carriers = unique(quote.rates.map((rate) => rate.carrier));
-  populateSelect(elements.collectionSelect, unique(quote.rates.flatMap((rate) => rate.collections || [])), "No collection selected", ["Abbots Bromley"], true);
+  populateSelect(elements.collectionSelect, unique(quote.rates.flatMap((rate) => rate.collections || [])), "None — port drop-off", ["Abbots Bromley"], true);
   populateSelect(elements.originSelect, origins, "Any origin", ["Felixstowe"], true);
   populateSelect(elements.destinationSelect, destinations, "Any destination", ["Laem Chabang"], true);
   populateSelect(elements.carrierSelect, carriers, "Any carrier", "", true);
   populateEquipment("40HC");
-  populateSelect(elements.materialSelect, MATERIAL_OPTIONS, "No materials", "All materials");
+  populateSelect(elements.materialSelect, MATERIAL_OPTIONS, "All materials", [], true);
   setCollectionVisibility(true);
 }
 
@@ -168,9 +196,10 @@ function populateConnectedFilters() {
   populateEquipment(canonicalEquipment(equipment[0] || "40HC"));
   populateSelect(
     elements.materialSelect,
-    ["All materials", ...(materials.length ? materials : MATERIAL_OPTIONS.slice(1))],
-    "No materials",
+    materials.length ? materials : MATERIAL_OPTIONS,
     "All materials",
+    [],
+    true,
   );
   refreshCollectionOptions();
 }
@@ -184,10 +213,10 @@ function refreshCollectionOptions() {
   const pickupNames = uniqueLocations([...haulagePickupNames, ...doorCollections]);
 
   if (pickupNames.length) {
-    populateSelect(elements.collectionSelect, pickupNames, "No collection selected", current, true);
+    populateSelect(elements.collectionSelect, pickupNames, "None — port drop-off", current, true);
     setCollectionVisibility(true);
   } else {
-    elements.collectionSelect.innerHTML = '<option value="">No collection selected</option>';
+    elements.collectionSelect.innerHTML = '<option value="">None — port drop-off</option>';
     setSelectedValues(elements.collectionSelect, []);
     elements.collectionSelect.disabled = true;
     setCollectionVisibility(false);
@@ -241,7 +270,7 @@ function selectedValues(select) {
   return select.value ? [select.value] : [];
 }
 
-function setSelectedValues(select, values) {
+function setSelectedValues(select, values, focusTarget = null) {
   const selected = new Set(values || []);
   if (select.multiple && select.options) {
     [...select.options].forEach((option) => {
@@ -250,7 +279,7 @@ function setSelectedValues(select, values) {
   } else {
     select.value = values[0] || "";
   }
-  renderMultiSelect(select);
+  renderMultiSelect(select, focusTarget);
 }
 
 function normalizeMultiSelection(select) {
@@ -262,64 +291,169 @@ function normalizeMultiSelection(select) {
   }
 }
 
-function setupMultiSelect(select, emptyLabel) {
+function setupMultiSelect(config) {
+  const { select } = config;
   const control = select?.closest?.("[data-multi-select]");
   if (!control) return;
   const toggle = control.querySelector("[data-multi-toggle]");
   const menu = control.querySelector("[data-multi-menu]");
-  const chips = control.querySelector("[data-multi-chips]");
-  if (!toggle || !menu || !chips) return;
-  select.multiEmptyLabel = emptyLabel;
+  if (!toggle || !menu) return;
+  select.multiConfig = config;
+  select.multiSearch = "";
   select.hidden = true;
   select.tabIndex = -1;
-  toggle.addEventListener("click", () => {
-    menu.hidden = !menu.hidden;
-    toggle.setAttribute("aria-expanded", String(!menu.hidden));
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const remove = event.target?.closest?.("[data-multi-button-remove]");
+    if (remove) {
+      setSelectedValues(
+        select,
+        selectedValues(select).filter((value) => value !== remove.dataset.multiButtonRemove),
+      );
+      resetAndRender();
+      return;
+    }
+    if (openMultiSelectControl === select) closeMultiSelect(select);
+    else openMultiSelect(select);
+  });
+  menu.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const action = event.target?.closest?.("[data-multi-action]")?.dataset.multiAction;
+    if (!action) return;
+    if (action === "select-visible") {
+      setSelectedValues(
+        select,
+        unique([...selectedValues(select), ...filteredMultiSelectOptions(select)]),
+        "search",
+      );
+      resetAndRender();
+    } else if (action === "clear") {
+      setSelectedValues(select, [], "search");
+      resetAndRender();
+    } else if (action === "done") {
+      closeMultiSelect(select);
+      toggle.focus();
+    }
+  });
+  menu.addEventListener("input", (event) => {
+    const search = event.target?.closest?.("[data-multi-search]");
+    if (!search) return;
+    select.multiSearch = search.value;
+    renderMultiSelect(select, "search");
   });
   menu.addEventListener("change", (event) => {
     const checkbox = event.target?.closest?.("[data-multi-option]");
     if (!checkbox) return;
-    const checkboxes = [...menu.querySelectorAll("[data-multi-option]")];
-    if (checkbox.value === "") {
-      checkboxes.forEach((item) => { item.checked = item === checkbox; });
-    } else {
-      const blank = checkboxes.find((item) => item.value === "");
-      if (blank) blank.checked = false;
-    }
-    setSelectedValues(select, checkboxes.filter((item) => item.checked).map((item) => item.value).filter(Boolean));
-    resetAndRender();
-  });
-  chips.addEventListener("click", (event) => {
-    const remove = event.target?.closest?.("[data-multi-remove]");
-    if (!remove) return;
-    const next = selectedValues(select).filter((value) => value !== remove.dataset.multiRemove);
-    setSelectedValues(select, next);
+    const next = new Set(selectedValues(select));
+    if (checkbox.checked) next.add(checkbox.value);
+    else next.delete(checkbox.value);
+    setSelectedValues(select, [...next], checkbox.value);
     resetAndRender();
   });
   renderMultiSelect(select);
 }
 
-function renderMultiSelect(select) {
+function openMultiSelect(select) {
+  if (openMultiSelectControl && openMultiSelectControl !== select) {
+    closeMultiSelect(openMultiSelectControl);
+  }
+  const control = select.closest("[data-multi-select]");
+  const toggle = control?.querySelector("[data-multi-toggle]");
+  const menu = control?.querySelector("[data-multi-menu]");
+  if (!toggle || !menu || toggle.disabled) return;
+  openMultiSelectControl = select;
+  select.multiSearch = "";
+  menu.hidden = false;
+  toggle.setAttribute("aria-expanded", "true");
+  renderMultiSelect(select, "search");
+}
+
+function closeMultiSelect(select) {
+  const control = select?.closest?.("[data-multi-select]");
+  const toggle = control?.querySelector("[data-multi-toggle]");
+  const menu = control?.querySelector("[data-multi-menu]");
+  if (!toggle || !menu) return;
+  menu.hidden = true;
+  toggle.setAttribute("aria-expanded", "false");
+  if (openMultiSelectControl === select) openMultiSelectControl = null;
+}
+
+function multiSelectOptionValues(select) {
+  return [...(select.options || [])]
+    .map((option) => option.value)
+    .filter(Boolean);
+}
+
+function filteredMultiSelectOptions(select) {
+  const search = normalized(select.multiSearch || "");
+  return multiSelectOptionValues(select).filter((value) => !search || normalized(value).includes(search));
+}
+
+function renderMultiSelect(select, focusTarget = null) {
   const control = select?.closest?.("[data-multi-select]");
   if (!control) return;
   const toggle = control.querySelector("[data-multi-toggle]");
   const menu = control.querySelector("[data-multi-menu]");
-  const chips = control.querySelector("[data-multi-chips]");
-  if (!toggle || !menu || !chips) return;
+  if (!toggle || !menu) return;
   const values = selectedValues(select);
-  const options = [...(select.options || [])];
-  const emptyLabel = select.multiEmptyLabel || "Any";
-  const label = values.length === 1 ? values[0] : values.length ? `${values.length} selected` : emptyLabel;
+  const config = select.multiConfig || { emptyLabel: "Any", searchLabel: "options" };
+  const options = filteredMultiSelectOptions(select);
+  const allOptions = multiSelectOptionValues(select);
   const labelNode = toggle.querySelector("[data-multi-label]");
-  if (labelNode) labelNode.textContent = label;
+  if (labelNode) {
+    labelNode.innerHTML = values.length > 2
+      ? `<span class="multi-filter-summary">${values.length} selected</span>`
+      : values.length
+        ? values.map((value) => `<span class="multi-filter-button-chip"><span>${escapeHtml(value)}</span><span class="multi-filter-button-remove" data-multi-button-remove="${escapeAttr(value)}" title="Remove ${escapeAttr(value)}" aria-hidden="true">×</span></span>`).join("")
+        : `<span class="multi-filter-placeholder">${escapeHtml(config.emptyLabel)}</span>`;
+  }
   toggle.disabled = select.disabled;
-  menu.innerHTML = options.map((option) => {
-    const checked = option.value ? values.includes(option.value) : !values.length;
-    return `<label class="multi-filter-option"><input type="checkbox" data-multi-option value="${escapeAttr(option.value)}"${checked ? " checked" : ""}><span>${escapeHtml(option.textContent)}</span></label>`;
-  }).join("");
-  chips.innerHTML = values.map((value) =>
-    `<button class="multi-filter-chip" data-multi-remove="${escapeAttr(value)}" type="button" aria-label="Remove ${escapeAttr(value)}">${escapeHtml(value)} <span aria-hidden="true">×</span></button>`
-  ).join("");
+  const search = select.multiSearch || "";
+  menu.innerHTML = `
+    <div class="multi-filter-search-wrap">
+      <input class="multi-filter-search" data-multi-search type="search" value="${escapeAttr(search)}" placeholder="Search ${escapeAttr(config.searchLabel)}…" aria-label="Search ${escapeAttr(config.searchLabel)}">
+    </div>
+    <div class="multi-filter-options" role="listbox" aria-multiselectable="true">
+      ${options.map((value) => {
+        const checked = values.includes(value);
+        return `<label class="multi-filter-option${checked ? " selected" : ""}"><input type="checkbox" data-multi-option value="${escapeAttr(value)}"${checked ? " checked" : ""}><span>${escapeHtml(value)}</span></label>`;
+      }).join("") || `<div class="multi-filter-no-results">No matches for “${escapeHtml(search)}”</div>`}
+    </div>
+    <div class="multi-filter-footer">
+      <span class="multi-filter-count">${values.length ? `${values.length} of ${allOptions.length} selected` : `None selected = all ${allOptions.length}`}</span>
+      <button class="multi-filter-footer-action" data-multi-action="select-visible" type="button">${search.trim() ? "Select matches" : "Select all"}</button>
+      <button class="multi-filter-footer-action" data-multi-action="clear" type="button">Clear</button>
+      <button class="multi-filter-done" data-multi-action="done" type="button">Done</button>
+    </div>`;
+  focusRenderedMultiSelectElement(menu, focusTarget);
+  renderActiveFilters();
+}
+
+function focusRenderedMultiSelectElement(menu, focusTarget) {
+  if (!focusTarget) return;
+  if (focusTarget === "search") {
+    const search = menu.querySelector("[data-multi-search]");
+    search?.focus();
+    search?.setSelectionRange?.(search.value.length, search.value.length);
+    return;
+  }
+  const checkbox = [...menu.querySelectorAll("[data-multi-option]")]
+    .find((item) => item.value === focusTarget);
+  checkbox?.focus();
+}
+
+function renderActiveFilters() {
+  if (!elements.activeFilters || !elements.activeFilterChips) return;
+  const chips = multiSelectConfigs.flatMap((config) =>
+    selectedValues(config.select).map((value) => `
+      <button class="active-filter-chip" data-filter-id="${escapeAttr(config.select.id)}" data-active-filter-remove="${escapeAttr(value)}" type="button" aria-label="Remove ${escapeAttr(config.category)} filter ${escapeAttr(value)}">
+        <span class="active-filter-category">${escapeHtml(config.category)} ·</span>
+        <span>${escapeHtml(value)}</span>
+        <span class="active-filter-remove" aria-hidden="true">×</span>
+      </button>`),
+  );
+  elements.activeFilterChips.innerHTML = chips.join("");
+  elements.activeFilters.hidden = chips.length === 0;
 }
 
 function setCollectionVisibility(visible) {
@@ -385,6 +519,7 @@ function buildSearchParams(limit = deskState.pageSize, offset = deskState.pageOf
     ["pol", selectedValues(elements.originSelect)],
     ["pod", selectedValues(elements.destinationSelect)],
     ["carrier_name", selectedValues(elements.carrierSelect)],
+    ["material", selectedValues(elements.materialSelect)],
     ["equipment_type", elements.equipmentSelect.value],
   ];
   filters.forEach(([key, value]) => {
@@ -394,9 +529,6 @@ function buildSearchParams(limit = deskState.pageSize, offset = deskState.pageOf
       params.set(key, value);
     }
   });
-  if (elements.materialSelect.value && elements.materialSelect.value !== "All materials") {
-    params.set("material", elements.materialSelect.value);
-  }
   return params;
 }
 
@@ -548,14 +680,14 @@ function buildDemoRows(quantity) {
   const destinations = selectedValues(elements.destinationSelect);
   const carriers = selectedValues(elements.carrierSelect);
   const equipment = elements.equipmentSelect.value;
-  const material = elements.materialSelect.value;
+  const materials = selectedValues(elements.materialSelect);
   const collections = selectedValues(elements.collectionSelect);
   const baseRates = quote.rates.filter((rate) =>
     matchesFilter(rate.origins, origins)
     && matchesFilter(rate.destinations, destinations)
     && matchesFilter(rate.carrier, carriers)
     && (!equipment || canonicalEquipment(rate.equipment) === equipment)
-    && (material === "All materials" || rate.materials.includes(material)));
+    && (!materials.length || materials.some((material) => rate.materials.includes(material))));
 
   const rows = [];
   baseRates.forEach((rate) => {
@@ -1351,8 +1483,8 @@ function showAllQuotes() {
   setSelectedValues(elements.originSelect, []);
   setSelectedValues(elements.destinationSelect, []);
   setSelectedValues(elements.carrierSelect, []);
+  setSelectedValues(elements.materialSelect, []);
   elements.equipmentSelect.value = "";
-  elements.materialSelect.value = "All materials";
   elements.showExpiredToggle.checked = true;
   resetAndRender();
 }
@@ -1362,8 +1494,8 @@ function isAllQuotesView() {
     && !selectedValues(elements.originSelect).length
     && !selectedValues(elements.destinationSelect).length
     && !selectedValues(elements.carrierSelect).length
-    && !elements.equipmentSelect.value
-    && elements.materialSelect.value === "All materials";
+    && !selectedValues(elements.materialSelect).length
+    && !elements.equipmentSelect.value;
 }
 
 function allQuotesTitle() {
