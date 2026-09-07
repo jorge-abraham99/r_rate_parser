@@ -7,6 +7,8 @@ const input = JSON.parse(fs.readFileSync(0, "utf8"));
 function makeContext(demoMode = false) {
   const nodes = new Map();
   const document = {
+    handlers: {},
+    addEventListener(event, callback) { this.handlers[event] = callback; },
     querySelectorAll: () => [],
     getElementById(id) {
       if (!nodes.has(id)) nodes.set(id, {
@@ -37,7 +39,7 @@ function makeContext(demoMode = false) {
 (async () => {
   await vm.runInContext(`(async () => {
     deskState.loaded = true;
-    elements.materialSelect.value = "All materials";
+    elements.materialSelect.value = "";
     elements.equipmentSelect.value = "40HC";
     elements.qtyInput.value = "1";
     const samePrice = (actual, expected) => assert.ok(Math.abs(actual - expected) < 0.00001, actual + " != " + expected);
@@ -115,12 +117,14 @@ function makeContext(demoMode = false) {
     selectMany(elements.destinationSelect, "Mundra", "Singapore");
     selectMany(elements.carrierSelect, "COSCO", "Maersk");
     selectMany(elements.collectionSelect, "Bristol", "Leeds");
+    selectMany(elements.materialSelect, "Paper", "Metal");
     await refreshConnectedRates();
     const multiQuery = new URLSearchParams(lastUrl.split("?")[1]);
     assert.equal(multiQuery.getAll("pol").join("|"), "Felixstowe|Southampton");
     assert.equal(multiQuery.getAll("pod").join("|"), "Mundra|Singapore");
     assert.equal(multiQuery.getAll("carrier_name").join("|"), "COSCO|Maersk");
     assert.equal(multiQuery.getAll("collection").join("|"), "Bristol|Leeds");
+    assert.equal(multiQuery.getAll("material").join("|"), "Paper|Metal");
 
     elements.collectionSelect.multiple = false;
     elements.collectionSelect.selectedOptions = undefined;
@@ -147,7 +151,7 @@ function makeContext(demoMode = false) {
   })()`, makeContext());
 
   vm.runInContext(`
-    elements.materialSelect.value = "All materials";
+    elements.materialSelect.value = "";
     elements.equipmentSelect.value = "40HC";
     const browse = buildDemoRows(1);
     assert.ok(browse.length > 0);

@@ -175,6 +175,68 @@ def test_multiple_filter_values_are_supported_by_csv_export(mixed):
     assert len(rows) == 4
 
 
+def test_multiple_materials_use_or_within_material_and_and_across_filters(quotes):
+    quotes.add(
+        "paper-door",
+        carrier="MSC",
+        key="msc-inline",
+        mode="SD / CY",
+        collection="Bristol",
+        pol="Felixstowe",
+        commodity="WASTE PAPER",
+    )
+    quotes.add(
+        "metal-door",
+        carrier="MSC",
+        key="msc-inline",
+        mode="SD / CY",
+        collection="Leeds",
+        pol="Southampton",
+        commodity="METAL SCRAP",
+    )
+
+    both = quotes.search(material=["Paper", "Metal"], carrier_name="MSC")
+    assert both["pagination"]["total"] == 2
+    assert {rate["offer_id"] for rate in both["rates"]} == {"paper-door", "metal-door"}
+
+    paper_lane = quotes.search(
+        material=["Paper", "Metal"],
+        carrier_name="MSC",
+        pol="Felixstowe",
+    )
+    assert [rate["offer_id"] for rate in paper_lane["rates"]] == ["paper-door"]
+
+    assert quotes.search(material=[])["pagination"]["total"] == 2
+    assert quotes.search(material="All materials")["pagination"]["total"] == 2
+
+
+def test_multiple_materials_are_supported_by_csv_export(quotes):
+    quotes.add(
+        "paper-door",
+        carrier="MSC",
+        key="msc-inline",
+        mode="SD / CY",
+        collection="Bristol",
+        commodity="WASTE PAPER",
+    )
+    quotes.add(
+        "metal-door",
+        carrier="MSC",
+        key="msc-inline",
+        mode="SD / CY",
+        collection="Leeds",
+        commodity="METAL SCRAP",
+    )
+
+    exported = services.export_rate_desk_csv(
+        quotes.settings,
+        material=["Paper", "Metal"],
+        repository=quotes.repository(),
+    )
+    rows = list(csv.DictReader(StringIO(exported)))
+    assert {row["collection"] for row in rows} == {"Bristol, GB", "Leeds, GB"}
+
+
 def test_pagination_uses_complete_prices_and_distinct_combinations(quotes):
     # The cheaper ocean leg produces the more expensive complete route.
     quotes.add("cheap-ocean", amount=50)
@@ -323,3 +385,15 @@ def test_frontend_consumes_real_search_results_and_preserves_prices(mixed):
                "details": details}
     subprocess.run([node, "tests/quote_search_frontend.cjs"], input=json.dumps(payload),
                    text=True, check=True, capture_output=True)
+
+
+def test_frontend_multi_select_interactions():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for executable frontend interaction checks")
+    subprocess.run(
+        [node, "tests/multi_select_frontend.cjs"],
+        text=True,
+        check=True,
+        capture_output=True,
+    )

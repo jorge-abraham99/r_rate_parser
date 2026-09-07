@@ -345,6 +345,8 @@ def test_rate_desk_accepts_repeated_filter_query_values(token_tools, monkeypatch
             ("pod", "Singapore"),
             ("carrier_name", "COSCO"),
             ("carrier_name", "MSC"),
+            ("material", "Paper"),
+            ("material", "Metal"),
         ],
         headers=bearer(make_token()),
     )
@@ -354,6 +356,27 @@ def test_rate_desk_accepts_repeated_filter_query_values(token_tools, monkeypatch
     assert captured["pol"] == ["Felixstowe", "Southampton"]
     assert captured["pod"] == ["Mundra", "Singapore"]
     assert captured["carrier_name"] == ["COSCO", "MSC"]
+    assert captured["material"] == ["Paper", "Metal"]
+
+
+def test_rate_desk_export_accepts_repeated_material_values(token_tools, monkeypatch):
+    verifier, make_token = token_tools
+    use_auth(monkeypatch, verifier, (membership(),))
+    captured = {}
+
+    def fake_export(_settings, **filters):
+        captured.update(filters)
+        return "collection,port_of_loading,port_of_delivery,total_cost\n"
+
+    monkeypatch.setattr(api_module, "export_rate_desk_csv", fake_export)
+    response = TestClient(app).get(
+        "/api/rate-desk/export",
+        params=[("material", "Paper"), ("material", "Metal")],
+        headers=bearer(make_token()),
+    )
+
+    assert response.status_code == 200
+    assert captured["material"] == ["Paper", "Metal"]
 
 
 def test_viewer_cannot_mutate(token_tools, monkeypatch):
@@ -440,16 +463,20 @@ def test_frontend_has_invite_only_auth_gate_and_shared_api_helper():
     assert '"/api/rate-desk/meta"' in rate_desk_js
     assert "/api/rate-desk/search?" in rate_desk_js
     assert 'id="carrierSelect"' in quote_html
-    assert quote_html.count('data-multi-select') == 4
+    assert quote_html.count('data-multi-select') == 5
     assert 'id="collectionSelect" multiple hidden' in quote_html
     assert 'id="originSelect" multiple hidden' in quote_html
     assert 'id="destinationSelect" multiple hidden' in quote_html
     assert 'id="carrierSelect" multiple hidden' in quote_html
-    assert 'data-multi-chips' in quote_html
+    assert 'id="materialSelect" multiple hidden' in quote_html
+    assert 'id="activeFilters"' in quote_html
+    assert 'id="activeFilterChips"' in quote_html
     assert "carrierSelect" in rate_desk_js
     assert "setupMultiSelect" in rate_desk_js
-    assert "data-multi-remove" in rate_desk_js
+    assert "data-multi-button-remove" in rate_desk_js
+    assert "data-active-filter-remove" in rate_desk_js
     assert '["carrier_name", selectedValues(elements.carrierSelect)]' in rate_desk_js
+    assert '["material", selectedValues(elements.materialSelect)]' in rate_desk_js
     assert "params.append(key, item)" in rate_desk_js
     assert 'id="marginInput"' in quote_html
     assert 'id="downloadCsvButton"' in quote_html
